@@ -1115,10 +1115,43 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             return Ok(true);
         }
     }
+    // Turning a part on while its module is off turns the module on too (as the dashboard does), so
+    // it needs the module switch's bar: an Owner, Extra Owner or Trusted Admin with a fresh 2FA.
+    let module = brim_core::sections::module_of(section)
+        .filter(|_| row.path == format!("{section}.enabled") && !matches!(op, Op::Remove(..)));
+    if let Some(m) = module {
+        let (_, _, doc) = locked(app, gid).await?;
+        if doc["modules"][m] == false && doc[section]["enabled"] != true {
+            let no = if !matches!(
+                level,
+                Level::Owner | Level::ExtraOwner | Level::TrustedAdmin
+            ) {
+                Some(crate::reply::say(app, gid, "reply.settings.may_not_change", &[]).await)
+            } else if !fresh_2fa(app, msg.author.id.get(), gid.get()).await? {
+                Some(needs_2fa(app, gid).await)
+            } else {
+                None
+            };
+            if let Some(no) = no {
+                send_said(app, msg, no, true).await?;
+                return Ok(true);
+            }
+        }
+    }
     let sections = [section];
     let saved = save_with(app, gid, msg.author.id.get(), &sections, |doc| {
+        let before = doc[section].clone();
         let e = edit_for(row, &op, &ids, get_path(doc, row.path))?;
         apply(doc, row.path, e);
+        let on = brim_core::sections::module_to_turn_on(
+            section,
+            &before,
+            &doc[section],
+            &doc["modules"],
+        );
+        if let Some(m) = on.filter(|_| module.is_some()) {
+            doc["modules"][m] = json!(true);
+        }
         Ok::<(), Refusal>(())
     });
     let said = match saved.await? {

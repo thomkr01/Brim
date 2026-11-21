@@ -726,11 +726,12 @@ pub async fn put_section(
             || b.value["log_channel"].as_str().is_none_or(str::is_empty));
     // Turning a part on (the wizard's recommended setup, a part switch, its page) turns its module
     // on too, so one switch shows what runs. That needs the module switch's bar as well.
-    let module = brim_core::sections::module_of(&section).filter(|m| {
-        b.value["enabled"] == true
-            && config[&section]["enabled"] != true
-            && config["modules"][*m] == false
-    });
+    let module = brim_core::sections::module_to_turn_on(
+        &section,
+        &config[&section],
+        &b.value,
+        &config["modules"],
+    );
     if module.is_some() {
         let (min, step_up) = access::write_bar("modules");
         require(&st, &s, guild, min, step_up).await?;

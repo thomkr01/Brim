@@ -1328,6 +1328,18 @@ pub fn module_of(section: &str) -> Option<&'static str> {
     .then_some("server_joins")
 }
 
+/// The module a write must turn on with its part: the part goes from off (`before`) to on (`after`)
+/// while its module is off. The dashboard and the bot's settings panel both use it.
+pub fn module_to_turn_on(
+    section: &str,
+    before: &Value,
+    after: &Value,
+    modules: &Value,
+) -> Option<&'static str> {
+    module_of(section)
+        .filter(|m| before["enabled"] != true && after["enabled"] == true && modules[*m] == false)
+}
+
 /// Honeypot channel: hacked accounts spam every channel, so anyone writing here is punished.
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -1613,6 +1625,27 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_part_turned_on_names_its_off_module() {
+        let off = serde_json::json!({"server_joins": false});
+        let (no, yes) = (
+            serde_json::json!({"enabled": false}),
+            serde_json::json!({"enabled": true}),
+        );
+        assert_eq!(
+            module_to_turn_on("joingate", &no, &yes, &off),
+            Some("server_joins")
+        );
+        // Already on (a settings save), module on or missing, a part without a module: nothing.
+        assert_eq!(module_to_turn_on("joingate", &yes, &yes, &off), None);
+        assert_eq!(
+            module_to_turn_on("verification", &no, &yes, &serde_json::json!({})),
+            None
+        );
+        assert_eq!(module_to_turn_on("catch", &no, &yes, &off), None);
+        assert_eq!(module_to_turn_on("raider_list", &no, &no, &off), None);
+    }
 
     #[test]
     fn a_restore_keeps_only_the_named_config_ids() {
