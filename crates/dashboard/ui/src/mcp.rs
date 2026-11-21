@@ -48,10 +48,13 @@ pub fn McpTokens() -> impl IntoView {
         })
     };
     load();
+    let busy = RwSignal::new(false);
     let create = move |_| {
         let n = name.get_untracked();
         run_act(
-            async move { api("POST", "/api/mcp-tokens", Some(json!({"name": n}))).await },
+            guard(busy, async move {
+                api("POST", "/api/mcp-tokens", Some(json!({"name": n}))).await
+            }),
             msg,
             need,
             move |v| {
@@ -103,7 +106,7 @@ pub fn McpTokens() -> impl IntoView {
             <p class="muted">"One token per place that uses the MCP server. Making or revoking a token needs 2FA."<Tip text="A token is the login of an AI client: it reads through the MCP server and can propose changes. An OAuth login only reads. Nothing changes until you give the AI client the code the bot sends you by DM, and the DM names the token. Revoke a token you no longer use, or at once if you get a DM you did not ask for." /></p>
             <div class="row">
                 <input placeholder="Name, for example VPS" aria-label="token name" maxlength="40" prop:value=name on:input=move |e| name.set(event_target_value(&e)) />
-                <button class="go" disabled=move || name.get().trim().is_empty() || !room(live(), "mcp_tokens") on:click=create>"Make token"</button>
+                <button class="go" disabled=move || busy.get() || name.get().trim().is_empty() || !room(live(), "mcp_tokens") on:click=create>{busy_label(move || busy.get(), "Make token")}</button>
                 <Count n=Signal::derive(live) key="mcp_tokens" />
             </div>
             <Show when=move || made.get().is_some()>

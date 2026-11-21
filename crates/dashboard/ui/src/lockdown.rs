@@ -208,19 +208,20 @@ pub fn LockdownSettings(guild: String) -> impl IntoView {
     check();
     // @everyone allows beside the main roles are fixed only when ticked.
     let picked = RwSignal::new(Vec::<String>::new());
+    let busy = RwSignal::new(false);
     let fix = move || {
         // The automatic fixes on screen: the server refuses when it finds others by now.
         let shown: Vec<String> = problems.with_untracked(|p| p.iter().flatten().filter(|p| !p["fix"].is_null() && p["opt_in"] != true).map(|p| s(&p["id"])).collect());
         let body = json!({"picked": picked.get_untracked(), "shown": shown});
         run_act(
-            async move {
+            guard(busy, async move {
                 api(
                     "POST",
                     &format!("/api/guilds/{}/lockdown/fix", g.get_value()),
                     Some(body),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |_| check(),
@@ -230,7 +231,7 @@ pub fn LockdownSettings(guild: String) -> impl IntoView {
         <div class="card">
             <div class="row"><h2>"Compatibility check"</h2>
                 <Show when=move || problems.get().is_some_and(|p| !p.is_empty())><span class="chip">{move || format!("{} ISSUES", problems.get().map_or(0, |p| p.len()))}</span></Show>
-                <button on:click=move |_| fix() disabled=move || !problems.get().is_some_and(|p| p.iter().any(|p| !p["fix"].is_null()))>"Fix issues"</button></div>
+                <button on:click=move |_| fix() disabled=move || busy.get() || !problems.get().is_some_and(|p| p.iter().any(|p| !p["fix"].is_null()))>{busy_label(move || busy.get(), "Fix issues")}</button></div>
             <p class="muted">"Checks that only the main roles can view and send, so a lockdown works in a few calls. Apply Fix corrects the role and channel permissions. An @everyone allow in a channel can be on purpose, so it is only changed when you tick it."</p>
             <Show when=move || problems.get().is_some_and(|p| p.is_empty())><p class="ok">"No lockdown compatibility issues found."</p></Show>
             {move || problems.get().unwrap_or_default().into_iter().map(|p| {

@@ -156,6 +156,7 @@ pub fn LayoutVersions(guild: String) -> impl IntoView {
     let data = RwSignal::new(Value::Null);
     let blocking = RwSignal::new(Vec::<Value>::new());
     let (msg, need) = (Msg::default(), step_up());
+    let busy = RwSignal::new(false);
     let g = StoredValue::new(guild);
     let load = move || {
         let p = format!("/api/guilds/{}/layout/versions", g.get_value());
@@ -182,7 +183,7 @@ pub fn LayoutVersions(guild: String) -> impl IntoView {
                 let p = format!("/api/guilds/{}/layout/{v}/rollback", g.get_value());
                 let body = serde_json::json!({"expected_version": cur});
                 run_change(
-                    async move { api("POST", &p, Some(body)).await },
+                    guard(busy, async move { api("POST", &p, Some(body)).await }),
                     msg,
                     need,
                     move |r| {
@@ -218,7 +219,7 @@ pub fn LayoutVersions(guild: String) -> impl IntoView {
                 {if current {
                     view! { <span class="chip green">"Current"</span> }.into_any()
                 } else {
-                    view! { <button class="ghost" disabled=!can title=(!can).then_some("Needs the Owner or an Extra Owner") on:click=move |_| roll(v)>"Roll back"</button> }.into_any()
+                    view! { <button class="ghost" disabled=move || !can || busy.get() title=(!can).then_some("Needs the Owner or an Extra Owner") on:click=move |_| roll(v)>{busy_label(move || busy.get(), "Roll back")}</button> }.into_any()
                 }}
             </div>
         }

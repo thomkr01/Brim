@@ -448,6 +448,7 @@ fn History(guild: String) -> impl IntoView {
     let diff_seq = StoredValue::new(0u32);
     let names = RwSignal::new(std::collections::HashMap::<String, String>::new());
     let version = RwSignal::new(0i64);
+    let busy = RwSignal::new(false);
     let access = expect_context::<Access>();
     let (msg, need) = (Msg::default(), step_up());
     let load = {
@@ -605,9 +606,9 @@ fn History(guild: String) -> impl IntoView {
                                 .map_err(|e| format!("The changes could not be loaded: {e}"));
                             if !diff.is_disposed() && diff_seq.get_value() == id && diff.get_untracked().is_some() { diff.set(Some((v, Some(r)))) }
                         }) }>"Diff vs current"</button>
-                        <button disabled=move || access.rank() < 3 title=move || if access.rank() < 3 { "Only Trusted Admins and owners can roll back" } else { "" } on:click=move |_| { let (g, load) = (g2.clone(), load.clone()); run_save(async move {
+                        <button disabled=move || access.rank() < 3 || busy.get() title=move || if access.rank() < 3 { "Only Trusted Admins and owners can roll back" } else { "" } on:click=move |_| { let (g, load) = (g2.clone(), load.clone()); run_save(guard(busy, async move {
                             let r = api("POST", &format!("/api/guilds/{g}/history/{v}/rollback"), Some(json!({"expected_version": version.get_untracked()}))).await;
-                            load(); r }, version, msg, need) }>"Roll back"</button>
+                            load(); r }), version, msg, need) }>{busy_label(move || busy.get(), "Roll back")}</button>
                     </div>
                 }
             }

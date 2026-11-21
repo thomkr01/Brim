@@ -356,7 +356,7 @@ pub fn CasePage(guild: String, no: String) -> impl IntoView {
                 <div class="card">
                     <div class="row"><h2>{format!("#{case_no} {kind}")}</h2><span class="chip" class:ok=active>{if active { "open" } else { "closed" }}</span><span class="sp"></span>
                         <button on:click=move |_| { reason.set(start.clone()); open.set(active); editing.set(true) }>"Edit"</button>
-                        {(rank >= 3).then(|| view! { <button class="ghost" on:click=move |_| { ask(Ask::new("Delete this case for good?").text("Its proofs and its history go with it.").yes("Delete").danger(), move |_| { let (url, to) = (format!("{}/delete", base.get_value()), back.get_value()); run_act(async move { api("POST", &url, Some(json!({}))).await }, msg, need, move |_| { let _ = window().location().set_hash(&to); }) }) }>"Delete"</button> })}
+                        {(rank >= 3).then(|| view! { <button class="ghost" disabled=move || busy.get() on:click=move |_| { ask(Ask::new("Delete this case for good?").text("Its proofs and its history go with it.").yes("Delete").danger(), move |_| { let (url, to) = (format!("{}/delete", base.get_value()), back.get_value()); run_act(guard(busy, async move { api("POST", &url, Some(json!({}))).await }), msg, need, move |_| { let _ = window().location().set_hash(&to); }) }) }>"Delete"</button> })}
                     </div>
                     <dl class="facts">
                         <dt>"Member"</dt><dd>{who(names, s(&c["user_id"]))}</dd>
@@ -645,6 +645,7 @@ fn report(guild: String, no: i64, msg: Msg, need: RwSignal<bool>) -> impl IntoVi
     let cat = RwSignal::new("raid".to_string());
     let reason = RwSignal::new(String::new());
     let path = StoredValue::new(format!("/api/guilds/{guild}/cases/{no}/raider_report"));
+    let busy = RwSignal::new(false);
     let go = move |_| {
         ask(
             Ask::new("Report this user to the Raider List?")
@@ -655,7 +656,7 @@ fn report(guild: String, no: i64, msg: Msg, need: RwSignal<bool>) -> impl IntoVi
                     json!({"category": cat.get_untracked(), "reason": reason.get_untracked()});
                 let path = path.get_value();
                 run_act(
-                    async move { api("POST", &path, Some(body)).await },
+                    guard(busy, async move { api("POST", &path, Some(body)).await }),
                     msg,
                     need,
                     move |_| msg.ok("Reported. The bot owner reviews it."),
@@ -668,7 +669,7 @@ fn report(guild: String, no: i64, msg: Msg, need: RwSignal<bool>) -> impl IntoVi
             {["raid", "nuke", "scam", "spam"].map(|c| view! { <option value=c prop:selected=move || cat.get() == c>{c}</option> }).to_vec()}
         </select>
         <input placeholder="Reason (only the bot owner sees it)" aria-label="Raider List report reason" maxlength="400" prop:value=reason on:input=move |e| reason.set(event_target_value(&e)) />
-        <button class="ghost" on:click=go>"Report to Raider List"</button>
+        <button class="ghost" disabled=move || busy.get() on:click=go>{busy_label(move || busy.get(), "Report to Raider List")}</button>
     }
 }
 

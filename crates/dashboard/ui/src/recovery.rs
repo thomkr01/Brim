@@ -13,15 +13,28 @@ pub(crate) fn when(secs: i64) -> String {
 
 /// Runs a queued bot action, then reloads after a few seconds, once the bot has picked the job up.
 /// After a 2FA code, `make` sends the same request again (its button may be gone or show the other action by then).
+/// `busy` stays on until that reload, so the button cannot queue the same job twice.
 fn queued<F: std::future::Future<Output = Result<Value, String>> + 'static>(
+    busy: RwSignal<bool>,
     make: impl Fn() -> F + 'static,
     msg: Msg,
     need: RwSignal<bool>,
     reload: impl Fn() + 'static,
 ) {
+    let make = move || {
+        busy.set(true);
+        let f = make();
+        async move {
+            let r = f.await;
+            if r.is_err() {
+                busy.try_set(false);
+            }
+            r
+        }
+    };
     run_resumable(make, msg, need, move |_| {
         msg.ok("Queued: the bot runs it within a few seconds.");
-        set_timeout(reload, Duration::from_secs(6));
+        set_timeout(move || { busy.try_set(false); reload() }, Duration::from_secs(6));
     });
 }
 
@@ -32,6 +45,7 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
     let preview = RwSignal::new(None::<(i64, Vec<String>)>);
     let detail = RwSignal::new(None::<(i64, Value)>);
     let (msg, need) = (Msg::default(), step_up());
+    let busy = RwSignal::new(false);
     let loaded = RwSignal::new(false);
     let load = {
         let g = guild.clone();
@@ -51,6 +65,7 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
     let create = move |_| {
         let g = gc.clone();
         queued(
+            busy,
             move || { let g = g.clone(); async move { api("POST", &format!("/api/guilds/{g}/backups"), None).await } },
             msg,
             need,
@@ -117,6 +132,7 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
         let g = gl.clone();
         preview.set(None);
         queued(
+            busy,
             move || { let g = g.clone(); async move { api("POST", &format!("/api/guilds/{g}/backups/{id}/load"), None).await } },
             msg,
             need,
@@ -159,7 +175,7 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
         {move || (access.rank() < 4).then(|| view! { <p class="card info" role="note">"Only the owner and Extra Owners can change these settings or create or delete backups."</p> })}
         <fieldset class:ro=move || access.rank() < 4 disabled=move || access.rank() < 4><Section guild=guild.clone() name="backups".to_string() /></fieldset>
         <div class="card">
-            <div class="row"><h2>"Backups"</h2><span class="sp"></span><button disabled=move || access.rank() < 4 title=move || (access.rank() < 4).then_some("Needs the owner or an Extra Owner") on:click=create>"Create backup"</button></div>
+            <div class="row"><h2>"Backups"</h2><span class="sp"></span><button disabled=move || access.rank() < 4 || busy.get() title=move || (access.rank() < 4).then_some("Needs the owner or an Extra Owner") on:click=create>{busy_label(move || busy.get(), "Create backup")}</button></div>
             <p class="muted">"Brim also saves one on the interval set above; each of those removes the oldest past Max Images. A backup you create never removes one. Loading a backup syncs the server to it: it recreates what is missing, fixes what changed and removes what was added since."</p>
             <For each=move || rows.get() key=|r| r["id"].as_i64() let:r>
                 {
@@ -187,7 +203,7 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
                     view! { <p class="muted">{format!("This would change {} things:", lines.len())}</p><pre>{lines.join("\n")}</pre> }.into_any() }}
                 <div class="row">
                     <button class="ghost" on:click=move |_| preview.set(None)>"Cancel"</button>
-                    <Show when={let n = lines.len(); move || n > 0}><button on:click=move |_| apply.run(id)>"Apply"</button></Show>
+                    <Show when={let n = lines.len(); move || n > 0}><button disabled=move || busy.get() on:click=move |_| apply.run(id)>"Apply"</button></Show>
                 </div>
             </div>
         })}
@@ -386,6 +402,7 @@ fn BackupView(
 pub fn Panic(guild: String, part: &'static str) -> impl IntoView {
     let status = RwSignal::new(json!({}));
     let (msg, need) = (Msg::default(), step_up());
+    let busy = RwSignal::new(false);
     let load = {
         let g = guild.clone();
         move || {
@@ -403,6 +420,7 @@ pub fn Panic(guild: String, part: &'static str) -> impl IntoView {
     let toggle = move |_| {
         let (g, what) = (g.clone(), if active() { "end" } else { "start" });
         queued(
+            busy,
             move || { let g = g.clone(); async move { api("POST", &format!("/api/guilds/{g}/panic/{what}"), None).await } },
             msg,
             need,
@@ -417,7 +435,7 @@ pub fn Panic(guild: String, part: &'static str) -> impl IntoView {
                 Some(t) if active() => format!("Panic mode is on until {}.", when(t)),
                 _ => "Panic mode is off.".to_string(),
             }}</p>
-            <div class="row"><button on:click=toggle>{move || if active() { "End panic mode now" } else { "Start panic mode now" }}</button></div>
+            <div class="row"><button disabled=move || busy.get() on:click=toggle>{move || if busy.get() { view! { <Working /> }.into_any() } else { (if active() { "End panic mode now" } else { "Start panic mode now" }).into_any() }}</button></div>
             <Toast msg />
         </div>
         <Section guild=guild.clone() name="panic".to_string() part=part />

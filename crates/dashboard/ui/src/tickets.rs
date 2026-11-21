@@ -84,11 +84,12 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
             }
         });
     });
+    let (busy, removing) = (RwSignal::new(false), RwSignal::new(false));
     let publish = move |_| {
         let g = g.get_value();
         let body = json!({"channel": channel.get_untracked(), "panels": picked.get_untracked(), "menu": menu.get_untracked()});
         run_act(
-            async move {
+            guard(busy, async move {
                 let c = api("GET", &format!("/api/guilds/{g}/config"), None).await?;
                 let mut body = body;
                 body["expected_version"] = c["version"].clone();
@@ -98,7 +99,7 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
                     Some(body),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |_| msg.done("Published!"),
@@ -128,7 +129,7 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
                 <button class="ghost" class:on=move || menu.get() on:click=move |_| menu.set(true)>"Dropdown"</button>
             </div>
         </div>
-        <button class="go" disabled=move || channel.get().is_empty() || picked.get().is_empty() on:click=publish>"Publish"</button>
+        <button class="go" disabled=move || channel.get().is_empty() || picked.get().is_empty() || busy.get() on:click=publish>{busy_label(move || busy.get(), "Publish")}</button>
         {move || others.get().into_iter().map(|(m, ch)| {
             let name = name_of(&dc.get(), "channels", &ch);
             let remove = move |_| {
@@ -139,7 +140,7 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
                         .yes("Delete")
                         .danger(),
                     move |_| run_act(
-                        { let path = format!("/api/guilds/{g}/tickets/panels/posts/{m}/delete"); async move { api("POST", &path, None).await } },
+                        { let path = format!("/api/guilds/{g}/tickets/panels/posts/{m}/delete"); guard(removing, async move { api("POST", &path, None).await }) },
                         msg,
                         need,
                         move |_| { others.update(|o| o.retain(|(x, _)| *x != m)); msg.done("Deleted!") },
@@ -147,7 +148,7 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
                 )
             };
             view! { <p class="info">{format!("A panel message is also posted in {}. ", name_of(&dc.get(), "channels", &ch))}
-                <button class="danger" on:click=remove>"Delete it"</button></p> }
+                <button class="danger" disabled=move || removing.get() on:click=remove>{busy_label(move || removing.get(), "Delete it")}</button></p> }
         }).collect_view()}
         <Toast msg />
     </div> }

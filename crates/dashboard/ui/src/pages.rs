@@ -868,17 +868,18 @@ pub fn Revert(guild: String) -> impl IntoView {
     let held = RwSignal::new(Vec::<Value>::new());
     let can_include = RwSignal::new(false);
     let gs = StoredValue::new(guild.clone());
+    let (busy, busy_owners) = (RwSignal::new(false), RwSignal::new(false));
     let send = move |ids: Vec<i64>, owners: bool| {
         let g = gs.get_value();
         run_act(
-            async move {
+            guard(if owners { busy_owners } else { busy }, async move {
                 api(
                     "POST",
                     &format!("/api/guilds/{g}/revert"),
                     Some(json!({"ids": ids, "owners": owners})),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |v| {
@@ -951,9 +952,9 @@ pub fn Revert(guild: String) -> impl IntoView {
                 </div> }
             }
         </For>
-        <button on:click=revert>"Revert selected"</button>
+        <button disabled=move || busy.get() || busy_owners.get() on:click=revert>{busy_label(move || busy.get(), "Revert selected")}</button>
         <Show when=move || can_include.get() && !held.get().is_empty()>
-            <button class="ghost" on:click=include>"Also revert the Owner / Extra Owner / TA actions"</button>
+            <button class="ghost" disabled=move || busy.get() || busy_owners.get() on:click=include>{busy_label(move || busy_owners.get(), "Also revert the Owner / Extra Owner / TA actions")}</button>
         </Show>
         <pre>{move || report.get()}</pre>
     }
@@ -974,6 +975,7 @@ pub fn Rescue(guild: String) -> impl IntoView {
     let qr_shown = RwSignal::new(false);
     let key_copied = RwSignal::new(None::<bool>);
     let (msg, need) = (Msg::default(), step_up());
+    let (busy, back_busy) = (RwSignal::new(false), RwSignal::new(false));
     let g = guild.clone();
     spawn_local(async move {
         match api("GET", &format!("/api/guilds/{g}/rescue"), None).await {
@@ -992,7 +994,7 @@ pub fn Rescue(guild: String) -> impl IntoView {
         let g = g.clone();
         let make = move |_: String| {
             run_act(
-                async move { api("POST", &format!("/api/guilds/{g}/rescue/regenerate"), None).await },
+                guard(busy, async move { api("POST", &format!("/api/guilds/{g}/rescue/regenerate"), None).await }),
                 msg,
                 need,
                 move |v| {
@@ -1041,7 +1043,7 @@ pub fn Rescue(guild: String) -> impl IntoView {
             move |_| {
                 let g = g.clone();
                 run_act(
-                    async move { api("POST", &format!("/api/guilds/{g}/rescue/give-back"), None).await },
+                    guard(back_busy, async move { api("POST", &format!("/api/guilds/{g}/rescue/give-back"), None).await }),
                     msg,
                     need,
                     move |_| {
@@ -1056,13 +1058,13 @@ pub fn Rescue(guild: String) -> impl IntoView {
             <div class="card">
                 <h2>"Owner level from a rescue"</h2>
                 <p class="muted">{move || format!("You hold Brim's Owner level in this server because you used its rescue key. The server owner account (ID {}) has no Brim control here until you give it back. This stays when Discord ownership moves to another account. It ends when you give it back, or when Discord ownership moves to this account.", paused.get().unwrap_or_default())}</p>
-                <button class="danger" on:click=give_back.clone()>"Give it back"</button>
+                <button class="danger" disabled=move || back_busy.get() on:click=give_back.clone()>{busy_label(move || back_busy.get(), "Give it back")}</button>
             </div>
         </Show>
         <div class="card">
             <p class="muted">{move || if let Some(at) = opens.get() { format!("This server changed owner. The rescue key made before that keeps working until {at}, then it stops working. Nobody can make a new key before then.") } else if no_code.get() { "The rescue key stopped working: it was made before rescue keys needed an authenticator code. Make a new one.".into() } else if expired.get() { "The rescue key stopped working: it was made before this server changed owner, more than 7 days ago. Make a new one.".into() } else if has_key.get() { "A rescue key exists. Regenerating invalidates the old one.".into() } else { "No rescue key yet.".into() }}</p>
             <p class="warn">"If this server changes owner, this rescue key keeps working for 7 days after the change, so whoever holds it can still take Brim's Owner level in that time. Then it stops working, and the new owner makes a new key."</p>
-            <button class="warn" on:click=regen>"Regenerate"</button>
+            <button class="warn" disabled=move || busy.get() on:click=regen>{busy_label(move || busy.get(), "Regenerate")}</button>
             <Show when=move || !key.get().is_empty()>
                 <p><b>"Rescue Key (shown once, store it somewhere safe):"</b></p>
                 <div class="row"><pre class:blur=move || !shown.get()>{move || key.get()}</pre>
@@ -1182,6 +1184,7 @@ pub fn PurgeData(guild: String) -> impl IntoView {
     });
     let (open, typed) = (RwSignal::new(false), RwSignal::new(String::new()));
     let (msg, need) = (Msg::default(), step_up());
+    let busy = RwSignal::new(false);
     let matches = move || !typed.get().trim().is_empty() && typed.get().trim() == name.get().trim();
     let purge = move |_| {
         let (g, n) = (gid.get_value(), typed.get_untracked());
@@ -1190,7 +1193,7 @@ pub fn PurgeData(guild: String) -> impl IntoView {
         run_resumable(
             move || {
                 let (g, n) = (g.clone(), n.clone());
-                async move { api("POST", &format!("/api/guilds/{g}/purge"), Some(json!({ "name": n }))).await }
+                guard(busy, async move { api("POST", &format!("/api/guilds/{g}/purge"), Some(json!({ "name": n }))).await })
             },
             msg,
             need,
@@ -1206,13 +1209,13 @@ pub fn PurgeData(guild: String) -> impl IntoView {
         <div class="card">
             <h3>"Delete server data"</h3>
             <p class="muted">"Deletes everything Brim stores for this server: settings, cases, logs, backups, tickets and permits. This cannot be undone. It waits while a lock, panic mode or a quarantine runs, because their saved roles and overwrites are deleted too. Data is also deleted automatically 30 days after Brim is removed."</p>
-            <button class="danger" on:click=move |_| open.set(true)>"Delete all data"</button>
+            <button class="danger" disabled=move || busy.get() on:click=move |_| open.set(true)>{busy_label(move || busy.get(), "Delete all data")}</button>
         </div>
         <Fade when=open>
             <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Delete server data" on:keydown=move |e| dialog_keys(&e, || open.set(false))><div class="card">
                 <p>"Type the server name "<b>{name}</b>" to delete all of its stored data."</p>
                 <input aria-label="server name" autocomplete="off" prop:value=typed on:input=move |e| typed.set(event_target_value(&e)) />
-                <div class="row"><button class="ghost" on:click=move |_| open.set(false)>"Abort"</button><button class="danger" disabled=move || !matches() on:click=purge>"Delete"</button></div>
+                <div class="row"><button class="ghost" on:click=move |_| open.set(false)>"Abort"</button><button class="danger" disabled=move || !matches() || busy.get() on:click=purge>{busy_label(move || busy.get(), "Delete")}</button></div>
             </div></div>
         </Fade>
         <Toast msg />
@@ -1232,11 +1235,12 @@ pub fn LostControl() -> impl IntoView {
     );
     let (msg, need) = (Msg::default(), step_up());
     let invite = RwSignal::new(None::<(String, String)>);
+    let busy = RwSignal::new(false);
     let claim = move |_| {
         let g = guild.get_untracked().trim().to_string();
         let body = json!({"guild_id": g, "key": secret.get_untracked().trim(), "code": code.get_untracked().trim()});
         run_act(
-            async move { api("POST", "/api/rescue/claim", Some(body)).await },
+            guard(busy, async move { api("POST", "/api/rescue/claim", Some(body)).await }),
             msg,
             need,
             // Opens the server at once (owner decision 11-18); the reload loads the server list with it.
@@ -1258,7 +1262,7 @@ pub fn LostControl() -> impl IntoView {
             <div class="card">
                 <h2>"Rescue process"</h2>
                 <p class="muted">"You have lost access to your owner account. Sign in with any account, also a new one, and enter the server ID, its rescue key and the 6-digit code from the authenticator you scanned with it. That account then holds Brim's Owner level in the server; Discord ownership does not change."</p>
-                <div class="row"><input placeholder="Server ID" aria-label="server ID" spellcheck="false" autocapitalize="none" prop:value=guild on:input=move |e| guild.set(event_target_value(&e)) /><input placeholder="Rescue key" aria-label="rescue key" autocomplete="off" spellcheck="false" autocapitalize="none" prop:value=secret on:input=move |e| secret.set(event_target_value(&e)) /><input placeholder="6-digit code" aria-label="6-digit code" autocomplete="one-time-code" inputmode="numeric" prop:value=code on:input=move |e| code.set(event_target_value(&e)) /><button on:click=claim>"Confirm"</button></div>
+                <div class="row"><input placeholder="Server ID" aria-label="server ID" spellcheck="false" autocapitalize="none" prop:value=guild on:input=move |e| guild.set(event_target_value(&e)) /><input placeholder="Rescue key" aria-label="rescue key" autocomplete="off" spellcheck="false" autocapitalize="none" prop:value=secret on:input=move |e| secret.set(event_target_value(&e)) /><input placeholder="6-digit code" aria-label="6-digit code" autocomplete="one-time-code" inputmode="numeric" prop:value=code on:input=move |e| code.set(event_target_value(&e)) /><button disabled=move || busy.get() on:click=claim>{busy_label(move || busy.get(), "Confirm")}</button></div>
                 <Toast msg />
                 {move || invite.get().map(|(link, id)| view! {
                     <p>"Done. This account is not in the server yet: join it with this one-use invite (valid 24 hours), then open the server."</p>
@@ -1287,11 +1291,12 @@ pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
     let dirty = RwSignal::new(false);
     let fresh = RwSignal::new(0u32);
     let g = guild.clone();
+    let busy = RwSignal::new(false);
     // Optional: private "Logs" and "Staff" categories with a channel per log type that has none yet.
     let setup = move |_| {
         let g = g.clone();
         run_act(
-            async move {
+            guard(busy, async move {
                 let c = api("GET", &format!("/api/guilds/{g}/config"), None).await?;
                 let all: Vec<&str> = OPTIONAL_LOGS.iter().map(|(n, _)| *n).collect();
                 api(
@@ -1300,7 +1305,7 @@ pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
                     Some(json!({"expected_version": c["version"], "logs": all})),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |_| {
@@ -1310,7 +1315,7 @@ pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
         );
     };
     view! {
-        <div class="row"><button disabled=move || dirty.get() on:click=setup>"Create a channel per log type"</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Create a channel per log type")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
         <PageTabs tabs=vec![Tab::link("brim", "brim", format!("#/{guild}/logging/brim/{sub}")), Tab::link("discord", "discord", format!("#/{guild}/logging/discord/{sub}"))] active=tab.to_string() />
         <PageTabs tabs=vec![Tab::link("essential", "essential", format!("#/{guild}/logging/{tab}/essential")), Tab::link("customize", "customize", format!("#/{guild}/logging/{tab}/customize"))] active=sub.to_string() />
         {move || { fresh.track(); let (g, part) = (guild.clone(), part.clone()); view! {
@@ -1356,6 +1361,7 @@ pub fn Catch(guild: String) -> impl IntoView {
     let dirty = RwSignal::new(false);
     let fresh = RwSignal::new(0u32);
     let g = guild.clone();
+    let busy = RwSignal::new(false);
     let setup = move |_| {
         let sure = "This creates #do-not-write at the top of the server and turns the catch channel on: anyone without a permit who writes there gets the action below. Continue?";
         if !web_sys::window()
@@ -1367,7 +1373,7 @@ pub fn Catch(guild: String) -> impl IntoView {
         }
         let g = g.clone();
         run_act(
-            async move {
+            guard(busy, async move {
                 let c = api("GET", &format!("/api/guilds/{g}/config"), None).await?;
                 api(
                     "POST",
@@ -1375,7 +1381,7 @@ pub fn Catch(guild: String) -> impl IntoView {
                     Some(json!({"expected_version": c["version"]})),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |_| {
@@ -1385,7 +1391,7 @@ pub fn Catch(guild: String) -> impl IntoView {
         );
     };
     view! {
-        <div class="row"><button disabled=move || dirty.get() on:click=setup>"Set up channel"</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Set up channel")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="catch".to_string() dirty /> } }}
     }
 }
@@ -1401,10 +1407,11 @@ pub fn Tickets(guild: String) -> impl IntoView {
     // Bumped after a save, so Publish lists the saved panels.
     let saved = RwSignal::new(0u32);
     let (g, g2) = (guild.clone(), guild.clone());
+    let busy = RwSignal::new(false);
     let setup = move |_| {
         let g = g.clone();
         run_act(
-            async move {
+            guard(busy, async move {
                 let c = api("GET", &format!("/api/guilds/{g}/config"), None).await?;
                 api(
                     "POST",
@@ -1412,7 +1419,7 @@ pub fn Tickets(guild: String) -> impl IntoView {
                     Some(json!({"expected_version": c["version"]})),
                 )
                 .await
-            },
+            }),
             msg,
             need,
             move |_| {
@@ -1427,7 +1434,7 @@ pub fn Tickets(guild: String) -> impl IntoView {
     view! {
         <PageTabs tabs=tabs.map(|(k, t)| Tab::state(k, t)).to_vec() active=Signal::derive(move || tab.get().to_string()) on_pick=Callback::new(move |k| tab.set(k)) />
         <div class:hide=move || tab.get() != "settings">
-        <div class="row"><button disabled=move || dirty.get() on:click=setup>"Set up the ticket category and log"</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Set up the ticket category and log")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="tickets".to_string() dirty on_save=Callback::new(move |_| saved.update(|n| *n += 1)) /> } }}
         </div>
         <div class:hide=move || tab.get() != "publish">

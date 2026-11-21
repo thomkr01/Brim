@@ -1910,6 +1910,7 @@ fn channel_picker(
             </button>
         }
     };
+    let busy = RwSignal::new(false);
     let create = move || {
         let n = name.get_untracked().trim().to_string();
         if n.is_empty() {
@@ -1920,7 +1921,7 @@ fn channel_picker(
         let body = json!({"name": n, "parent": p, "staff_only": staff.get_untracked()});
         let u = url.get_value();
         run_act(
-            async move { api("POST", &u, Some(body)).await },
+            guard(busy, async move { api("POST", &u, Some(body)).await }),
             msg,
             step_up(),
             move |v| {
@@ -1974,7 +1975,7 @@ fn channel_picker(
                                 </div>
                             </div>
                             <p class="muted small">"Made with Channel Setup's rules. Needs your 2FA code."</p>
-                            <div class="acts"><button class="ghost" on:click=move |_| adding.set(false)>"Cancel"</button><button on:click=move |_| create()>"Make channel"</button></div>
+                            <div class="acts"><button class="ghost" on:click=move |_| adding.set(false)>"Cancel"</button><button disabled=move || busy.get() on:click=move |_| create()>{busy_label(move || busy.get(), "Make channel")}</button></div>
                         </div>
                     </Show>
                 </Show>

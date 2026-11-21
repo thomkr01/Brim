@@ -111,8 +111,10 @@ pub fn RaiderReview() -> impl IntoView {
     }
 }
 
-/// POSTs a decision; `done` runs after it went through.
+/// POSTs a decision; `done` runs after it went through. `busy` holds `key` meanwhile (the row's
+/// buttons are off and this one shows the working sign), so a double click decides once.
 fn decide(
+    (busy, key): (RwSignal<&'static str>, &'static str),
     path: String,
     body: Value,
     msg: Msg,
@@ -120,8 +122,13 @@ fn decide(
     ok: &'static str,
     done: impl Fn() + 'static,
 ) {
+    busy.set(key);
     run_act(
-        async move { api("POST", &path, Some(body)).await },
+        async move {
+            let r = api("POST", &path, Some(body)).await;
+            busy.try_set("");
+            r
+        },
         msg,
         need,
         move |_| {
@@ -155,11 +162,12 @@ fn Queue(msg: Msg, need: RwSignal<bool>) -> impl IntoView {
             let auto = e["status"] == "confirmed";
             let cat = RwSignal::new(s(&e["category"]));
             let note = RwSignal::new(String::new());
+            let busy = RwSignal::new("");
             let (i1, i2, i3, i4) = (id.clone(), id.clone(), id.clone(), id.clone());
-            let approve = move |_| decide(format!("/api/raiders/{i1}/confirm"), json!({"category": cat.get_untracked(), "note": note.get_untracked()}), msg, need, "Confirmed. Servers with the Raider List on will see it.", load);
-            let verify = move |_| decide(format!("/api/raiders/{i2}/verify"), json!({}), msg, need, "Verified.", load);
-            let remove = move |_| { let i3 = i3.clone(); ask(Ask::new(format!("Take {i3} off the list?")).text("Bans the list made are lifted where the server allows it.").yes("Remove").danger(), move |_| decide(format!("/api/raiders/{i3}/remove"), json!({}), msg, need, "Removed.", load)) };
-            let reject = move |_| decide(format!("/api/raiders/{i4}/reject"), json!({}), msg, need, "Rejected.", load);
+            let approve = move |_| decide((busy, "confirm"), format!("/api/raiders/{i1}/confirm"), json!({"category": cat.get_untracked(), "note": note.get_untracked()}), msg, need, "Confirmed. Servers with the Raider List on will see it.", load);
+            let verify = move |_| decide((busy, "verify"), format!("/api/raiders/{i2}/verify"), json!({}), msg, need, "Verified.", load);
+            let remove = move |_| { let i3 = i3.clone(); ask(Ask::new(format!("Take {i3} off the list?")).text("Bans the list made are lifted where the server allows it.").yes("Remove").danger(), move |_| decide((busy, "remove"), format!("/api/raiders/{i3}/remove"), json!({}), msg, need, "Removed.", load)) };
+            let reject = move |_| decide((busy, "reject"), format!("/api/raiders/{i4}/reject"), json!({}), msg, need, "Rejected.", load);
             view! { <div class="card">
                 {who(&e)}
                 <div class="row">{if auto { view! { <span class="chip orange">"listed automatically, not verified"</span> }.into_any() } else { view! { <span class="chip">"pending"</span> }.into_any() }}<span class="muted">{format!("since {}", when(&e["listed_at"]))}</span></div>
@@ -167,8 +175,8 @@ fn Queue(msg: Msg, need: RwSignal<bool>) -> impl IntoView {
                 <div class="row">
                     <select aria-label="category" on:change=move |ev| cat.set(event_target_value(&ev))>{CATEGORIES.map(|c| view! { <option value=c prop:selected=move || cat.get() == c>{c}</option> }).to_vec()}</select>
                     <input placeholder="Public note (servers and the user see it)" aria-label="public note" maxlength="200" prop:value=note on:input=move |ev| note.set(event_target_value(&ev)) />
-                    <button class="go" on:click=approve>"Confirm"</button>
-                    {if auto { view! { <button on:click=verify>"Verify"</button><button class="danger" on:click=remove>"Remove"</button> }.into_any() } else { view! { <button class="danger" on:click=reject>"Reject"</button> }.into_any() }}
+                    <button class="go" disabled=move || !busy.get().is_empty() on:click=approve>{busy_label(move || busy.get() == "confirm", "Confirm")}</button>
+                    {if auto { view! { <button disabled=move || !busy.get().is_empty() on:click=verify>{busy_label(move || busy.get() == "verify", "Verify")}</button><button class="danger" disabled=move || !busy.get().is_empty() on:click=remove>{busy_label(move || busy.get() == "remove", "Remove")}</button> }.into_any() } else { view! { <button class="danger" disabled=move || !busy.get().is_empty() on:click=reject>{busy_label(move || busy.get() == "reject", "Reject")}</button> }.into_any() }}
                 </div>
             </div> }
         }).collect_view()}
@@ -211,14 +219,15 @@ fn Listed(msg: Msg, need: RwSignal<bool>) -> impl IntoView {
         {move || rows.get().into_iter().map(|r| {
             let id = s(&r["user_id"]);
             let id2 = id.clone();
-            let remove = move |_| { let id2 = id2.clone(); ask(Ask::new(format!("Take {id2} off the list?")).text("Bans the list made are lifted where the server allows it.").yes("Remove").danger(), move |_| decide(format!("/api/raiders/{id2}/remove"), json!({}), msg, need, "Removed.", load)) };
+            let busy = RwSignal::new("");
+            let remove = move |_| { let id2 = id2.clone(); ask(Ask::new(format!("Take {id2} off the list?")).text("Bans the list made are lifted where the server allows it.").yes("Remove").danger(), move |_| decide((busy, "remove"), format!("/api/raiders/{id2}/remove"), json!({}), msg, need, "Removed.", load)) };
             let unverified = (r["verified"] != true).then(|| view! { <span class="chip orange">"not verified"</span> });
             let ends = r["expires_at"].is_string().then(|| view! { <span class="muted">{format!("ends {}", when(&r["expires_at"]))}</span> });
             view! { <div class="card">
                 <div class="row"><code>{id}</code><b>{s(&r["category"])}</b>{unverified}
                     <span>{format!("{} different owners, {} evidence", r["owners"].as_i64().unwrap_or(0), r["evidence"].as_i64().unwrap_or(0))}</span>
                     <span class="muted">{when(&r["updated_at"])}</span>{ends}
-                    <button class="danger" on:click=remove>"Remove"</button></div>
+                    <button class="danger" disabled=move || !busy.get().is_empty() on:click=remove>{busy_label(move || busy.get() != "", "Remove")}</button></div>
                 <p>{s(&r["public_note"])}</p>
             </div> }
         }).collect_view()}
@@ -246,14 +255,15 @@ fn Appeals(msg: Msg, need: RwSignal<bool>) -> impl IntoView {
         <Show when=move || loaded.get() && rows.get().is_empty()><p class="card empty muted">"No open appeals."</p></Show>
         {move || rows.get().into_iter().map(|a| {
             let id = a["id"].as_i64().unwrap_or_default();
-            let accept = move |_| { ask(Ask::new("Accept this appeal?").text("The user is taken off the list and the bans it made are lifted.").yes("Accept"), move |_| decide(format!("/api/raiders/appeals/{id}/accept"), json!({}), msg, need, "Appeal accepted.", load)) };
-            let deny = move |_| decide(format!("/api/raiders/appeals/{id}/deny"), json!({}), msg, need, "Appeal denied. The user can appeal again in 30 days.", load);
+            let busy = RwSignal::new("");
+            let accept = move |_| { ask(Ask::new("Accept this appeal?").text("The user is taken off the list and the bans it made are lifted.").yes("Accept"), move |_| decide((busy, "accept"), format!("/api/raiders/appeals/{id}/accept"), json!({}), msg, need, "Appeal accepted.", load)) };
+            let deny = move |_| decide((busy, "deny"), format!("/api/raiders/appeals/{id}/deny"), json!({}), msg, need, "Appeal denied. The user can appeal again in 30 days.", load);
             view! { <div class="card">
                 {who(&a)}
                 <div class="row"><b>{s(&a["category"])}</b><span class="muted">{s(&a["status"])}</span><span>{s(&a["public_note"])}</span><span class="muted">{format!("appealed {}", when(&a["at"]))}</span></div>
                 <p class="keepws">{s(&a["text"])}</p>
                 {evidence(&a)}
-                <div class="row"><button class="go" on:click=accept>"Accept"</button><button class="danger" on:click=deny>"Deny"</button></div>
+                <div class="row"><button class="go" disabled=move || !busy.get().is_empty() on:click=accept>{busy_label(move || busy.get() == "accept", "Accept")}</button><button class="danger" disabled=move || !busy.get().is_empty() on:click=deny>{busy_label(move || busy.get() == "deny", "Deny")}</button></div>
             </div> }
         }).collect_view()}
         {pager(page, move || rows.get().len(), load)}
@@ -282,10 +292,11 @@ pub fn RaiderAppeal() -> impl IntoView {
         })
     };
     load();
+    let busy = RwSignal::new(false);
     let send = move |_| {
         let body = json!({"text": text.get_untracked()});
         run_act(
-            async move { api("POST", "/api/raider-appeal", Some(body)).await },
+            guard(busy, async move { api("POST", "/api/raider-appeal", Some(body)).await }),
             msg,
             need,
             move |_| {
@@ -322,7 +333,7 @@ pub fn RaiderAppeal() -> impl IntoView {
                     <Show when=move || data.get()["can_appeal"] == true>
                         <label for="raider-appeal">"Why should you be taken off the list? (at most 1000 characters)"</label>
                         <textarea id="raider-appeal" maxlength="1000" class="ta-l" prop:value=text on:input=move |e| text.set(event_target_value(&e))></textarea>
-                        <div class="row"><button class="go" disabled=move || text.get().trim().is_empty() on:click=send>"Send appeal"</button></div>
+                        <div class="row"><button class="go" disabled=move || busy.get() || text.get().trim().is_empty() on:click=send>{busy_label(move || busy.get(), "Send appeal")}</button></div>
                     </Show>
                 }.into_any()
             }}

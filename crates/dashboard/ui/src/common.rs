@@ -950,6 +950,17 @@ pub fn busy_label(busy: impl Fn() -> bool + Send + Sync + 'static, label: &'stat
     move || if busy() { view! { <Working /> }.into_any() } else { label.into_any() }
 }
 
+/// Sets `busy` now and clears it when `fut` answers (ok, refusal or 2FA prompt): pass the result to
+/// [`run_act`] and show `disabled=busy` with [`busy_label`], so a slow request cannot be sent twice.
+pub fn guard<T>(busy: RwSignal<bool>, fut: impl std::future::Future<Output = T>) -> impl std::future::Future<Output = T> {
+    busy.set(true);
+    async move {
+        let r = fut.await;
+        busy.try_set(false);
+        r
+    }
+}
+
 /// "Working" animation: four dots in the logo colours that swap corners, and a fun word that
 /// changes every 4 s (2 s changed too fast, owner decision 2026-11-18).
 #[component]

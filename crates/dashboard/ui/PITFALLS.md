@@ -607,6 +607,12 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 
 **Check:** in the browser, count the `/api/` requests after the tap: more than the server list must go out, and the page content must load again.
 
+## A button that sends a request twice on a double click
+- **Cause:** a button whose handler starts a request (a queued job, a post, a key, a token) but never goes busy. The confirm dialog does not help: it runs its action once, but the first button is pressable again at once and opens it again. Found in recovery.rs, pages.rs, tickets.rs, lockdown.rs, secure.rs, main.rs (history), layout.rs, embeds.rs (Make channel), records.rs, mcp.rs, raiders.rs, appeals.rs, datareq.rs.
+- **Rule:** wrap the request in `guard(busy, fut)` (common.rs; sets `busy` at once, clears it when the request answers, also on a refusal or a 2FA prompt so the code's retry can click again), then `disabled=busy` and `busy_label(..)` on the button. A list row uses a signal made in its own closure (or a `(id, key)` pair for the row's several buttons). A queued bot job (`recovery.rs queued`) keeps `busy` on until its reload, so the same job is not queued twice before the bot has taken it.
+- **Server side (not fixed here):** the handlers are not idempotent. A repeated request queues a second backup or load, mints a second Rescue Key (the first key is dead and only the last answer on screen is right), posts a second ticket panel or makes a second MCP token. Purge, Secure my account and the decisions stop themselves on the second try. Only a script or a second tab can send the repeat now.
+- **Check:** a new button that starts a request needs `disabled=busy`. Click it twice fast in the browser and count the requests.
+
 ## A slow action needs a pending state
 - A button that starts a slow request (the server asks GitHub first) must show the working sign and be disabled from the click until the page has the result. `update.rs` first showed nothing for 2-3 s; use `busy_label` and set busy before the request. Clear it on a refusal (so a 2FA retry can click again), and keep it until the next answer shows the queued run.
 - A failed poll while the dashboard restarts itself is expected: show the same page (text only), never a pose. A pose is a state of its own (empty, error, offline), not a loading flicker.

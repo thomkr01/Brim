@@ -56,6 +56,8 @@ pub fn DataRequests() -> impl IntoView {
         })
     };
     load();
+    // The request and answer being sent: every answer button is off meanwhile, so a double click answers once.
+    let busy = RwSignal::new((0i64, false));
     let answer = move |id: i64, approve: bool, what: String| {
         let (title, text, yes) = if approve {
             (
@@ -79,8 +81,13 @@ pub fn DataRequests() -> impl IntoView {
                 "/api/data-requests/{id}/{}",
                 if approve { "approve" } else { "deny" }
             );
+            busy.set((id, approve));
             run_act(
-                async move { api("POST", &path, None).await },
+                async move {
+                    let r = api("POST", &path, None).await;
+                    busy.try_set((0, false));
+                    r
+                },
                 msg,
                 need,
                 move |_| {
@@ -113,8 +120,8 @@ pub fn DataRequests() -> impl IntoView {
                         <td data-label="Rows">{detail}</td>
                         <td class="tact">{if pending {
                             view! { <span class="row">
-                                <button class="danger" on:click=move |_| answer(id, true, what.clone())>"Approve"</button>
-                                <button class="ghost" on:click=move |_| answer(id, false, w2.clone())>"Deny"</button>
+                                <button class="danger" disabled=move || busy.get().0 != 0 on:click=move |_| answer(id, true, what.clone())>{busy_label(move || busy.get() == (id, true), "Approve")}</button>
+                                <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| answer(id, false, w2.clone())>{busy_label(move || busy.get() == (id, false), "Deny")}</button>
                             </span> }.into_any()
                         } else {
                             view! { <span>{format!("{} {}", s(&r["status"]), when(&r["decided_at"]))}</span> }.into_any()

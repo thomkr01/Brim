@@ -24,6 +24,7 @@ pub fn SecureAccount(me: Signal<Option<Value>>) -> impl IntoView {
     let state = RwSignal::new(None::<Value>);
     let (key, code) = (RwSignal::new(String::new()), RwSignal::new(String::new()));
     let done = RwSignal::new(None::<Value>);
+    let busy = RwSignal::new(false);
     let (msg, need) = (Msg::default(), step_up());
     Effect::new(move |_| {
         if owner() {
@@ -39,13 +40,17 @@ pub fn SecureAccount(me: Signal<Option<Value>>) -> impl IntoView {
             })
         }
     });
-    let ready = move || state.get().is_some_and(|s| s["has_key"] == true && s["totp"] == true);
+    let ready = move || {
+        state
+            .get()
+            .is_some_and(|s| s["has_key"] == true && s["totp"] == true)
+    };
     let press = move |_| {
         ask(Ask::new("Secure my account now?").text("Everyone is logged out of the dashboard, you too, a queued update is cancelled, every MCP token is revoked and changes waiting for a code are closed. Your 2FA and the Rescue Key stay.").yes("Secure my account").danger(), move |_| run_resumable(
             // Read again after a 2FA prompt: the rescue code may have changed meanwhile.
             move || {
                 let b = json!({"key": key.get_untracked(), "code": code.get_untracked()});
-                async move { api("POST", "/api/secure-account", Some(b)).await }
+                guard(busy, async move { api("POST", "/api/secure-account", Some(b)).await })
             },
             msg,
             need,
@@ -92,7 +97,7 @@ pub fn SecureAccount(me: Signal<Option<Value>>) -> impl IntoView {
                             <label class="field">"Rescue authenticator code"<input inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" prop:value=code on:input=move |e| code.set(event_target_value(&e)) /></label>
                         }.into_any(),
                     }}
-                    <button class="danger" disabled=move || !ready() || key.get().trim().is_empty() || code.get().trim().len() != 6 on:click=press>"Secure my account"</button>
+                    <button class="danger" disabled=move || busy.get() || !ready() || key.get().trim().is_empty() || code.get().trim().len() != 6 on:click=press>{busy_label(move || busy.get(), "Secure my account")}</button>
                 </div>
                 <div class="card">
                     <h2>"After the press"</h2>

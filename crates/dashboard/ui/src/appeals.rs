@@ -55,11 +55,16 @@ pub fn AppealList(guild: String) -> impl IntoView {
     };
     load();
     let reply = RwSignal::new(String::new());
-    let decide = move |id: i64, accept: bool, blacklist: bool, dismiss: bool| {
+    // The appeal and button being decided: every decision button is off meanwhile, so a double click decides once.
+    let busy = RwSignal::new((0i64, ""));
+    let decide = move |id: i64, key: &'static str, accept: bool, blacklist: bool, dismiss: bool| {
+        busy.set((id, key));
         spawn_local(async move {
             let path = format!("/api/guilds/{}/appeals/{id}/decide", g.get_value());
             let body = json!({"accept": accept, "blacklist": blacklist, "dismiss": dismiss, "reply": reply.get_untracked()});
-            match api("POST", &path, Some(body)).await {
+            let r = api("POST", &path, Some(body)).await;
+            busy.try_set((0, ""));
+            match r {
                 // An accept runs in the bot (its rate limit); the appeal closes once it is done.
                 Ok(v) if v["queued"] == true => {
                     msg.ok("Sent to the bot. The appeal closes when the punishment is lifted; a refusal is posted in the appeal log.");
@@ -108,10 +113,10 @@ pub fn AppealList(guild: String) -> impl IntoView {
                     {r["answers"].as_array().cloned().unwrap_or_default().into_iter().map(|a| view! { <p><b>{s(&a["label"])}</b><br/>{s(&a["answer"])}</p> }).collect_view()}
                     <Show when=move || open>
                         <div class="row">
-                            <button on:click=move |_| decide(id, true, false, false)>"Accept"</button>
-                            <button class="ghost" on:click=move |_| decide(id, false, false, false)>"Deny"</button>
-                            <button class="ghost" on:click=move |_| decide(id, false, true, false)>"Deny and blacklist"</button>
-                            <button class="ghost" on:click=move |_| decide(id, false, false, true)>"Dismiss"</button>
+                            <button disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "accept", true, false, false)>{busy_label(move || busy.get() == (id, "accept"), "Accept")}</button>
+                            <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "deny", false, false, false)>{busy_label(move || busy.get() == (id, "deny"), "Deny")}</button>
+                            <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "blacklist", false, true, false)>{busy_label(move || busy.get() == (id, "blacklist"), "Deny and blacklist")}</button>
+                            <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "dismiss", false, false, true)>{busy_label(move || busy.get() == (id, "dismiss"), "Dismiss")}</button>
                         </div>
                     </Show>
                 </div> }
