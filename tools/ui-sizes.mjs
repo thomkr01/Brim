@@ -15,9 +15,13 @@ import { readFileSync, readdirSync } from 'node:fs';
 
 const UI = new URL('../crates/dashboard/ui/', import.meta.url);
 const bad = [];
+// Channel Setup's channel list is compact on purpose and is free of the 4 px scale and the padding tokens
+// (owner decision 2026-11-21, ui PITFALLS "Channel Setup list is compact"): only its row rules.
+const CS_LIST = /^\.cs \.(tr|slot|nm)\b/;
 // Comments are blanked (newlines kept, so line numbers stay right).
 const css = readFileSync(new URL('style.css', UI), 'utf8').replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
 css.split('\n').forEach((line, i) => {
+  if (CS_LIST.test(line)) return;
   for (const m of line.matchAll(/(?:^|[;{\s])(font|font-size|padding[a-z-]*|border[a-z-]*radius)\s*:([^;}]*)/g)) {
     const raw = m[2].replace(/var\([^)]*\)/g, '');
     if (/\d(px|rem|pt|vh|vw|vmin|vmax|dvh|ch)\b/.test(raw)) bad.push(`style.css:${i + 1}: ${m[1]}:${m[2].trim()} is not a token`);
@@ -26,6 +30,7 @@ css.split('\n').forEach((line, i) => {
 const SPACING = /(?:^|[;{\s])((?:margin|padding|gap|row-gap|column-gap|top|left|right|bottom|inset|scroll-margin|scroll-padding)[a-z-]*)\s*:([^;}]*)/g;
 for (const file of ['style.css', 'design/bundle.css']) {
   readFileSync(new URL(file, UI), 'utf8').replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).split('\n').forEach((line, i) => {
+    if (file === 'style.css' && CS_LIST.test(line)) return;
     for (const m of line.matchAll(SPACING)) {
       for (const n of m[2].matchAll(/(?<![\w.-])(-?\d+(?:\.\d+)?)px|--space-(\d+)/g)) {
         const v = Number(n[1] ?? n[2]);

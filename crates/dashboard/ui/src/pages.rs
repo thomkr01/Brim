@@ -1314,8 +1314,19 @@ pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
             },
         );
     };
+    // The button hides while every log type already has a channel: the setup would make nothing.
+    let todo = RwSignal::new(false);
+    let g3 = guild.clone();
+    Effect::new(move |_| {
+        fresh.track();
+        let g = g3.clone();
+        spawn_local(async move {
+            let t = api("GET", &format!("/api/guilds/{g}/logging/setup"), None).await;
+            todo.try_set(t.is_ok_and(|t| t["todo"] == true));
+        });
+    });
     view! {
-        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Create a channel per log type")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><Show when=move || todo.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Create a channel per log type")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         <PageTabs tabs=vec![Tab::link("brim", "brim", format!("#/{guild}/logging/brim/{sub}")), Tab::link("discord", "discord", format!("#/{guild}/logging/discord/{sub}"))] active=tab.to_string() />
         <PageTabs tabs=vec![Tab::link("essential", "essential", format!("#/{guild}/logging/{tab}/essential")), Tab::link("customize", "customize", format!("#/{guild}/logging/{tab}/customize"))] active=sub.to_string() />
         {move || { fresh.track(); let (g, part) = (guild.clone(), part.clone()); view! {
@@ -1390,8 +1401,23 @@ pub fn Catch(guild: String) -> impl IntoView {
             },
         );
     };
+    // The setup button hides once the catch channel is set and still exists in Discord.
+    let set_up = RwSignal::new(true);
+    let g3 = guild.clone();
+    Effect::new(move |_| {
+        fresh.track();
+        let g = g3.clone();
+        spawn_local(async move {
+            let (c, d) = (api("GET", &format!("/api/guilds/{g}/config"), None).await, api("GET", &format!("/api/guilds/{g}/discord"), None).await);
+            let done = match (c, d) {
+                (Ok(c), Ok(d)) => c["config"]["catch"]["channel"].as_str().is_some_and(|id| crate::form::items(&d, "channels").iter().any(|(i, _)| i == id)),
+                _ => false,
+            };
+            set_up.try_set(done);
+        });
+    });
     view! {
-        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Set up channel")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up channel")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="catch".to_string() dirty /> } }}
     }
 }

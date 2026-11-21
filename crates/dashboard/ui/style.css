@@ -86,8 +86,8 @@ textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; fo
 .card { background:var(--b2); border-radius:var(--radius-card); padding:var(--space-20); margin-bottom:var(--space-24); transition:box-shadow var(--dur) var(--ease); }
 .cards .card { margin:0; scroll-margin-top:96px; } .card.off { box-shadow:0 0 0 2px var(--bad), 0 0 0 6px var(--b1); }
 /* Wide windows (owner decision 2026-11-21): the screen scale stops at 1.25, so text and controls stay normal size and the page uses the width instead. A page made of Cards (and the server list) gets 3 columns from 2300 px and 4 from 3200 px; the two .col boxes dissolve and the cards flow down the columns in list order. Every other page (lists, editors, wizard, forms) keeps its normal width and stays centred. `main` in the card selector outranks page rules such as `.home .card { margin:0 }`, which took the gap away (cards touched). */
-@media (min-width:2300px) { main:has(.cards, .gcards) { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } main .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
-@media (min-width:3200px) { main:has(.cards, .gcards) { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
+@media (min-width:2300px) { main:has(.cards, .gcards, .cs) { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } main .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
+@media (min-width:3200px) { main:has(.cards, .gcards, .cs) { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .sp { flex:1; }
 .row label { flex:0 0 100%; font-weight:700; }
 /* A label and its field side by side outside a .row (Secure my account): the gap keeps the text off the field. */
@@ -317,20 +317,20 @@ nav a:not(.srv) .i, nav summary .i { width:20px; height:20px; margin-right:12px;
 nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { stroke:currentColor; }
 /* Channel Setup: tree on the left, the selected item on the right; stacked on a phone. */
 .cs-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-24); align-items:start; } .cs-grid > .card { margin:0; min-width:0; }
-@media (max-width:900px) { .cs-grid { grid-template-columns:minmax(0,1fr); } .cs .tr .mini { max-width:7em; } .cs .tr.child { padding-left:var(--space-20); } .cs .tr:not(.sel):not(.del) .acts, .cs .tr:not(.sel) .h { display:none; } }
+@media (max-width:900px) { .cs-grid { grid-template-columns:minmax(0,1fr); } .cs .tr .mini { max-width:7em; } .cs .tr.child { padding-left:var(--space-16); } .cs .tr:not(.sel):not(.del) .acts, .cs .tr:not(.sel) .h { display:none; } }
 .cs .ttl { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; } .cs .ttl h2 { margin:0; overflow-wrap:anywhere; } .cs .ttl h2 .i { margin-right:8px; } .cs .ttl input { flex:1; min-width:0; }
 .cs .end { justify-content:flex-end; align-items:center; } .cs button.link { gap:4px; }
-.cs .tr { display:flex; align-items:center; gap:8px; min-height:32px; padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); cursor:pointer; transition:background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.cs .tr { display:flex; align-items:center; gap:6px; min-height:26px; padding:1px 6px; line-height:1.3; border-radius:var(--radius-row); cursor:pointer; transition:background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .cs .tr:hover { background:color-mix(in srgb, var(--b3) 60%, transparent); }
 .cs .tr.sel, .cs .tr.sel:hover { background:color-mix(in srgb, var(--primary) 18%, transparent); box-shadow:var(--ol-pick); }
 .cs .tr.over, .cs .tr.over:hover { box-shadow:inset 0 2px 0 var(--primary); }
 /* A finger holds the selected row to lift it (HoldDrag): no text selection or iOS callout during the hold. */
 @media (pointer:coarse) { .cs .tr.sel { -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; } }
 .cs .tr.moving, .cs .tr.moving:hover, .cs .tr.sel.moving { box-shadow:var(--ol-pick), var(--lift); transform:translateY(-2px); }
-.cs .slot { height:4px; border-radius:var(--radius-row); transition:height var(--dur) var(--ease); } .cs .slot.on { height:14px; } .cs .slot.on:hover, .cs .slot.on.over { box-shadow:inset 0 2px 0 var(--primary); }
-.cs .tr.child { padding-left:var(--space-32); } .cs .tr.cat { margin-top:12px; font-size:var(--fs-caption); font-weight:600; text-transform:uppercase; color:var(--muted); }
-.cs .tr > .i, .cs .tr .tip .i, .cs .acts .i { width:18px; height:18px; flex:none; } .cs .tr .tip { margin-left:0; width:18px; height:18px; }
-.cs .nm { min-width:0; overflow-wrap:anywhere; text-align:left; } .cs .tr input.nm { flex:1; padding:var(--space-4) var(--space-8); }
+.cs .slot { height:2px; border-radius:var(--radius-row); transition:height var(--dur) var(--ease); } .cs .slot:not(.on) { border:0; background:none; } .cs .slot.on { height:14px; } .cs .slot.on:hover, .cs .slot.on.over { box-shadow:inset 0 2px 0 var(--primary); }
+.cs .tr.child { padding-left:22px; } .cs .tr.cat { margin-top:6px; font-size:var(--fs-caption); font-weight:600; text-transform:uppercase; color:var(--muted); }
+.cs .tr > .i, .cs .tr .tip .i, .cs .acts .i { width:16px; height:16px; flex:none; } .cs .tr .tip { margin-left:0; width:16px; height:16px; }
+.cs .nm { min-width:0; overflow-wrap:anywhere; text-align:left; } .cs .tr input.nm { flex:1; padding:1px 6px; }
 .cs .tr.cat .nm { text-transform:inherit; font-weight:inherit; color:inherit; }
 .cs .tr.del .nm { text-decoration:line-through; color:var(--muted); }
 .cs .h { cursor:grab; display:flex; color:var(--muted); opacity:.25; }
@@ -339,6 +339,7 @@ nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { s
 .cs .mini { font-size:var(--fs-caption); font-weight:600; text-transform:none; padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); border:1px solid var(--line); background:var(--b3); color:var(--fg); white-space:nowrap; max-width:12em; overflow:hidden; text-overflow:ellipsis; flex:none; }
 .cs .mini.r { background:color-mix(in srgb, var(--rc, var(--primary)) 22%, var(--b3)); border-color:color-mix(in srgb, var(--rc, var(--primary)) 60%, transparent); }
 .cs .mini.big { display:inline-flex; gap:8px; align-items:center; font-size:var(--fs-caption); padding:var(--space-4) var(--space-12); max-width:100%; }
+.cs .tr .mini { padding:0 6px; line-height:1.5; } .cs .tr .acts { gap:6px; } .cs .tr .rowmenu { margin:0; }
 /* The gradient icons recoloured: yellow for an exception, red for a problem. */
 .cs .exc .i [fill^="url"] { fill:var(--warn); } .cs .exc .i [stroke^="url"] { stroke:var(--warn); }
 .cs .risk-i .i [fill^="url"] { fill:var(--bad); } .cs .risk-i .i [stroke^="url"] { stroke:var(--bad); }
@@ -365,7 +366,6 @@ nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { s
 .bk .tr { padding:var(--space-4) 0; } .bk .tr .i { opacity:.8; } .bk .tr.cat { font-size:var(--fs-caption); font-weight:600; text-transform:uppercase; color:var(--muted); margin-top:8px; } .bk .tr.child, .bk .perms.child { padding-left:var(--space-20); } .bk .tr.has { cursor:pointer; } .bk .tr.has:hover { color:var(--primary); }
 .bk .perms { font-size:var(--fs-caption); color:var(--muted); margin:4px 0 8px 20px; }
 .bk .set { margin:0 0 12px; } .bk .set b { display:flex; gap:8px; align-items:center; } .bk .set div { padding-left:var(--space-24); font-weight:600; } .bk .set small { color:var(--muted); font-weight:400; font-style:italic; margin-left:8px; }
-.bk .hook { background:var(--b3); border:1px solid var(--line); border-radius:var(--radius-row); padding:var(--space-4) var(--space-12); }
 .bk .role { --rc:var(--muted); display:inline-flex; align-items:center; gap:8px; padding:var(--space-4) var(--space-12); font-weight:400; text-transform:none; color:var(--fg); background:var(--b3); border:1px solid var(--line); border-radius:var(--radius-row); }
 .bk .role i { width:11px; height:11px; border-radius:50%; border:2px solid var(--rc); } .bk .role.tinted { background:color-mix(in srgb,var(--rc) 22%,var(--b3)); border-color:color-mix(in srgb,var(--rc) 60%,transparent); } .bk .role.tinted i { background:var(--rc); }
 .bk .role.on { outline:2px solid var(--primary); }

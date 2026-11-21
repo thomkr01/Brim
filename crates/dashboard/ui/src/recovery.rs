@@ -295,6 +295,16 @@ pub fn ChannelTree(channels: Vec<Value>) -> impl IntoView {
     view! { {top}{cats} }
 }
 
+/// What a saved webhook does. The backup keeps only its name and channel.
+fn hook_text(w: &Value) -> &'static str {
+    // Brim makes one per channel to send messages and feeds with their own name and picture.
+    if w["name"] == "Brim messages" {
+        "Brim sends messages and feeds with it."
+    } else {
+        "Made by a member or another app, not by Brim."
+    }
+}
+
 /// One backup as its own page: the channel tree, server settings, webhooks and roles.
 #[component]
 fn BackupView(
@@ -364,9 +374,7 @@ fn BackupView(
                     <h3 class="ttl">{crate::icons::icon("info")}" General Settings"</h3>
                     {settings}
                     <h3 class="ttl mt">{crate::icons::icon("webhook")}" Webhooks"</h3>
-                    <div class="chips">
-                        {hooks.iter().map(|w| view! { <span class="hook" title=format!("#{}", w["channel"].as_str().unwrap_or("?"))>{w["name"].as_str().unwrap_or("").to_string()}</span> }).collect_view()}
-                    </div>
+                    {hooks.iter().map(|w| view! { <div class="set"><b>{crate::icons::icon("webhook")}" "{w["name"].as_str().unwrap_or("").to_string()}</b><div>{w["channel"].as_str().map_or_else(|| "Channel not in the backup".to_string(), |c| format!("#{c}"))}<small>{hook_text(w)}</small></div></div> }).collect_view()}
                     <Show when={let n = hooks.is_empty(); move || n}><p class="muted">"No webhooks."</p></Show>
                 </div>
                 </div>

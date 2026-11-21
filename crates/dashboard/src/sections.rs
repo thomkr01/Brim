@@ -23,7 +23,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/guilds/{guild}/members", get(members_route))
         .route("/api/guilds/{guild}/wizard/auto-setup", post(auto_setup))
         .route("/api/guilds/{guild}/wizard/done", post(wizard_done))
-        .route("/api/guilds/{guild}/logging/setup", post(log_setup))
+        .route(
+            "/api/guilds/{guild}/logging/setup",
+            get(log_setup_todo).post(log_setup),
+        )
         .route(
             "/api/guilds/{guild}/wizard/verify-channel",
             post(verify_channel),
@@ -1866,12 +1869,11 @@ pub(crate) async fn category(
 /// Discord events); Auto Setup makes just the [`ESSENTIAL`] ones. An unused text channel with the
 /// same name is taken over instead of made. Returns the names of the channels it set; nothing
 /// when all have one.
-pub(crate) async fn log_channels(
-    st: &AppState,
-    guild: i64,
-    config: &mut Value,
+/// The log channels `wanted` that have no channel set, and the Discord events with none.
+fn log_gaps(
+    config: &Value,
     wanted: impl Fn(&str) -> bool,
-) -> Result<Vec<&'static str>, ApiError> {
+) -> (Vec<(&'static [&'static str], &'static str)>, Vec<String>) {
     let missing: Vec<_> = LOG_CHANNELS
         .into_iter()
         .filter(|(p, name)| at(config, p).is_null() && wanted(name))
@@ -1887,6 +1889,26 @@ pub(crate) async fn log_channels(
     } else {
         vec![]
     };
+    (missing, unset)
+}
+
+/// Whether "Create a channel per log type" would make anything, so the page can hide the button.
+async fn log_setup_todo(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    let (_, config) = store::current(&st.db, guild).await?;
+    let (missing, unset) = log_gaps(&config, |_| true);
+    Ok(Json(
+        json!({"todo": !missing.is_empty() || !unset.is_empty()}),
+    ))
+}
+
+pub(crate) async fn log_channels(
+    st: &AppState,
+    guild: i64,
+    config: &mut Value,
+    wanted: impl Fn(&str) -> bool,
+) -> Result<Vec<&'static str>, ApiError> {
+    let (missing, unset) = log_gaps(config, wanted);
     if unset.is_empty() && missing.is_empty() {
         return Ok(vec![]);
     }
@@ -1968,6 +1990,23 @@ pub(crate) async fn log_channels(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn log_gaps_empty_only_when_every_channel_is_set() {
+        use serde_json::json;
+        let mut c = json!({});
+        assert!(!super::log_gaps(&c, |n| n != "discord-logs").0.is_empty());
+        for (p, _) in super::LOG_CHANNELS {
+            let mut v = &mut c;
+            for k in p {
+                v = &mut v[*k];
+            }
+            *v = json!("1");
+        }
+        let (missing, unset) = super::log_gaps(&c, |n| n != "discord-logs");
+        assert!(missing.is_empty() && unset.is_empty());
+        assert!(!super::log_gaps(&c, |_| true).1.is_empty());
+    }
+
     #[test]
     fn log_channels_are_made_locked() {
         let ows = super::locked(

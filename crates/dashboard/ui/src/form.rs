@@ -1275,8 +1275,11 @@ pub fn Section(
                         {c.alert.map(|t| view! { <div class="alert" role="alert"><b>"!"</b><p>{t}</p></div> })}
                         {c.notes.iter().map(|t| view! { <p class="note">{*t}</p> }).collect_view()}
                         <div class="split"><div>{fs}
-                            {c.action.map(|(label, path)| view! { <div class="act"><button class="go" disabled=dirty on:click=move |_| act(path)>{label}</button>
-                                <Show when=dirty><span class="chip orange">"Save your changes first"</span></Show></div> })}</div>
+                            {c.action.map(|(label, path)| {
+                                // A channel the action would make that already exists needs no button.
+                                let made = move || c.done.is_some_and(|p| get_path(&val.get(), p).as_str().is_some_and(|id| items(&dc.get(), "channels").iter().any(|(i, _)| i == id)));
+                                view! { <div class="act" class:hide=made><button class="go" disabled=dirty on:click=move |_| act(path)>{label}</button>
+                                <Show when=dirty><span class="chip orange">"Save your changes first"</span></Show></div> } })}</div>
                             <div class="preview loop" node_ref=pv>{move || (cs[at.get_untracked()].preview)(&val.get(), &dc.get())}</div></div>
                     </div> } }}
                 <p class="muted">{move || format!("{} / {}", at.get() + 1, cs.len())}</p>

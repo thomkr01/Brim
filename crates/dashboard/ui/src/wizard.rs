@@ -13,6 +13,8 @@ pub struct Card {
     pub preview: fn(&Value, &Value) -> AnyView,
     /// A button that POSTs `/api/guilds/{id}/<path>` with the config version: (label, path).
     pub action: Option<(&'static str, &'static str)>,
+    /// Config path of the channel the action makes: the button hides while that channel exists.
+    pub done: Option<&'static str>,
     /// The fields after the first sit in a "While you are at it" box that rings red while the first (the switch) is off.
     pub boxed: bool,
     /// (field, switch): the field slides open only while that switch is on.
@@ -36,6 +38,7 @@ const fn card(
         fields,
         preview,
         action: None,
+        done: None,
         boxed: false,
         when: &[],
         alert: None,
@@ -295,6 +298,7 @@ pub const JOINRAID: &[Card] = &[Card {
 pub const VERIFICATION: &[Card] = &[Card {
     notes: &["Turn it on and save: Brim makes the #verify-here channel with its panel."],
     action: Some(("Set up channel", "wizard/verify-channel")),
+    done: Some("verification.channel"),
     ..card(
         "Verification status",
         "Do you want to filter in only genuine members? Use the verification and fend off bots!",
