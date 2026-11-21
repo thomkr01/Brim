@@ -98,6 +98,8 @@ services:
       DASHBOARD_URL: ${DASHBOARD_URL:?set DASHBOARD_URL in .env}
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?set DISCORD_CLIENT_SECRET in .env}
+      # Optional: raises GitHub's limit for followed repositories from 60 to 5000 requests an hour.
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       SUPPORT_URL: ${SUPPORT_URL:-}

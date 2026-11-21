@@ -237,7 +237,7 @@ async fn take(st: &AppState, id: i64, h: &HeaderMap, body: &[u8]) -> Result<Stat
 }
 
 /// Queues one event; a delivery id seen before (a retry, a replay) is ignored.
-async fn queue(
+pub(crate) async fn queue(
     st: &AppState,
     id: i64,
     delivery: &str,

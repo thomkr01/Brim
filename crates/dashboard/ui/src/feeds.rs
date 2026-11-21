@@ -55,9 +55,20 @@ fn blank() -> Value {
            "events": ["push", "pull_request", "issues", "release"]})
 }
 
-/// GitHub and GitLab feeds: events come in, nothing is fetched.
-fn hooked(f: &Value) -> bool {
+/// GitHub and GitLab feeds: one message per event type, and event switches.
+fn repo(f: &Value) -> bool {
     f["kind"] == "github" || f["kind"] == "gitlab"
+}
+
+/// A GitHub or GitLab feed through a webhook: events come in, nothing is fetched. A followed
+/// GitHub repository (`webhook` false) is read by Brim, with no setup.
+fn hooked(f: &Value) -> bool {
+    repo(f) && f["webhook"] != false
+}
+
+/// Whether a new feed from the dialog uses a webhook: GitHub only when picked, GitLab always.
+fn webhook_of(v: &Value) -> bool {
+    v["kind"] == "github_hook" || kind_of(v) == "gitlab"
 }
 
 /// What a pasted link is: the source a new feed gets when the owner picks none. `None` while empty.
@@ -95,17 +106,18 @@ fn guess_kind(input: &str) -> Option<&'static str> {
     })
 }
 
-/// The source a dialog's feed will have: the owner's pick, else the one the link shows. A
-/// repository link is followed as a feed (the feed its page names), so it needs no admin rights;
-/// the webhook is picked under More options.
+/// The source a dialog's feed will have: the owner's pick, else the one the link shows. A GitHub
+/// link is followed by Brim, as the webhook would post it, with no admin rights; the webhook is
+/// picked under More options ("github_hook"). A GitLab link follows the feed its page names.
 fn kind_of(v: &Value) -> &'static str {
     match v["kind"].as_str() {
         Some("rss") => "rss",
         Some("youtube") => "youtube",
-        Some("github") => "github",
+        Some("github" | "github_hook") => "github",
         Some("gitlab") => "gitlab",
         _ => match guess_kind(v["target"].as_str().unwrap_or("")) {
             Some("youtube") => "youtube",
+            Some("github") => "github",
             _ => "rss",
         },
     }
@@ -341,7 +353,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             let Ok(list) = r else {
                 return msg.err(r.err().unwrap_or_default());
             };
-            let (key, own) = if hooked(&f) {
+            let (key, own) = if repo(&f) {
                 let e = open_event.get_untracked();
                 (
                     json!(format!("feed.github.{e}")),
@@ -468,7 +480,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                     <details class="rowmenu"><summary aria-label=format!("actions for {}", name_of(&f4))>{icon("more")}</summary><div>
                         {(state != "paused" && !hook).then(|| menu_btn("Check now", Box::new(move || act(format!("{i2}/ask"), json!({"what": "check"}), format!("{i2}:ask"), "Asked. Brim checks the feed within 30 seconds."))))}
                         {(hook && state == "broken").then(|| { let i = id.clone(); menu_btn("Turn on again", Box::new(move || act(format!("{i}/ask"), json!({"what": "check"}), format!("{i}:ask"), "Feed on again. New events post from now."))) })}
-                        {(!hook).then(|| menu_btn("Test post", { let i = id.clone(); Box::new(move || act(format!("{i}/ask"), json!({"what": "test"}), format!("{i}:ask"), "Asked. Brim posts the newest item within 30 seconds.")) }))}
+                        {(!repo(&f)).then(|| menu_btn("Test post", { let i = id.clone(); Box::new(move || act(format!("{i}/ask"), json!({"what": "test"}), format!("{i}:ask"), "Asked. Brim posts the newest item within 30 seconds.")) }))}
                         {hook.then(|| menu_btn("Show setup", Box::new(move || setup.set(Some(f5.clone())))))}
                         {hook.then(|| menu_btn("Make new secret", Box::new(move || new_secret(f6.clone()))))}
                         {menu_btn("Edit message", Box::new(move || edit_message(f1.clone())))}
@@ -520,10 +532,12 @@ pub fn Feeds(guild: String) -> impl IntoView {
             let close = move || dialog.set(None);
             let text = move |k: &'static str| move |e: leptos::ev::Event| d.update(|v| v[k] = json!(event_target_value(&e)));
             let kind = move || d.with(kind_of);
+            // Event switches: GitHub and GitLab, followed or through a webhook.
             let hook = move || matches!(kind(), "github" | "gitlab");
+            let webhook = move || d.with(webhook_of);
             // What is missing, said on the disabled button's tooltip: the form itself stays calm.
             let why = move || d.with(|v| {
-                if new && !hook() && s(&v["target"]).trim().is_empty() {
+                if new && !webhook() && s(&v["target"]).trim().is_empty() {
                     Some("Paste a link first.")
                 } else if s(&v["channel"]).is_empty() {
                     Some("Pick a channel.")
@@ -533,19 +547,21 @@ pub fn Feeds(guild: String) -> impl IntoView {
             });
             // One plain line under the link: what Brim took it for.
             let seen = move || d.with(|v| match (kind(), s(&v["target"]).trim().is_empty() && v["kind"] == "auto") {
-                ("rss", _) if v["kind"] == "auto" && guess_kind(&s(&v["target"])) == Some("github") => "A GitHub repository. Brim posts new commits on its main branch. You manage it and want issues, pull requests and releases too? Pick GitHub webhook under More options.",
                 ("rss", _) if v["kind"] == "auto" && guess_kind(&s(&v["target"])) == Some("gitlab") => "A GitLab project. Brim posts its new activity. You manage it and want each event? Pick GitLab webhook under More options.",
                 (_, true) => "A website, a YouTube channel, or a GitHub or GitLab repository: open it in your browser and copy the address bar.",
                 ("youtube", _) => "A YouTube channel. New videos are posted.",
-                ("github", _) => "A GitHub repository. Brim gives you an address to paste into its webhook settings.",
+                ("github", _) if v["kind"] == "github_hook" => "A GitHub repository. Brim gives you an address to paste into its webhook settings.",
+                ("github", _) => "A GitHub repository. Brim posts its events as GitHub's own webhook does, with no setup. They can come some minutes late, and check results come only through a webhook.",
                 ("gitlab", _) => "A GitLab project. Brim gives you an address to paste into its webhook settings.",
                 _ => "A website. Brim finds its feed (RSS or Atom) and posts new posts. You manage a self-hosted GitLab? Pick GitLab webhook under More options.",
             });
             let save = move |_| {
                 let mut v = d.get_untracked();
                 let link = s(&v["target"]);
+                let hook = webhook_of(&v);
                 v["kind"] = json!(kind_of(&v));
-                if matches!(kind_of(&v), "github" | "gitlab") {
+                v["webhook"] = json!(hook);
+                if hook {
                     v["target"] = json!("");
                 }
                 save_dialog(v, link)
@@ -576,7 +592,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                         {new.then(|| view! {
                             <div class="row"><label for="feed-source">"Source"</label>
                                 <select id="feed-source" on:change=text("kind")>
-                                    {[("auto", "Detect from the link"), ("rss", "RSS or Atom"), ("youtube", "YouTube"), ("github", "GitHub webhook (you manage the repository)"), ("gitlab", "GitLab webhook (you manage the project, also self-hosted)")].map(|(k, l)| view! { <option value=k prop:selected=move || d.with(|v| v["kind"] == k)>{l}</option> }).collect_view()}
+                                    {[("auto", "Detect from the link"), ("rss", "RSS or Atom"), ("youtube", "YouTube"), ("github", "GitHub (no setup)"), ("github_hook", "GitHub webhook (you manage the repository)"), ("gitlab", "GitLab webhook (you manage the project, also self-hosted)")].map(|(k, l)| view! { <option value=k prop:selected=move || d.with(|v| v["kind"] == k)>{l}</option> }).collect_view()}
                                 </select></div>
                         })}
                         <div class="row"><label for="feed-name">"Name"</label>
@@ -618,7 +634,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
         let r3 = row.clone();
         let r4 = r3.clone();
         let gone = move || cur.with(|c| !crate::botmsgs::missing(&r4, &c["body"]).is_empty());
-        let own = if hooked(&f) {
+        let own = if repo(&f) {
             f["message"][open_event.get_untracked().as_str()].is_object()
         } else {
             f["message"].is_object()
@@ -631,7 +647,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 <button class="ghost" on:click=move |_| { if dirty.get_untracked() { ask(Ask::new("Leave without saving?").text("The changes since the last save are lost.").yes("Leave").danger(), move |_| close_editor()) } else { close_editor() } }>"Close"</button>
                 {(can && own).then(|| view! { <button class="danger" disabled=move || busy.get() on:click=move |_| { let d = r3_default(&row); cur.set(json!({"body": d})); save_message(i1.clone(), Value::Null, "This feed uses the server's version again.") }>"Use the server's version"</button> })}
             </div>
-            {hooked(&f).then(|| { let f7 = f.clone(); view! {
+            {repo(&f).then(|| { let f7 = f.clone(); view! {
                 <div class="row"><label for="feed-event">"Event"</label>
                     <select id="feed-event" disabled=move || dirty.get() || busy.get() on:change=move |e| { open_event.set(event_target_value(&e)); edit_message(f7.clone()) }>
                         {EVENTS.iter().map(|&(k, l)| view! { <option value=k prop:selected=move || open_event.get() == k>{l}</option> }).collect_view()}
@@ -794,8 +810,11 @@ mod tests {
         );
         // A repository link is followed without a webhook unless the webhook is picked.
         let repo = "https://github.com/a/b";
-        assert_eq!(kind_of(&json!({"kind": "auto", "target": repo})), "rss");
-        assert_eq!(kind_of(&json!({"kind": "github", "target": repo})), "github");
+        assert_eq!(kind_of(&json!({"kind": "auto", "target": repo})), "github");
+        assert!(!webhook_of(&json!({"kind": "auto", "target": repo})));
+        assert!(webhook_of(&json!({"kind": "github_hook", "target": repo})));
+        assert!(!webhook_of(&json!({"kind": "auto", "target": "https://gitlab.com/a/b"})));
+        assert_eq!(kind_of(&json!({"kind": "auto", "target": "https://gitlab.com/a/b"})), "rss");
     }
 
     #[test]

@@ -1604,3 +1604,6 @@ A native AutoMod test never approved its rule, so every hit stopped before the w
 
 **A feed address had to be the feed file itself.** (feed setup, 2026-11-21)
 Staff paste a site's normal address, and the add failed with "this is not an RSS or Atom feed". *Avoid:* `feed::find` reads the page and takes the feed its `<link rel="alternate">` names. The found address goes through `check_url` and the same guarded client as a typed one (public names only, https on 443, redirect, time and size limits), one hop only.
+
+**GitHub's public list of events leaves out most of each event.** (followed repositories, 2026-11-21)
+A push in `/repos/<repo>/events` has no commits, and a pull request has no title, link or author. *Avoid:* `feedfollow::body` reads each part again from its own `url` (only `https://api.github.com/`), and a push from the compare API, so `feedhooks::github_post` gets the body the webhook sends. The list says `merged` and `created` where the webhook says `closed` and `submitted`. The hourly limit (60 without `GITHUB_TOKEN`) does not count toward stopping a feed, and an unchanged list (304) costs nothing.

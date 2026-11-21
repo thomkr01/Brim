@@ -65,6 +65,7 @@ struct FeedRow {
     asked: Option<String>,
     events: Vec<String>,
     primed: bool,
+    webhook: bool,
 }
 
 /// GitHub and GitLab feeds: events come in, nothing is fetched.
@@ -76,7 +77,8 @@ async fn rows(st: &AppState, guild: i64, id: Option<i64>) -> Result<Vec<Value>, 
     let r: Vec<FeedRow> = sqlx::query_as(
         "select id, kind, target, channel_id, ping_role, name, picture, source_name, source_picture,
                 send_as_bot, message, state, extract(epoch from last_check)::float8 as last_check,
-                extract(epoch from last_post)::float8 as last_post, last_error, asked, events, primed
+                extract(epoch from last_post)::float8 as last_post, last_error, asked, events, primed,
+                secret is not null as webhook
          from feeds where guild_id = $1 and ($2::bigint is null or id = $2) order by id",
     )
     .bind(guild)
@@ -87,7 +89,7 @@ async fn rows(st: &AppState, guild: i64, id: Option<i64>) -> Result<Vec<Value>, 
     Ok(r.into_iter()
         .map(|r| {
             // The secret is never listed: it is shown once, when it is made.
-            let hook = hooked(&r.kind).then(|| format!("{base}/hooks/feed/{}", r.id));
+            let hook = (hooked(&r.kind) && r.webhook).then(|| format!("{base}/hooks/feed/{}", r.id));
             let entry = (!hooked(&r.kind)).then(|| format!("feed.{}", r.kind));
             json!({
                 "id": r.id, "kind": r.kind, "target": r.target, "channel": r.channel_id.to_string(),
@@ -96,7 +98,7 @@ async fn rows(st: &AppState, guild: i64, id: Option<i64>) -> Result<Vec<Value>, 
                 "send_as_bot": r.send_as_bot, "message": r.message, "state": r.state,
                 "last_check": r.last_check.map(|t| t as i64), "last_post": r.last_post.map(|t| t as i64),
                 "last_error": r.last_error, "asked": r.asked, "entry": entry,
-                "events": r.events, "connected": r.primed, "hook_url": hook,
+                "events": r.events, "connected": r.primed, "hook_url": hook, "webhook": r.webhook,
             })
         })
         .collect())
@@ -275,6 +277,10 @@ struct Add {
     /// GitHub and GitLab: the event types that post; none given = the defaults.
     #[serde(default)]
     events: Option<Vec<String>>,
+    /// GitHub: through a webhook (the repository's admin sets it up). False: Brim follows the
+    /// public repository itself (`feedfollow`).
+    #[serde(default)]
+    webhook: bool,
 }
 
 /// The event types a GitHub or GitLab feed posts, checked.
@@ -310,8 +316,23 @@ async fn add(
     check_channel(&st, guild, channel).await?;
     check_role(&st, guild, role).await?;
     let events = check_events(&b.events)?;
-    // GitHub and GitLab: nothing to read; the repository's name comes with its first event.
+    // A webhook: nothing to read; the repository's name comes with its first event. A followed
+    // GitHub repository is read once here, so a wrong name is said now.
     let (target, source_name, source_picture, secret) = match b.kind.as_str() {
+        "github" if !b.webhook => {
+            let repo = crate::feedfollow::repo_of(&b.target).ok_or_else(|| {
+                bad("paste the link of a GitHub repository, like https://github.com/owner/name")
+            })?;
+            let (repo, picture) = crate::feedfollow::check_repo(&repo)
+                .await
+                .map_err(ApiError::BadRequest)?;
+            (
+                repo.clone(),
+                repo,
+                Some(picture).filter(|p| p.starts_with("https://")),
+                None,
+            )
+        }
         "github" => (
             String::new(),
             "GitHub".into(),
@@ -344,7 +365,7 @@ async fn add(
     .bind(&target)
     .fetch_one(&mut *tx)
     .await?;
-    if twice && !hooked(&b.kind) {
+    if twice && secret.is_none() {
         return Err(bad("that channel already follows this feed"));
     }
     let (all, here): (i64, i64) = sqlx::query_as(
@@ -533,8 +554,8 @@ async fn ask(
 ) -> Res {
     api::require(&st, &s, guild, Level::Admin, false).await?;
     let what = label(&st, guild, id).await?;
-    let (paused, kind): (bool, String) =
-        sqlx::query_as("select state = 'paused', kind from feeds where id = $1 and guild_id = $2")
+    let (paused, kind, webhook): (bool, String, bool) =
+        sqlx::query_as("select state = 'paused', kind, secret is not null from feeds where id = $1 and guild_id = $2")
             .bind(id)
             .bind(guild)
             .fetch_one(&st.db)
@@ -542,11 +563,12 @@ async fn ask(
     if paused && b.what == "check" {
         return Err(bad("the feed is paused: turn it on to check it"));
     }
-    // GitHub and GitLab send their events: nothing to check or fetch. Check now only takes a
-    // stopped feed back; a test is a real event (Redeliver repeats one Brim already has).
-    let sql = match (b.what.as_str(), hooked(&kind)) {
+    // A webhook sends its events: nothing to check or fetch. Check now only takes a stopped feed
+    // back. A followed repository is checked like an RSS feed. A test is a real event for both
+    // (Redeliver repeats one Brim already has).
+    let sql = match (b.what.as_str(), hooked(&kind) && webhook) {
+        ("test", _) if hooked(&kind) => return Err(bad("GitHub and GitLab post events as they happen: open an issue or push a commit to test the feed")),
         ("check", true) => "update feeds set fails = 0, last_error = null, state = case when state = 'broken' then 'on' else state end where id = $1 and guild_id = $2",
-        ("test", true) => return Err(bad("GitHub and GitLab send events as they happen: open an issue or push a commit to test the feed (GitHub's Redeliver repeats one Brim already has, so it posts nothing)")),
         _ => match b.what.as_str() {
         "check" => "update feeds set asked = 'check', fails = 0, state = case when state = 'broken' then 'on' else state end where id = $1 and guild_id = $2",
         "test" => "update feeds set asked = 'test' where id = $1 and guild_id = $2",
@@ -653,7 +675,7 @@ async fn secret(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i6
     let what = label(&st, guild, id).await?;
     let new = crate::feedhooks::new_secret();
     let done = sqlx::query(
-        "update feeds set secret = $3 where id = $1 and guild_id = $2 and kind in ('github', 'gitlab')",
+        "update feeds set secret = $3 where id = $1 and guild_id = $2 and kind in ('github', 'gitlab') and secret is not null",
     )
     .bind(id)
     .bind(guild)

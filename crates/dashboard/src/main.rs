@@ -9,6 +9,7 @@ mod datareq;
 mod diff;
 mod discord;
 mod embeds;
+mod feedfollow;
 mod feedhooks;
 mod feeds;
 mod layout;
@@ -331,6 +332,7 @@ async fn main() -> anyhow::Result<()> {
         }
     });
     tokio::spawn(msgrules::runner(st.clone()));
+    tokio::spawn(feedfollow::run(st.clone()));
     if let Err(e) = st.discord.load_emojis().await {
         tracing::warn!(?e, "custom emojis not loaded, using Unicode fallbacks");
     }
