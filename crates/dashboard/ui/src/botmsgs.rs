@@ -1,6 +1,6 @@
 //! Bot messages: Brim's built-in messages, each editable on the Message Builder editor. A row
 //! says Default or Edited; Revert puts the default back after a confirmation, and Undo brings the
-//! edited copy back for 24 hours. Security texts only Owner and Extra Owners change, with a 2FA
+//! edited copy back for 24 hours. Security texts a Trusted Admin changes, with a 2FA
 //! code; locked texts
 //! can be looked at, not changed.
 use crate::common::*;
@@ -116,6 +116,19 @@ const AREAS: &[&str] = &[
     "Security",
 ];
 
+/// The icon and the one-line text of a main area's row.
+fn area_info(area: &str) -> (&'static str, &'static str) {
+    match area {
+        "Commands" => ("code", "Answers to commands, settings panels, buttons and error replies."),
+        "Logging" => ("logs", "The log messages Brim posts in your log channels."),
+        "Moderation" => ("moderator", "DMs to members, cases, reports and lockdown notices."),
+        "Tickets" => ("ticket", "Ticket panels, ticket messages and ticket commands."),
+        "Members and server" => ("member_join", "Verification, welcome, feeds and messages to the bot owner."),
+        "Security" => ("lock", "Security texts. Trusted Admins and above can change them, with a 2FA code."),
+        _ => ("message", ""),
+    }
+}
+
 /// Rows grouped by main area, then sub-group, each in page order.
 type Areas = Vec<(String, Vec<(String, Vec<Value>)>)>;
 
@@ -159,8 +172,8 @@ pub fn BotMessages(
     let access = expect_context::<Access>();
     let admin = move || access.rank() >= 3;
     let owner = move || access.rank() >= 4;
-    // Who may change entry `r`: a security text Owner and Extra Owners, any other a Trusted Admin.
-    let may = move |r: &Value| if r["security"] == true { owner() } else { admin() };
+    // Who may change entry `r`: a Trusted Admin (a security text also needs the 2FA code).
+    let may = move |_: &Value| admin();
     // The open message's row, and the editor on its body.
     let open = RwSignal::new(None::<Value>);
     let cur = RwSignal::new(json!({"body": {}}));
@@ -445,7 +458,7 @@ pub fn BotMessages(
         })
     };
     let badge = |r: &Value| {
-        let security = (r["security"] == true).then(|| view! { <span class="chip">{crate::icons::icon("lock")}"Security"</span><Tip text="Only the Owner and Extra Owners can change it, with a 2FA code, and every change is in the dashboard log with the old and new version. Its key variables (who, what, the counts) must stay in it, as plain text." icon="info" /> });
+        let security = (r["security"] == true).then(|| view! { <span class="chip">{crate::icons::icon("lock")}"Security"</span><Tip text="Trusted Admins and above can change it, with a 2FA code, and every change is in the dashboard log with the old and new version. Its key variables (who, what, the counts) must stay in it, as plain text." icon="info" /> });
         let state = if r["locked"] == true {
             view! { <span class="chip">{crate::icons::icon("lock")}"Locked"</span><Tip text="You can look at it, but nobody can change it, so it can never be hidden or blanked." icon="info" /> }.into_any()
         } else if r["message"].is_object() && !missing(r, &r["message"]).is_empty() {
@@ -537,23 +550,28 @@ pub fn BotMessages(
                             </div>
                         }
                 };
-                let head = move |id: String, label: String, n: usize, security: bool| {
+                // A card row that opens and closes its part, like the hub rows on the Messages page.
+                let head = move |id: String, label: String, n: usize, line: Option<&'static str>, ico: Option<&'static str>| {
                     let id = StoredValue::new(id);
-                    view! { <button class="link" aria-expanded=move || id.with_value(|i| is_open(i)).to_string() on:click=move |_| id.with_value(|i| flip(i))>
-                        {move || if id.with_value(|i| is_open(i)) { "▾" } else { "▸" }}" "{label}" "{format!("({n})")}
-                        {security.then(|| crate::icons::icon("lock"))}
+                    let open_now = move || id.with_value(|i| is_open(i));
+                    view! { <button class="card hub" class:sub=ico.is_none() class:on=open_now aria-expanded=move || open_now().to_string() on:click=move |_| id.with_value(|i| flip(i))>
+                        {ico.map(|i| view! { <span class="ico">{crate::icons::icon(i)}</span> })}
+                        <span class="txt"><b>{label}</b>{line.map(|l| view! { <span class="muted">{l}</span> })}</span>
+                        <span class="chip">{n.to_string()}</span>
+                        <span class="chev">{crate::icons::icon("chevron_right")}</span>
                     </button> }
                 };
                 shown.into_iter().map(|(area, subs)| {
                     let n: usize = subs.iter().map(|s| s.1.len()).sum();
-                    let security = area == "Security";
-                    let a1 = area.clone();
+                    let (ico, line) = area_info(&area);
+                    let a2 = area.clone();
                     let one = subs.len() == 1;
                     let subs = StoredValue::new(subs);
                     view! {
-                        <h3>{head(area.clone(), area.clone(), n, security)}</h3>
-                        {security.then(|| view! { <p class="muted small">"Only the Owner and Extra Owners can change these texts, with a 2FA code."</p> })}
-                        <Show when=move || is_open(&a1)>
+                        <div class="hubarea">
+                        {head(area.clone(), area.clone(), n, Some(line), Some(ico))}
+                        <Show when=move || is_open(&a2)>
+                        <div class="hubsubs">
                         {let area = area.clone(); subs.get_value().into_iter().map(move |(sub, items)| {
                             let id = format!("{area}/{sub}");
                             let id1 = id.clone();
@@ -563,12 +581,14 @@ pub fn BotMessages(
                                 list().into_any()
                             } else {
                                 view! {
-                                    <h4>{head(id, sub, items.with_value(Vec::len), false)}</h4>
+                                    {head(id, sub, items.with_value(Vec::len), None, None)}
                                     <Show when=move || is_open(&id1)>{list()}</Show>
                                 }.into_any()
                             }
                         }).collect_view()}
+                        </div>
                         </Show>
+                        </div>
                     }
                 }).collect_view().into_any()
             }}
@@ -628,7 +648,7 @@ pub fn BotMessages(
                 {(may(&r) && edited).then(|| view! { <button class="danger" disabled=move || busy.get() on:click=move |_| revert(r2.clone())>{busy_label(move || busy.get() && doing.get() == rkey, "Revert to default")}</button> })}
             </div>
             {locked.then(|| view! { <p class="muted">{crate::icons::icon("lock")}" It is shown here, but it cannot be changed."</p> })}
-            {(!locked && !can_edit).then(|| view! { <p class="muted">{if r["security"] == true { "Only the Owner and Extra Owners can change security texts, with a 2FA code." } else { "Only the Owner, Extra Owners and Trusted Admins can change bot messages." }}</p> })}
+            {(!locked && !can_edit).then(|| view! { <p class="muted">{if r["security"] == true { "Trusted Admins and above can change security texts, with a 2FA code." } else { "Only the Owner, Extra Owners and Trusted Admins can change bot messages." }}</p> })}
             {can_edit.then(|| view! {
                 <PageTabs tabs=vec![Tab::state("message", "Message").icon("edit"), Tab::state("preview", "Preview").icon("eye")]
                     active=Signal::derive(move || tab.get().to_string())

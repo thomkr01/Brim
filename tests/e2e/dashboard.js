@@ -513,15 +513,30 @@ fs.mkdirSync(out, { recursive: true });
   // Bot messages: the grouped list, a message opens in the editor, Revert asks first.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1bot_messages')}`);
   // Six main areas, all closed at first; an area opens to its sub-groups, a sub-group to its messages.
-  await page.locator('h3', { hasText: 'Moderation' }).waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Moderation area'));
-  if ((await page.locator('h3 button.link').count()) !== 6) failed.push('bot messages: not 6 main areas');
+  await page.locator('button.card.hub', { hasText: 'Moderation' }).first().waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Moderation area'));
+  if ((await page.locator('button.card.hub:not(.sub)').count()) !== 6) failed.push('bot messages: not 6 main areas');
   if (await page.locator('.mrow').count()) failed.push('bot messages: an area is open at first');
-  await page.click('h3 button:has-text("Security")');
-  await page.click('h4 button:has-text("Anti-nuke")');
+  // Nothing on the page starts left of the window or makes it scroll sideways (a cut-off left edge),
+  // closed and with an area and a sub-group open. Hidden tips (opacity 0) do not count.
+  const noCut = async (when) => {
+    for (const w of [390, 1400]) {
+      await page.setViewportSize({ width: w, height: 900 });
+      const cut = await page.evaluate(() => [...document.querySelectorAll('main *')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && e.checkVisibility({ opacityProperty: true, visibilityProperty: true }) && (r.left < -0.5 || r.right > innerWidth + 0.5); }).length + (document.documentElement.scrollWidth > innerWidth ? 1 : 0));
+      if (cut) failed.push(`bot messages: ${cut} parts cut off at ${w} px (${when})`);
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+  };
+  await noCut('closed');
+  // The recovery texts are never listed (nobody may change them).
+  for (const t of ['Dashboard 2FA setup code', 'Rescue key expired']) { await page.locator('input[aria-label="search messages"]').fill(t); if (await page.locator('.mrow', { hasText: t }).count()) failed.push(`bot messages: ${t} is listed`); }
+  await page.locator('input[aria-label="search messages"]').fill('');
+  await page.click('button.card.hub:not(.sub):has-text("Security")');
+  await page.click('button.card.hub.sub:has-text("Anti-nuke")');
   if (!(await page.locator('.chip', { hasText: 'Security' }).count())) failed.push('bot messages: no security text chip');
-  await page.click('h3 button:has-text("Security")');
-  await page.click('h3 button:has-text("Moderation")');
-  await page.click('h4 button:has-text("Punishment DMs")');
+  await noCut('Security open');
+  await page.click('button.card.hub:not(.sub):has-text("Security")');
+  await page.click('button.card.hub:not(.sub):has-text("Moderation")');
+  await page.click('button.card.hub.sub:has-text("Punishment DMs")');
   await page.click('.mrow .nm b:text-is("Ban")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Ban row'));
   await page.locator('.ed[aria-label="Title"]').first().waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: Ban did not open in the editor'));
   if (await page.locator('button', { hasText: 'Add button row' }).count()) failed.push('bot messages: the editor offers buttons');
@@ -533,7 +548,7 @@ fs.mkdirSync(out, { recursive: true });
   await find.fill('ban');
   if (!(await page.locator('.mrow .nm b:text-is("Ban")').count())) failed.push('bot messages: search does not find Ban');
   await find.fill('');
-  await page.click('h4 button:has-text("Punishment DMs")');
+  await page.click('button.card.hub.sub:has-text("Punishment DMs")');
   if (await page.locator('.mrow .nm b:text-is("Ban")').count()) failed.push('bot messages: a folded group still shows its messages');
   await find.fill('ban');
   if (!(await page.locator('.mrow .nm b:text-is("Ban")').count())) failed.push('bot messages: a search does not open a folded group');

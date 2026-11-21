@@ -12,7 +12,7 @@ const only = (process.env.DEEP_ONLY || 'matrix,proofs,pages,owner,extras,contras
 fs.mkdirSync(out, { recursive: true });
 const G = '100000000000000001', G2 = '100000000000000002';
 const sql = (q) => execSync(`psql "${db}" -qAtc "${q.replace(/"/g, '\\"')}"`).toString().trim();
-const RANK = { none: 0, viewer: 1, editor: 2, admin: 3, owner: 4 };
+const RANK = { none: 0, viewer: 1, editor: 2, admin: 3, owner: 4, nobody: 9 };
 // code -> [user id, level, permit perms]; mirrors mock_discord.py and levels.sql
 const USERS = {
   none: ['200000000000000007', 'none', []],
@@ -143,10 +143,12 @@ async function matrix(browser) {
     ['POST', `${g}/bot-messages/dm.punish.ban/revert`, () => ({}), 'admin', false],
     ['POST', `${g}/bot-messages/dm.punish.ban/undo`, () => ({}), 'admin', false],
     ['POST', `${g}/bot-messages/revert-all`, () => ({}), 'admin', false],
-    // security texts: only Owner and Extra Owners change them, after 2FA
-    ['POST', `${g}/bot-messages/dm.security`, () => ({ message: { content: '', embeds: [{ description: 'e2e {text}' }] } }), 'owner', true],
-    ['POST', `${g}/bot-messages/dm.security/revert`, () => ({}), 'owner', true],
-    ['POST', `${g}/bot-messages/dm.security/undo`, () => ({}), 'owner', true],
+    // security texts: Trusted Admins and above change them, after 2FA (owner decision 2026-11-21)
+    ['POST', `${g}/bot-messages/dm.security`, () => ({ message: { content: '', embeds: [{ description: 'e2e {text}' }] } }), 'admin', true],
+    ['POST', `${g}/bot-messages/dm.security/revert`, () => ({}), 'admin', true],
+    ['POST', `${g}/bot-messages/dm.security/undo`, () => ({}), 'admin', true],
+    // recovery texts: nobody changes them, the Owner with 2FA included
+    ['POST', `${g}/bot-messages/dm.dashboard_2fa`, () => ({ message: { content: '{code}', embeds: [] } }), 'nobody', true],
     // Message Kits: Trusted Admins export; only Owner and Extra Owners import (a preview saves nothing)
     ['GET', `${g}/bot-messages/kit`, () => undefined, 'admin', false],
     ['POST', `${g}/bot-messages/import`, () => ({ kit: { kit: 'brim-messages', version: 1, messages: {} }, apply: false }), 'owner', false],

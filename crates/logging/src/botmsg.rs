@@ -575,8 +575,22 @@ fn build() -> Vec<Def> {
             }
         }
     }
+    for d in out.iter_mut().filter(|d| HIDDEN.contains(&d.key.as_str())) {
+        d.locked = true;
+    }
     out
 }
+
+/// Texts that warn the real owner or let them get their access back: nobody may change them, not
+/// even the Owner, so a hijacked account cannot take facts out of them (owner decision,
+/// 2026-11-21). They are locked and left out of the Bot messages page.
+pub const HIDDEN: &[&str] = &[
+    "dm.rescue_expired",
+    "dm.dashboard_2fa",
+    "dm.owner_handover",
+    "dm.invite_back",
+    "dm.mcp_decision",
+];
 
 /// The moderation logs and answers whose edited version names their facts (plan D1): the key is
 /// the whole entry, and an edit must keep every required placeholder as plain text.
@@ -6612,6 +6626,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recovery_texts_are_locked() {
+        for k in HIDDEN {
+            let d = find(k).unwrap_or_else(|| panic!("{k} is not an entry"));
+            assert!(d.locked, "{k}");
+            // A stored copy never reaches the member.
+            let m = render(k, Some(&json!({"content": "hijacked"})), &[]);
+            assert_ne!(m["content"], "hijacked", "{k}");
+        }
+    }
+
+    #[test]
     fn every_entry_has_a_main_area() {
         for d in defs() {
             let (a, _) = area(d).unwrap_or_else(|| panic!("group {:?} has no main area", d.group));
@@ -6728,9 +6753,6 @@ mod tests {
             .collect();
         for k in [
             "dm.security",
-            "dm.mcp_decision",
-            "dm.invite_back",
-            "dm.dashboard_2fa",
             "log.anti_nuke",
             "log.panic",
             "log.join_raid",
@@ -6740,6 +6762,10 @@ mod tests {
         ] {
             assert!(sec.contains(&k), "{k}");
             assert!(!find(k).unwrap().locked, "{k}");
+        }
+        // The recovery texts stay security texts, but nobody changes them (owner decision 2026-11-21).
+        for k in ["dm.mcp_decision", "dm.invite_back", "dm.dashboard_2fa"] {
+            assert!(sec.contains(&k) && find(k).unwrap().locked, "{k}");
         }
         assert_eq!(find("log.panic").unwrap().required, ["title", "text"]);
         // No rescue key text is editable: a saved copy never applies.

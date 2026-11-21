@@ -1,8 +1,9 @@
 //! Bot messages: the server's own copies of Brim's built-in messages (`bot_messages`), edited
 //! on the Message Builder. Anyone with dashboard access may look; Owner, Extra Owners and Trusted
 //! Admins save, revert and undo (owner decision 2026-11-18). Security
-//! texts only Owner and Extra Owners with a fresh 2FA code, each change audited with the old and
-//! new version (plan "all embeds editable", section 6). Locked texts are shown, never saved. A revert keeps the
+//! texts a Trusted Admin with a fresh 2FA code, each change audited with the old and
+//! new version (plan "all embeds editable", section 6). Locked texts are never saved; the
+//! `botmsg::HIDDEN` ones are also left out of the list. A revert keeps the
 //! removed copy 24 hours for Undo.
 use crate::{
     access::Level,
@@ -87,6 +88,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     .await?;
     let rows: Vec<Value> = botmsg::defs()
         .iter()
+        .filter(|d| !botmsg::HIDDEN.contains(&d.key.as_str()))
         .map(|d| {
             let mine = saved.iter().find(|r| r.0 == d.key).filter(|_| !d.locked);
             let vars: Vec<Value> = d
@@ -121,8 +123,12 @@ fn bot_wide() -> Vec<String> {
 }
 
 /// Who may change the copy of `key` on `guild`: an outside-server entry only the bot owner, a
-/// security text Owner and Extra Owners with a fresh 2FA code, any other entry a server Admin.
+/// security text a Trusted Admin with a fresh 2FA code (owner decision 2026-11-21), any other entry
+/// a Trusted Admin. A `botmsg::HIDDEN` text nobody (`editable` refuses it).
 async fn may_edit(st: &AppState, s: &Sess, guild: i64, key: &str) -> Result<(), ApiError> {
+    if botmsg::HIDDEN.contains(&key) {
+        return Err(ApiError::Forbidden("nobody can change this message"));
+    }
     if botmsg::BOT_WIDE.contains(&key) {
         if crate::update::is_bot_owner(st, s).await {
             return Ok(());
@@ -132,12 +138,7 @@ async fn may_edit(st: &AppState, s: &Sess, guild: i64, key: &str) -> Result<(), 
         ));
     }
     // A security text also needs a fresh 2FA step-up for this server, on every route that changes it.
-    let level = if is_security(key) {
-        Level::Owner
-    } else {
-        Level::Admin
-    };
-    api::require(st, s, guild, level, is_security(key)).await?;
+    api::require(st, s, guild, Level::Admin, is_security(key)).await?;
     Ok(())
 }
 
@@ -654,12 +655,18 @@ mod tests {
         let db = brim_core::db::connect(&url).await.unwrap();
         let pid = std::process::id() as i64;
         let (g, owner) = (9_720_000_000 + pid, 7_720_000_000 + pid);
-        let mock = Router::new().route(
-            "/guilds/{g}",
-            get(move || async move {
-                Json(json!({"owner_id": owner.to_string(), "name": "T", "roles": []}))
-            }),
-        );
+        let (eo, ta, ed) = (owner + 1, owner + 2, owner + 3);
+        let mock = Router::new()
+            .route(
+                "/guilds/{g}",
+                get(move || async move {
+                    Json(json!({"owner_id": owner.to_string(), "name": "T", "roles": []}))
+                }),
+            )
+            .route(
+                "/guilds/{g}/members/{u}",
+                get(|| async { Json(json!({"roles": []})) }),
+            );
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let api = format!("http://{}", l.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(l, mock).await });
@@ -682,7 +689,15 @@ mod tests {
             vpn_logged: Default::default(),
         };
         let clean = || async {
-            for t in ["bot_messages", "bot_messages_undo", "dashboard_audit"] {
+            for t in [
+                "bot_messages",
+                "bot_messages_undo",
+                "dashboard_audit",
+                "extra_owners",
+                "trusted_admins",
+                "permit_members",
+                "permits",
+            ] {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "delete from {t} where guild_id = $1"
                 )))
@@ -693,14 +708,34 @@ mod tests {
             }
         };
         clean().await;
-        let send = |path: &str, stepped_up: bool, body: Value| {
-            let mut req = Request::post(format!("/api/guilds/{g}/bot-messages/{path}"))
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
+        for (q, user) in [
+            ("insert into extra_owners (guild_id, user_id) values ($1, $2)", eo),
+            ("insert into trusted_admins (guild_id, user_id) values ($1, $2)", ta),
+            ("insert into permits (guild_id, name, perms) values ($1, 'Ed', '{dashboard_edit}') returning $2", ed),
+            ("insert into permit_members (permit_id, guild_id, user_id) select id, $1, $2 from permits where guild_id = $1 and name = 'Ed'", ed),
+        ] {
+            sqlx::query(q)
+                .bind(g)
+                .bind(user)
+                .execute(&db)
+                .await
                 .unwrap();
+        }
+        let call = move |user: i64, get_list: bool, path: &str, stepped_up: bool, body: Value| {
+            let url = format!("/api/guilds/{g}/bot-messages/{path}");
+            let mut req = if get_list {
+                Request::get(url.trim_end_matches('/'))
+                    .body(Body::empty())
+                    .unwrap()
+            } else {
+                Request::post(url)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap()
+            };
             req.extensions_mut().insert(Sess {
                 id: String::new(),
-                user_id: owner,
+                user_id: user,
                 username: "t".into(),
                 access_token: String::new(),
                 stepped_up,
@@ -720,6 +755,8 @@ mod tests {
                 )
             }
         };
+        let send =
+            |path: &str, stepped_up: bool, body: Value| call(owner, false, path, stepped_up, body);
         let step_up = (403, Some("step_up_required"));
         let d = botmsg::find("dm.security").unwrap();
         let sec = d.template.clone();
@@ -786,6 +823,65 @@ mod tests {
         .await
         .unwrap();
         assert!(line.contains("was the default, now `"), "{line}");
+
+        // Every level may look; the list never holds a recovery text (owner decision 2026-11-21).
+        for user in [owner, eo, ta, ed] {
+            let (code, r) = call(user, true, "", false, Value::Null).await;
+            assert_eq!(code, 200, "{user}: {r}");
+            let keys: Vec<&str> = r
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|x| x["key"].as_str())
+                .collect();
+            assert!(keys.contains(&"dm.security"));
+            for k in botmsg::HIDDEN {
+                assert!(!keys.contains(k), "{k} is listed");
+            }
+        }
+        // A security text: Owner, Extra Owner and Trusted Admin save it with the step-up; an Editor
+        // (a dashboard_edit permit, below Trusted Admin) may not.
+        for (user, want) in [(owner, 200), (eo, 200), (ta, 200), (ed, 403)] {
+            let (code, r) = call(user, false, "dm.security", true, json!({"message": sec})).await;
+            assert_eq!(code, want, "{user}: {r}");
+        }
+        assert_eq!(
+            call(ta, false, "dm.security", false, json!({"message": sec}))
+                .await
+                .1["error"],
+            "step_up_required",
+            "a Trusted Admin still needs the 2FA code"
+        );
+        // A recovery text: nobody changes it, the Owner with a fresh step-up included.
+        for k in botmsg::HIDDEN {
+            let m = botmsg::find(k).unwrap().template.clone();
+            for user in [owner, eo, ta] {
+                for (path, body) in [
+                    (k.to_string(), json!({"message": m})),
+                    (format!("{k}/revert"), json!({})),
+                    (format!("{k}/undo"), json!({})),
+                ] {
+                    let (code, r) = call(user, false, &path, true, body).await;
+                    assert_eq!(code, 403, "{path} by {user}: {r}");
+                }
+            }
+            let (code, r) = send("import", true, json!({"kit": kit(k, &m), "apply": true})).await;
+            assert!(code == 200 || code == 400, "{k}: {code} {r}");
+        }
+        let n: i64 = sqlx::query_scalar(
+            "select count(*) from bot_messages where guild_id = $1 and key = any($2)",
+        )
+        .bind(g)
+        .bind(
+            botmsg::HIDDEN
+                .iter()
+                .map(|k| k.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(n, 0, "no recovery text was stored");
         clean().await;
     }
 

@@ -740,3 +740,11 @@ nav .peek { --pose:56px; flex:none; margin:auto auto calc(-1 * var(--space-16));
 .poses { display:flex; flex-wrap:wrap; gap:var(--space-16); } .poses figure { margin:0; width:176px; display:flex; flex-direction:column; align-items:center; gap:var(--space-8); text-align:center; } .poses figcaption { display:flex; flex-direction:column; font-size:var(--fs-caption); }
 /* History diff: the old and current columns get room, so "not set" stays on one line. */
 @media (min-width:601px) { table.diffs td + td, table.diffs th + th { width:30%; } }
+/* Bot messages areas: card rows like the Messages hub; a sub-group row is a smaller card inside its open area. */
+.hubarea { margin:0 0 var(--space-16); } .hubsubs { margin:var(--space-12) 0 0 var(--space-24); }
+button.card.hub { display:flex; align-items:center; gap:var(--space-16); width:100%; margin:0; text-align:left; text-transform:none; font-weight:400; color:var(--fg); background:var(--b2); border:0; border-radius:var(--radius-card); }
+button.card.hub .ico { width:40px; height:40px; flex:none; } button.card.hub .ico .i { width:100%; height:100%; }
+button.card.hub .txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:var(--space-4); overflow-wrap:anywhere; }
+button.card.hub .chev .i { width:24px; height:24px; transition:transform var(--dur) var(--ease); } button.card.hub.on .chev .i { transform:rotate(90deg); }
+button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--space-8); }
+.hubsubs .mlist { margin:0 0 var(--space-12) var(--space-16); }
