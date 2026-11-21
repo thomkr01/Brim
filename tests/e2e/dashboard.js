@@ -2,6 +2,7 @@
 // sidebar page, failing on console errors/panics or blank pages. Screenshots go to $E2E_OUT.
 const { chromium } = require('playwright');
 const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8080';
+const mock = process.env.DISCORD_API_BASE || 'http://127.0.0.1:9100';
 const out = process.env.E2E_OUT || '/tmp/e2e';
 const fs = require('fs');
 fs.mkdirSync(out, { recursive: true });
@@ -286,7 +287,7 @@ fs.mkdirSync(out, { recursive: true });
   let answered = '0';
   for (let i = 0; i < 20 && answered === '0'; i++) { await page.waitForTimeout(500); answered = psql("select count(*) from message_sends where source = 'trigger'"); }
   if (answered !== '1') failed.push(`triggers: a queued answer sent ${answered} copies, not 1`);
-  const replies = (await (await fetch('http://127.0.0.1:9100/sent')).json()).filter((m) => m.body && m.body.includes('"message_reference"'));
+  const replies = (await (await fetch(`${mock}/sent`)).json()).filter((m) => m.body && m.body.includes('"message_reference"'));
   if (!replies.length || !replies[0].body.includes('"message_id":"777"') || !replies[0].body.includes('"allowed_mentions":{"parse":[]}')) failed.push(`triggers: answer is not a reply without pings: ${replies[0] && replies[0].body}`);
   psql("update message_sends set delete_at = now() where source = 'trigger'");
   let deleted = false;
@@ -319,7 +320,7 @@ fs.mkdirSync(out, { recursive: true });
   let moved = false;
   for (let i = 0; i < 20 && !moved; i++) { await page.waitForTimeout(500); moved = psql("select count(*) from sticky_msgs where posted_id = 1") === '1'; }
   if (!moved) failed.push('sticky: a queued repost did not post a new copy');
-  const gone = (await (await fetch('http://127.0.0.1:9100/sent')).json()).some((m) => m.method === 'DELETE' && m.path === '/channels/300000000000000001/messages/5');
+  const gone = (await (await fetch(`${mock}/sent`)).json()).some((m) => m.method === 'DELETE' && m.path === '/channels/300000000000000001/messages/5');
   if (!gone) failed.push('sticky: the old copy was not deleted');
   if (psql("select count(*) from message_sends where source = 'sticky' and posted_id is not null") !== '1') failed.push('sticky: more than one copy is up');
   await page.screenshot({ path: `${out}/sticky_list.png` });
@@ -358,7 +359,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.waitForSelector('text=Tag removed.', { timeout: 5000 }).catch(() => failed.push('tag: remove failed'));
   await page.click('text=← Saved messages');
   if (!(await page.locator('.mrow', { hasText: 'e2e' }).locator('.states .tip').count())) failed.push('embeds: list shows no Sent icon');
-  const sent = await (await fetch('http://127.0.0.1:9100/sent')).json();
+  const sent = await (await fetch(`${mock}/sent`)).json();
   if (!sent.some((m) => /\/messages\/1$/.test(m.path) && m.body.includes('Hello'))) failed.push('embeds: no edit reached Discord');
   const post = sent.find((m) => /\/messages$/.test(m.path) && m.body.includes('Hello'));
   const hooked = sent.find((m) => /^\/webhooks\/500000000000000001\/mock-webhook-token\?wait=true&with_components=true$/.test(m.path));
@@ -413,7 +414,7 @@ fs.mkdirSync(out, { recursive: true });
     });
     return `${r.status} ${await r.text()}`;
   }, gid);
-  const after = await (await fetch('http://127.0.0.1:9100/sent')).json();
+  const after = await (await fetch(`${mock}/sent`)).json();
   if (!after.some((m) => m.path === `/channels/300000000000000002/permissions/${gid}`)) failed.push(`log setup: public Logs category not made private (${setup})`);
   // Permits: a sortable list and one add button, also with no permits of your own. Extra Owner and Trusted Admin are
   // fixed rows with a lock; a permit row moves with the arrow keys; Delete is in Edit, not on the row.

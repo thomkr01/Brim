@@ -5,6 +5,7 @@ const { chromium } = require('playwright');
 const { execSync } = require('child_process');
 const fs = require('fs');
 const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8080';
+const mock = process.env.DISCORD_API_BASE || 'http://127.0.0.1:9100';
 const out = process.env.E2E_OUT || '/tmp/e2e-deep';
 const db = process.env.DATABASE_URL;
 const only = (process.env.DEEP_ONLY || 'matrix,proofs,pages,owner,extras,contrast,overflow').split(',');
@@ -486,11 +487,11 @@ async function extras(browser) {
     if (!(await as.count())) fail('auto setup', 'no Auto Setup button on the wizard');
     else {
       // Cancel in the "Create channels?" warning runs nothing.
-      const before = (await (await fetch('http://127.0.0.1:9100/sent')).json()).length;
+      const before = (await (await fetch(`${mock}/sent`)).json()).length;
       await as.click();
       await page.locator('.modal button', { hasText: 'Cancel' }).click();
       await page.waitForTimeout(800);
-      const after = (await (await fetch('http://127.0.0.1:9100/sent')).json()).length;
+      const after = (await (await fetch(`${mock}/sent`)).json()).length;
       if (after !== before) fail('auto setup', `Cancel still sent ${after - before} Discord calls`);
       page.errs.length = 0;
       await as.click();

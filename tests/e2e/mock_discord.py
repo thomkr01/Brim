@@ -133,4 +133,5 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
-HTTPServer(("127.0.0.1", 9100), H).serve_forever()
+# The port is the first argument (9100 by default): run.sh starts a second mock for the matrix.
+HTTPServer(("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 9100), H).serve_forever()

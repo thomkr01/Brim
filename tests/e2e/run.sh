@@ -27,21 +27,41 @@ fi
 [ -n "${SKIP_UNIT:-}" ] || cargo test --workspace
 [ -f $DASHBOARD_DIST/index.html ] || (cd crates/dashboard/ui && trunk build --release)
 
+# The permission matrix runs at the same time as dashboard.js, on its own database, dashboard and
+# mock (each counts what its mock was sent), so neither sees the other's rows. DEEP=1 runs all of
+# deep.js after dashboard.js on one database, as before.
+matrix_db=${DATABASE_URL%/*}/matrix_$db_name
 python3 tests/e2e/mock_discord.py & mock=$!
+python3 tests/e2e/mock_discord.py 9101 & mock2=$!
 cargo build -q --release -p brim-dashboard
 target/release/brim-dashboard & dash=$!
-trap 'kill $mock $dash 2>/dev/null' EXIT
-for _ in $(seq 600); do curl -s $DASHBOARD_URL/api/me -o /dev/null -w "%{http_code}" | grep -q 401 && break; sleep 1; done
+dash2=
+trap 'kill $mock $mock2 $dash $dash2 2>/dev/null' EXIT
+if [ -z "${DEEP:-}" ]; then
+  psql "$DATABASE_URL" -q -c "drop database if exists matrix_$db_name" -c "create database matrix_$db_name"
+  DATABASE_URL=$matrix_db DISCORD_API_BASE=http://127.0.0.1:9101 DASHBOARD_URL=http://127.0.0.1:8081 BIND=127.0.0.1:8081 \
+    target/release/brim-dashboard & dash2=$!
+fi
+up() { for _ in $(seq 600); do curl -s "$1/api/me" -o /dev/null -w "%{http_code}" | grep -q 401 && return; sleep 1; done; }
+up $DASHBOARD_URL
+[ -n "$dash2" ] && up http://127.0.0.1:8081
 
 # dashboard.js counts rows of these tables, so a second run on the same database starts clean.
 psql "$DATABASE_URL" -q -c "delete from message_sends; delete from message_rules; delete from sticky_msgs; delete from scheduled_jobs where kind = 'case_log'"
-# The mock's owner is the guild owner, so the dashboard grants owner level without any seed data.
-node tests/e2e/dashboard.js
-# Every write route for every access level always runs (the fast part of deep.js). DEEP=1 adds
-# every page as every level and every control (~1 h).
-psql "$DATABASE_URL" -q -f tests/e2e/levels.sql
 if [ -n "${DEEP:-}" ]; then
+  # The mock's owner is the guild owner, so the dashboard grants owner level without any seed data.
+  node tests/e2e/dashboard.js
+  # Every page as every level and every control (~1 h).
+  psql "$DATABASE_URL" -q -f tests/e2e/levels.sql
   node tests/e2e/deep.js
-else
-  DEEP_ONLY=matrix,proofs node tests/e2e/deep.js
+  exit
 fi
+# Every write route for every access level always runs (the fast part of deep.js).
+psql "$matrix_db" -q -f tests/e2e/levels.sql
+DATABASE_URL=$matrix_db DISCORD_API_BASE=http://127.0.0.1:9101 DASHBOARD_URL=http://127.0.0.1:8081 E2E_OUT=${E2E_OUT:-/tmp/e2e}/matrix \
+  DEEP_ONLY=matrix,proofs node tests/e2e/deep.js > /tmp/e2e-matrix.log 2>&1 & matrix=$!
+sweep=0; node tests/e2e/dashboard.js || sweep=$?
+deep=0; wait $matrix || deep=$?
+cat /tmp/e2e-matrix.log
+echo "dashboard.js: exit $sweep. Matrix and proofs: exit $deep."
+[ "$sweep" -eq 0 ] && [ "$deep" -eq 0 ]
