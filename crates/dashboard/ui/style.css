@@ -669,13 +669,16 @@ nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active {
 .frow { display:flex; align-items:center; gap:var(--space-12); padding:var(--space-12) var(--space-20); background:var(--b2); border:1px solid var(--line); border-radius:var(--radius-card); } .frow:hover { border-color:var(--muted); } .frow.off .fmain { opacity:.7; }
 .frow .ico, .frow .rowmenu summary { width:24px; height:24px; display:grid; place-items:center; flex:none; } .frow .ico svg, .frow .rowmenu summary svg { width:20px; height:20px; } .frow .fmain { min-width:0; } .frow .fmain .chip { margin-left:var(--space-8); }
 .frow .rowmenu { margin:0; } .frow .rowmenu summary { width:40px; height:40px; border-radius:50%; padding:0; }
-/* A phone (owner's layout): icon, title and switch on the top line (the title wraps, the details go
-   under it), the ⋯ menu and Edit on a second line at its right end. */
+/* A phone (owner's layout): icon, title and switch on the top line (the title wraps); the details
+   and error lines under it use the whole width of the row; the ⋯ menu and Edit on the last line at
+   its right end. `.fmain` gives its lines to the grid (`display:contents`). */
 @media (max-width:600px) {
   .frow { display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; align-items:start; row-gap:var(--space-8); }
-  .frow > .ico { grid-area:1 / 1; } .frow > .fmain { grid-area:1 / 2 / 2 / 4; } .frow > .sw { grid-area:1 / 4; }
-  .frow > .sp { display:none; } .frow > :not(.ico, .fmain, .sw, .sp, .rowmenu, button) { grid-area:2 / 1 / 3 / 3; }
-  .frow > .sw { justify-self:end; } .frow > .rowmenu { grid-area:2 / 3; align-self:center; margin:0; } .frow > button { grid-area:2 / 4; align-self:center; }
+  .frow > .ico { grid-area:1 / 1; } .frow > .sw { grid-area:1 / 4; justify-self:end; }
+  .frow .fmain { display:contents; } .frow .ftitle { grid-area:1 / 2 / 2 / 4; align-self:center; min-width:0; }
+  .frow .fmain > div:not(.ftitle) { grid-column:1 / -1; min-width:0; } .frow.off .fmain > * { opacity:.7; }
+  .frow > .sp { display:none; } .frow > :not(.ico, .fmain, .sw, .sp, .rowmenu, button) { grid-column:1 / 3; }
+  .frow > .rowmenu { grid-column:3; align-self:center; margin:0; } .frow > button { grid-column:4; align-self:center; }
 }
 .modal .card.feeds-dialog { width:min(calc(92 * var(--vw)),520px); } .feeds-dialog .hint { margin:calc(-1 * var(--space-4)) 0 var(--space-12); } .feeds-dialog .acts { display:flex; gap:var(--space-8); justify-content:flex-end; margin-top:var(--space-16); }
 .feeds-dialog .row:has(> input.sw) { flex-wrap:nowrap; } .feeds-dialog .row:has(> input.sw) label { flex:1; }

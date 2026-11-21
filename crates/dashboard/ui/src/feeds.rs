@@ -474,7 +474,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             <li class="frow" class:off=!on>
                 <input type="checkbox" class="sw" role="switch" aria-label=format!("{} on", name_of(&f)) prop:checked=on disabled=move || busy.get() || !admin() on:change=toggle />
                 <span class="ico" title=source.1>{icon(source.0)}</span>
-                <div class="fmain"><b>{name_of(&f)}</b>{chip}
+                <div class="fmain"><div class="ftitle"><b>{name_of(&f)}</b>{chip}</div>
                     <div class="muted small">{source.1}" · "{line.join(" · ")}</div>
                     {asked}{error}
                 </div>
