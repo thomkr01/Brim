@@ -85,6 +85,9 @@ textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; fo
 @media (max-width:900px) { .cards { flex-direction:column; align-items:stretch; } .cards > .col { flex:none; } .cards > .col:empty { display:none; } }
 .card { background:var(--b2); border-radius:var(--radius-card); padding:var(--space-20); margin-bottom:var(--space-24); transition:box-shadow var(--dur) var(--ease); }
 .cards .card { margin:0; scroll-margin-top:96px; } .card.off { box-shadow:0 0 0 2px var(--bad), 0 0 0 6px var(--b1); }
+/* Wide windows (owner decision 2026-11-21): the screen scale stops at 1.25, so text and controls stay normal size and the page uses the width instead. A page made of Cards (and the server list) gets 3 columns from 2300 px and 4 from 3200 px; the two .col boxes dissolve and the cards flow down the columns in list order. Every other page (lists, editors, wizard, forms) keeps its normal width and stays centred. */
+@media (min-width:2300px) { main:has(.cards, .gcards) { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
+@media (min-width:3200px) { main:has(.cards, .gcards) { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .row .sp { flex:1; }
 .row label { flex:0 0 100%; font-weight:700; }
 /* A label and its field side by side outside a .row (Secure my account): the gap keeps the text off the field. */

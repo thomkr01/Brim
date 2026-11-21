@@ -619,4 +619,5 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 
 ## Screen scale stops at 1920
 - `zoom` on the root above 1.25 (the old 1.45 to 2.45 steps) made a 2560 px window look zoomed in: text, controls and cards all grew. The scale stops at 1.25 from 1920 px up; more width is margin. `tools/ui-sizes.mjs` fails on a `--z` above 1.25.
+- Wide windows (2026-11-21): above 1920 px the width goes to columns: `main:has(.cards, .gcards)` widens (1600 px from 2300, up to 2300 px from 3200) and `.cards` becomes CSS columns (3, then 4). Only pages made of Cards get this; a list, editor or wizard stretched over 1600 px reads worse, so they stay at 1200. Cards flow down the columns, so a card that grows (a "+" list gets an item) can push the next card into the next column; it is by design on wide screens only. Never put a page with its own grid under `.cards`.
 - A label with its field beside it outside a `.row` needs the `field` class, or the text touches the input.
