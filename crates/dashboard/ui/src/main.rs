@@ -9,6 +9,7 @@ mod commands;
 mod common;
 mod datareq;
 mod discord;
+mod histdiff;
 mod embeds;
 mod form;
 mod help;
@@ -414,17 +415,8 @@ pub(crate) fn hash() -> Vec<String> {
         .collect()
 }
 
-/// The open "Diff vs current" box: the version and its text (None while it loads).
-type DiffBox = Option<(i64, Option<Result<String, String>>)>;
-
-/// What the "Diff vs current" box says: the changes, or that there are none.
-fn diff_text(v: i64, cur: i64, d: &Value) -> String {
-    let head = format!("Changes from v{v} to current (v{cur}):");
-    if d.as_array().is_some_and(Vec::is_empty) {
-        return format!("{head}\nNo differences.");
-    }
-    format!("{head}\n{}", serde_json::to_string_pretty(d).unwrap_or_default())
-}
+/// The open "Diff vs current" box: the version, the current version and its lines (None while they load).
+type DiffBox = Option<(i64, i64, Option<Result<Vec<histdiff::Line>, String>>)>;
 
 /// A history time ("2026-11-20T11:42:05.39Z") in the viewer's local time; the text itself if it is no date.
 fn local_time(at: &str) -> String {
@@ -442,7 +434,9 @@ fn History(guild: String) -> impl IntoView {
     let (rows, set_rows) = signal(Vec::<Value>::new());
     // The "Diff vs current" box: open, and its text (None while it loads).
     // `Some` while the box is open; the memo keeps the last one for the fade-out.
-    let diff = RwSignal::new(None::<(i64, Option<Result<String, String>>)>);
+    let diff = RwSignal::new(None::<(i64, i64, Option<Result<Vec<histdiff::Line>, String>>)>);
+    // The schema (labels) and the channel and role names, fetched once on the first diff that needs them.
+    let (schema, dc) = (StoredValue::new(None::<Value>), StoredValue::new(None::<Value>));
     let diff_shown = Memo::new(move |prev: Option<&DiffBox>| diff.get().or(prev.cloned().flatten()));
     // Counts the opens, so a slow answer to an earlier click cannot fill a later one.
     let diff_seq = StoredValue::new(0u32);
@@ -600,11 +594,21 @@ fn History(guild: String) -> impl IntoView {
                     <div class="card row">
                         <b>{format!("v{v}")}</b>
                         <span class="muted">"by "{records::who(names, by.clone())}{move || names.with(|n| n.contains_key(&by)).then(|| format!(" ({by})"))}{format!(" at {}", local_time(r["at"].as_str().unwrap_or("")))}</span>
-                        <button class="ghost" on:click=move |_| { let g = g1.clone(); let cur = version.get_untracked(); diff.set(Some((v, None))); diff_seq.update_value(|n| *n += 1); let id = diff_seq.get_value(); spawn_local(async move {
-                            let r = api("GET", &format!("/api/guilds/{g}/history/{v}/{cur}"), None).await
-                                .map(|d| diff_text(v, cur, &d))
-                                .map_err(|e| format!("The changes could not be loaded: {e}"));
-                            if !diff.is_disposed() && diff_seq.get_value() == id && diff.get_untracked().is_some() { diff.set(Some((v, Some(r)))) }
+                        <button class="ghost" on:click=move |_| { let g = g1.clone(); let cur = version.get_untracked(); diff.set(Some((v, cur, None))); diff_seq.update_value(|n| *n += 1); let id = diff_seq.get_value(); spawn_local(async move {
+                            let r = match api("GET", &format!("/api/guilds/{g}/history/{v}/{cur}"), None).await {
+                                Ok(d) => {
+                                    if schema.try_get_value().flatten().is_none() {
+                                        if let Ok(s) = api("GET", &format!("/api/guilds/{g}/schema"), None).await { schema.try_set_value(Some(s)); }
+                                    }
+                                    let sc = schema.try_get_value().flatten().unwrap_or_default();
+                                    if dc.try_get_value().flatten().is_none() && histdiff::needs_names(&d, &sc) {
+                                        if let Ok(x) = api("GET", &format!("/api/guilds/{g}/discord"), None).await { dc.try_set_value(Some(x)); }
+                                    }
+                                    Ok(histdiff::lines(&d, &sc, &dc.try_get_value().flatten().unwrap_or_default()))
+                                }
+                                Err(e) => Err(format!("The changes could not be loaded: {e}")),
+                            };
+                            if !diff.is_disposed() && diff_seq.get_value() == id && diff.get_untracked().is_some() { diff.set(Some((v, cur, Some(r)))) }
                         }) }>"Diff vs current"</button>
                         <button disabled=move || access.rank() < 3 || busy.get() title=move || if access.rank() < 3 { "Only Trusted Admins and owners can roll back" } else { "" } on:click=move |_| { let (g, load) = (g2.clone(), load.clone()); run_save(guard(busy, async move {
                             let r = api("POST", &format!("/api/guilds/{g}/history/{v}/rollback"), Some(json!({"expected_version": version.get_untracked()}))).await;
@@ -614,14 +618,18 @@ fn History(guild: String) -> impl IntoView {
             }
         </For>
         <Toast msg />
-        <Fade when=Signal::derive(move || diff.get().is_some())>{move || diff_shown.get().map(|(v, body)| {
+        <Fade when=Signal::derive(move || diff.get().is_some())>{move || diff_shown.get().map(|(v, cur, body)| {
             let r = NodeRef::new();
             focus_on_open(r);
             view! { <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Diff vs current" on:keydown=move |e| dialog_keys(&e, || diff.set(None))><div class="card">
                 <b>{format!("Diff of v{v} vs current")}</b>
                 {match body {
                     None => view! { <p><Working /></p> }.into_any(),
-                    Some(Ok(t)) => view! { <pre>{t}</pre> }.into_any(),
+                    Some(Ok(l)) if l.is_empty() => view! { <p class="muted">"No differences."</p> }.into_any(),
+                    Some(Ok(l)) => view! {
+                        <p class="muted">{format!("Changes from v{v} to current (v{cur}):")}</p>
+                        <ul class="diff">{l.into_iter().map(|l| view! { <li><b>{l.what}":"</b>" "<span class="err">{l.old}</span>" → "<span class="ok">{l.new}</span></li> }).collect_view()}</ul>
+                    }.into_any(),
                     Some(Err(e)) => view! { <p class="err">{e}</p> }.into_any(),
                 }}
                 <div class="row"><button class="ghost" on:click=move |_| diff.set(None)>"Close"</button></div>
@@ -1133,14 +1141,3 @@ fn main() {
     leptos::mount::mount_to_body(App);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn an_empty_diff_says_so() {
-        assert_eq!(diff_text(3, 5, &json!([])), "Changes from v3 to current (v5):\nNo differences.");
-        assert!(diff_text(3, 5, &json!([{"path": "a"}])).contains("\"path\""));
-    }
-}

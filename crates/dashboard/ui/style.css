@@ -726,3 +726,4 @@ nav .peek { --pose:56px; flex:none; margin:auto auto calc(-1 * var(--space-16));
 @media (max-width:1200px) { .head .pose-head { display:none; } }
 @media (max-width:900px) { .card.empty.pointing { flex-direction:column; text-align:center; } .pose-side { --pose:72px; } }
 .poses { display:flex; flex-wrap:wrap; gap:var(--space-16); } .poses figure { margin:0; width:176px; display:flex; flex-direction:column; align-items:center; gap:var(--space-8); text-align:center; } .poses figcaption { display:flex; flex-direction:column; font-size:var(--fs-caption); }
+.diff { list-style:none; padding:0; margin:var(--space-8) 0; } .diff li { margin:var(--space-4) 0; overflow-wrap:anywhere; }

@@ -169,7 +169,7 @@ pub fn name_of(dc: &Value, key: &str, id: &str) -> String {
 }
 
 /// Wording for the stored option values; anything else just gets a capital letter.
-fn opt_label(v: &str) -> String {
+pub(crate) fn opt_label(v: &str) -> String {
     match v {
         "Nothing" => "Keep Unverified".into(),
         "SuspiciousOnly" => "Suspicious".into(),
