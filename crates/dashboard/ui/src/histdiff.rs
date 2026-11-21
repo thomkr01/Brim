@@ -1,4 +1,4 @@
-//! The History "Diff vs current" box: one plain line per change, with the labels of the settings pages.
+//! The History "Diff vs current" box: one table row per change, with the labels of the settings pages.
 
 use serde_json::Value;
 
@@ -10,10 +10,15 @@ pub struct Line {
     pub new: String,
 }
 
-/// "auto_role_id" -> "Auto role id".
+/// "public_channel_id" -> "Public channel".
 fn readable(s: &str) -> String {
     let s = s.replace(['/', '_', '.'], " ");
-    let mut c = s.trim().chars();
+    let s = s.trim();
+    let s = s
+        .strip_suffix(" ids")
+        .or_else(|| s.strip_suffix(" id"))
+        .unwrap_or(s);
+    let mut c = s.chars();
     c.next()
         .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
 }
@@ -75,7 +80,13 @@ fn show(v: Option<&Value>, kind: &str, dc: &Value) -> String {
         Value::Array(a) if a.is_empty() => return "none".into(),
         _ => {}
     }
-    if let Some((key, word)) = id_kind(kind) {
+    // Config keeps ids as strings of digits; a number under a "channels" key is a count, not an id.
+    let is_id = |x: &Value| {
+        x.as_str()
+            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+    };
+    let ids = is_id(v) || v.as_array().is_some_and(|a| a.iter().all(is_id));
+    if let Some((key, word)) = id_kind(kind).filter(|_| ids) {
         let names = crate::form::items(dc, key);
         let loaded = dc[if key == "roles" { "roles" } else { "channels" }].is_array();
         let one = |x: &Value| {
@@ -107,6 +118,17 @@ fn show(v: Option<&Value>, kind: &str, dc: &Value) -> String {
             .map(|x| show(Some(x), kind, dc))
             .collect::<Vec<_>>()
             .join(", "),
+        Value::Array(a) => a
+            .iter()
+            .map(|x| show(Some(x), "", dc))
+            .collect::<Vec<_>>()
+            .join(" | "),
+        // A list entry such as a ticket panel: each key with its value, ids as names.
+        Value::Object(o) => o
+            .iter()
+            .map(|(k, x)| format!("{}: {}", readable(k), show(Some(x), key_kind(k), dc)))
+            .collect::<Vec<_>>()
+            .join("; "),
         o => o.to_string(),
     }
 }
@@ -120,11 +142,40 @@ fn kind_at<'a>(f: &'a Value, left: &str) -> &'a str {
     }
 }
 
-/// True when a change is on a channel or role field, so the names list is needed.
+/// The kind a key name tells, for ids the schema does not show (such as the bot's own `public_channel_id`).
+fn key_kind(key: &str) -> &'static str {
+    let k = key.rsplit('.').next().unwrap_or(key);
+    if k.contains("categor") {
+        "category"
+    } else if k.contains("channel") {
+        "channel"
+    } else if k.contains("role") {
+        "role"
+    } else {
+        ""
+    }
+}
+
+/// The kind of the value at `rest` in `section`: from the schema, else from the key name.
+fn kind_of(schema: &Value, section: &str, rest: &str) -> String {
+    match field(schema, section, rest) {
+        Some((f, _, left)) if !kind_at(f, &left).is_empty() => kind_at(f, &left).to_string(),
+        _ => key_kind(rest).to_string(),
+    }
+}
+
+/// True when a value is an object or holds one: its keys can name ids.
+fn has_object(v: &Value) -> bool {
+    v.is_object() || v.as_array().is_some_and(|a| a.iter().any(has_object))
+}
+
+/// True when a change can hold a channel or role id, so the names list is needed.
 pub fn needs_names(diff: &Value, schema: &Value) -> bool {
     diff.as_array().into_iter().flatten().any(|c| {
         let (sec, rest) = split(c["path"].as_str().unwrap_or_default());
-        field(schema, sec, &rest).is_some_and(|(f, _, left)| id_kind(kind_at(f, &left)).is_some())
+        id_kind(&kind_of(schema, sec, &rest)).is_some()
+            || has_object(&c["old"])
+            || has_object(&c["new"])
     })
 }
 
@@ -135,14 +186,14 @@ fn split(path: &str) -> (&str, String) {
     (sec, rest.replace('/', "."))
 }
 
-/// The server's diff (`[{path, old, new}]`) as plain lines.
+/// The server's diff (`[{path, old, new}]`) as plain rows.
 pub fn lines(diff: &Value, schema: &Value, dc: &Value) -> Vec<Line> {
     diff.as_array()
         .into_iter()
         .flatten()
         .map(|c| {
             let (sec, rest) = split(c["path"].as_str().unwrap_or_default());
-            let (what, kind) = match field(schema, sec, &rest) {
+            let what = match field(schema, sec, &rest) {
                 Some((f, title, left)) => {
                     let label = f["title"].as_str().map_or_else(
                         || readable(f["label"].as_str().unwrap_or(&rest)),
@@ -153,25 +204,19 @@ pub fn lines(diff: &Value, schema: &Value, dc: &Value) -> Vec<Line> {
                     } else {
                         format!("{label}, {}", readable(&left))
                     };
-                    let kind = kind_at(f, &left);
-                    (
-                        format!(
-                            "{}, {label}",
-                            title.as_str().map_or_else(|| readable(sec), String::from)
-                        ),
-                        kind,
+                    format!(
+                        "{}, {label}",
+                        title.as_str().map_or_else(|| readable(sec), String::from)
                     )
                 }
-                None if rest.is_empty() => (section_title(schema, sec), ""),
-                None => (
-                    format!("{}, {}", section_title(schema, sec), readable(&rest)),
-                    "",
-                ),
+                None if rest.is_empty() => section_title(schema, sec),
+                None => format!("{}, {}", section_title(schema, sec), readable(&rest)),
             };
+            let kind = kind_of(schema, sec, &rest);
             Line {
                 what,
-                old: show(c.get("old"), kind, dc),
-                new: show(c.get("new"), kind, dc),
+                old: show(c.get("old"), &kind, dc),
+                new: show(c.get("new"), &kind, dc),
             }
         })
         // Missing and null both read "not set": no line for a change nobody can see.
@@ -188,7 +233,8 @@ mod tests {
         json!([{"name": "tickets", "title": "Tickets", "fields": [
             {"path": "enabled", "label": "enabled", "kind": "bool", "title": "Use tickets"},
             {"path": "category_id", "label": "category id", "kind": "category"},
-            {"path": "public_channel_id", "label": "public channel id", "kind": "channel", "title": "Public channel"},
+            {"path": "log_channel", "label": "log channel", "kind": "channel", "title": "Ticket log channel"},
+            {"path": "public_channel", "label": "public channel", "kind": "bool"},
             {"path": "ping_roles", "label": "ping roles", "kind": "roles"},
             {"path": "mode", "label": "mode", "kind": "choice"},
             {"path": "routes", "label": "routes", "kind": "route_pick", "title": "Routes"},
@@ -201,10 +247,14 @@ mod tests {
         let d = json!([
             {"path": "/tickets/category_id", "old": null, "new": "1"},
             {"path": "/tickets/enabled", "old": false, "new": true},
-            {"path": "/tickets/public_channel_id", "old": "9", "new": "2"},
+            {"path": "/tickets/log_channel", "old": "9", "new": "2"},
+            {"path": "/tickets/public_channel_id", "old": null, "new": "2"},
+            {"path": "/tickets/public_channel", "old": true, "new": false},
+            {"path": "/tickets/panels", "old": [], "new": [{"id": "help", "category": "1", "ping_roles": ["5"]}]},
             {"path": "/tickets/ping_roles", "old": [], "new": ["5", "7"]},
             {"path": "/tickets/mode", "old": "Dm", "new": null},
             {"path": "/automod/heat/max", "old": 3, "new": 4},
+            {"path": "/automod/max_channels", "old": 3, "new": 4},
         ]);
         assert!(needs_names(&d, &schema()));
         let l = lines(&d, &schema(), &dc);
@@ -215,12 +265,16 @@ mod tests {
         assert_eq!(
             got,
             [
-                "Tickets, Category id: not set -> tickets",
+                "Tickets, Category: not set -> tickets",
                 "Tickets, Use tickets: off -> on",
-                "Tickets, Public channel: deleted channel -> #open-a-ticket",
+                "Tickets, Ticket log channel: deleted channel -> #open-a-ticket",
+                "Tickets, Public channel: not set -> #open-a-ticket",
+                "Tickets, Public channel: on -> off",
+                "Tickets, Panels: none -> Category: tickets; Id: help; Ping roles: @Staff",
                 "Tickets, Ping roles: none -> @Staff, deleted role",
                 "Tickets, Mode: DMs -> not set",
                 "Automod, Heat max: 3 -> 4",
+                "Automod, Max channels: 3 -> 4",
             ]
         );
     }

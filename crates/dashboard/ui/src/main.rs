@@ -626,10 +626,12 @@ fn History(guild: String) -> impl IntoView {
                 {match body {
                     None => view! { <p><Working /></p> }.into_any(),
                     Some(Ok(l)) if l.is_empty() => view! { <p class="muted">"No differences."</p> }.into_any(),
-                    Some(Ok(l)) => view! {
-                        <p class="muted">{format!("Changes from v{v} to current (v{cur}):")}</p>
-                        <ul class="diff">{l.into_iter().map(|l| view! { <li><b>{l.what}":"</b>" "<span class="err">{l.old}</span>" → "<span class="ok">{l.new}</span></li> }).collect_view()}</ul>
-                    }.into_any(),
+                    Some(Ok(l)) => {
+                        let (was, now) = (format!("v{v}"), format!("Current (v{cur})"));
+                        view! { <table class="data diffs"><thead><tr><th>"Setting"</th><th>{was.clone()}</th><th>{now.clone()}</th></tr></thead><tbody>
+                            {l.into_iter().map(|l| view! { <tr><td><b>{l.what}</b></td><td class="err" data-label=was.clone()>{l.old}</td><td class="ok" data-label=now.clone()>{l.new}</td></tr> }).collect_view()}
+                        </tbody></table> }.into_any()
+                    }
                     Some(Err(e)) => view! { <p class="err">{e}</p> }.into_any(),
                 }}
                 <div class="row"><button class="ghost" on:click=move |_| diff.set(None)>"Close"</button></div>
