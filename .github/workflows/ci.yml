@@ -1,10 +1,10 @@
 name: CI
 
 on:
-  # Every branch: a change is checked on its own branch, then main moves to that same commit. A tag
+  # Every push: commits go straight to main and are checked there. A tag
   # push runs CI too: that run decides if a release gets images (images.yml).
   push:
-  # Runs every job, e2e too, on a branch on request: Actions > CI > Run workflow.
+  # Runs every job, e2e too, on request: Actions > CI > Run workflow.
   workflow_dispatch:
 
 permissions:
@@ -80,6 +80,9 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: crates/dashboard/ui
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
+        with:
+          tool: trunk@0.21.14
       - name: Design tokens match tokens.json
         run: node ../../../tools/design-tokens.mjs --check
       - name: Sizes come from the tokens
@@ -88,8 +91,16 @@ jobs:
         run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
       - name: Test
         run: cargo test --locked
+      # The e2e job runs only for a tag, and a tag reads only main's caches. This job runs on main
+      # too, so it keeps the built web app of each commit for the e2e job of a tag on that commit.
+      - name: Release build
+        run: trunk build --release
+      - uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: crates/dashboard/ui/dist
+          key: dashboard-ui-dist-${{ github.sha }}
 
-  # Slow, so only for a release tag or on request: on a branch push it is skipped, and a skipped job
+  # Slow, so only for a release tag or on request: on any other push it is skipped, and a skipped job
   # counts as passed. The Images workflow builds a release only when this job passed on its tag.
   e2e:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
@@ -120,6 +131,12 @@ jobs:
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
         with:
           tool: trunk@0.21.14
+      # The web app the dashboard-ui job built for this commit (about 3 minutes to build here).
+      # tests/e2e/run.sh builds it only when it is missing.
+      - uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: crates/dashboard/ui/dist
+          key: dashboard-ui-dist-${{ github.sha }}
       - run: mkdir -p "$E2E_OUT" && npm i --no-save playwright@1.64.1 && npx playwright install --with-deps chromium
       # Both at once: the updater test needs only Docker, the sweep the Postgres service and cargo.
       # Together they took about 20 minutes one after the other, the updater test 7 of them.
