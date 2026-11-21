@@ -14,7 +14,7 @@
 :root { --z:1.05; --vw:calc(1vw / var(--z)); --vh:calc(1vh / var(--z)); zoom:var(--z); }
 @media (min-width:900px) { :root { --z:1.1; } } @media (min-width:1800px) { :root { --z:1.2; } } @media (min-width:1920px) { :root { --z:1.25; } }
 .tb-page { min-height:calc(100 * var(--vh)); }
-:root { --fs-figure:26px; --fs-page-title-phone:32px; --w-wide:1200px; --w-narrow:900px; } /* big figures (score, stats) and the page title on a phone: sizes the design system's components use */
+:root { --fs-figure:26px; --fs-page-title-phone:32px; --w-wide:1200px; } /* big figures (score, stats) and the page title on a phone: sizes the design system's components use */
 :root { --dur-fast:120ms; --dur:200ms; --dur-slow:320ms; --ease:cubic-bezier(.2,0,0,1); --quint:cubic-bezier(.23,1,.32,1); --brand:linear-gradient(135deg,#FFA36C,#FF6F91,#9B7BFF,#4FC3F7); }
 @property --p { syntax:'<number>'; inherits:false; initial-value:0; }
 @keyframes enter { from { opacity:0; transform:translateY(6px); } }
@@ -85,9 +85,9 @@ textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; fo
 @media (max-width:900px) { .cards { flex-direction:column; align-items:stretch; } .cards > .col { flex:none; } .cards > .col:empty { display:none; } }
 .card { background:var(--b2); border-radius:var(--radius-card); padding:var(--space-20); margin-bottom:var(--space-24); transition:box-shadow var(--dur) var(--ease); }
 .cards .card { margin:0; scroll-margin-top:96px; } .card.off { box-shadow:0 0 0 2px var(--bad), 0 0 0 6px var(--b1); }
-/* Wide windows (owner decision 2026-11-21): the screen scale stops at 1.25, so text and controls stay normal size and the page uses the width instead. A page made of Cards (and the server list) gets 3 columns from 2300 px and 4 from 3200 px; the two .col boxes dissolve and the cards flow down the columns in list order. Every other page (lists, editors, wizard, forms) keeps its normal width and stays centred. `main` in the card selector outranks page rules such as `.home .card { margin:0 }`, which took the gap away (cards touched). */
-@media (min-width:2300px) { main:has(.cards, .gcards, .cs) { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } main .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
-@media (min-width:3200px) { main:has(.cards, .gcards, .cs) { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
+/* Wide windows (owner decision 2026-11-21): the screen scale stops at 1.25, so text and controls stay normal size and the page uses the width instead. Every page has the same width (owner decision 2026-11-21, "universally"): --w-wide is set here on :root, never per page, so a page does not change width when it finishes loading. Cards get 3 columns from 2300 px and 4 from 3200 px; the two .col boxes dissolve and the cards flow down the columns in list order. `main` in the card selector outranks page rules such as `.home .card { margin:0 }`, which took the gap away (cards touched). */
+@media (min-width:2300px) { :root { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } main .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
+@media (min-width:3200px) { :root { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .sp { flex:1; }
 .row label { flex:0 0 100%; font-weight:700; }
 /* A label and its field side by side outside a .row (Secure my account): the gap keeps the text off the field. */
@@ -199,7 +199,7 @@ details.more { margin:0 0 12px; } details.more summary { cursor:pointer; color:v
 .gbody { display:flex; align-items:center; justify-content:space-between; gap:var(--space-12); padding:0 var(--space-16) var(--space-16); } .gbody b { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .gbody a.ghost, .gbody .muted { flex:none; white-space:nowrap; }
 .qr { background:#fff; display:inline-block; padding:var(--space-8); border-radius:var(--radius-row); } .qr svg { width:200px; height:200px; display:block; }
 @media (max-width:900px) { header .menu-btn { display:block; } nav { display:none; position:fixed; top:80px; z-index:20; } .m-srv { display:block; padding:0 var(--space-16); background:var(--b2); } .m-srv .srv-row { margin:0; padding:var(--space-8) 0; } nav .srv-row { display:none; } nav.open { display:flex; animation:fade var(--dur) var(--ease); } main { padding:var(--space-16) var(--space-16) calc(var(--space-56) + var(--space-40)); } .head h1 { font-size:var(--fs-page-title-phone); } }
-.stack { display:flex; flex-direction:column; gap:var(--space-24); max-width:var(--w-narrow); margin:0 auto; } .stack .card { margin:0; }
+.stack { display:flex; flex-direction:column; gap:var(--space-24); } .stack .card { margin:0; }
 .lockrow h3, .card.empty h3 { margin:0; } .chip.ok { background:var(--ok); color:#000; }
 .card.empty { text-align:center; }
 /* The one add button (AddButton in common.rs): green pill, a circle plus, a text naming the thing. */
@@ -242,7 +242,6 @@ table.data td { padding:var(--space-12); border-top:1px solid var(--line); } tab
 main { overflow-x:clip; }
 .offnote { display:flex; align-items:center; margin:12px 0 0; color:var(--muted); font-size:var(--fs-caption); }
 .offnote .tip { margin:0 8px 0 0; }
-.stack.narrow { max-width:36rem; }
 /* Wizard cards: arrows on the sides, settings left, Discord-like preview right. */
 .card.wiz { display:flex; gap:12px; align-items:stretch; }
 .wiz .wizbody { flex:1; min-width:0; }
@@ -458,7 +457,7 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .mbhead { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 8px; }
 .mbhead input.name { font-size:var(--fs-section-title); font-weight:700; min-width:0; flex:1 1 200px; }
 .tabs button .i { width:16px; height:16px; margin-right:8px; vertical-align:-3px; }
-.mcard { max-width:var(--w-narrow); margin:0 auto var(--space-24); }
+.mcard { margin:0 0 var(--space-24); }
 .small { font-size:var(--fs-caption); } .pvtop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; } .pvtop h2 { margin:0; }
 /* Base two-choice selector: the open choice is the orange one. Pages may add to it (the scoped rules below). */
 .seg { display:inline-flex; border:1px solid var(--line); border-radius:var(--radius-row); overflow:hidden; flex:none; max-width:100%; }
@@ -664,7 +663,7 @@ nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active {
 .cs .rowmenu > div button:not(:disabled):hover, .feeds .rowmenu > div button:not(:disabled):hover { background:color-mix(in srgb, var(--b3) 50%, transparent); }
 .cs .rowmenu.up > div { top:auto; bottom:100%; } .cs .rowmenu .mv { display:flex; flex-direction:column; gap:var(--space-4); padding:var(--space-8) var(--space-12); font-size:var(--fs-caption); color:var(--muted); } .cs .rowmenu .mv select { width:100%; }
 /* Feeds page: one row per feed (switch, source icon, name and details, menu); add button is the green pill. */
-.feeds { max-width:var(--w-narrow); margin:0 auto; } .feeds .fhead { flex-wrap:wrap; gap:var(--space-12); margin-bottom:var(--space-12); }
+.feeds .fhead { flex-wrap:wrap; gap:var(--space-12); margin-bottom:var(--space-12); }
 .feeds-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:var(--space-12); }
 .frow { display:flex; align-items:center; gap:var(--space-12); padding:var(--space-12) var(--space-20); background:var(--b2); border:1px solid var(--line); border-radius:var(--radius-card); } .frow:hover { border-color:var(--muted); } .frow.off .fmain { opacity:.7; }
 .frow .ico, .frow .rowmenu summary { width:24px; height:24px; display:grid; place-items:center; flex:none; } .frow .ico svg, .frow .rowmenu summary svg { width:20px; height:20px; } .frow .fmain { min-width:0; } .frow .fmain .chip { margin-left:var(--space-8); }
@@ -696,7 +695,7 @@ nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active {
 .cs details.perm { margin:8px 0; } .cs details.perm summary { cursor:pointer; } .cs details.perm label.row2 { margin:4px 0; }
 .cs .cs-server input:not([type=file]), .cs .cs-server select { display:block; width:100%; max-width:420px; } .cs .srv-icon { border-radius:50%; }
 /* "How it works" box on hard pages: folded by default, three numbered steps. */
-details.how { max-width:var(--w-narrow); margin:0 auto var(--space-24); } details.how summary { cursor:pointer; font-weight:600; } details.how ol { margin:var(--space-8) 0 0; padding-left:var(--space-20); } details.how li { margin:var(--space-4) 0; }
+details.how { margin:0 0 var(--space-24); } details.how summary { cursor:pointer; font-weight:600; } details.how ol { margin:var(--space-8) 0 0; padding-left:var(--space-20); } details.how li { margin:var(--space-4) 0; }
 nav .nav-label { margin:var(--space-16) var(--space-16) var(--space-4); font-size:var(--fs-caption); text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 nav a .chip { float:right; } nav a .sw { float:right; }
 .mod-state { display:flex; align-items:center; gap:var(--space-8); margin:0 0 var(--space-16); }

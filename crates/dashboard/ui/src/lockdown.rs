@@ -150,7 +150,7 @@ pub fn LockdownManage(guild: String) -> impl IntoView {
     };
     let join_locked = move || locks().iter().any(|l| !l["join"].is_null());
     view! {
-        <div class="stack narrow">
+        <div class="stack">
         <div class="card row">
             <label>"Lock length"</label>
             <select aria-label="lock length" on:change=move |e| secs.set(event_target_value(&e).parse().unwrap_or(0))>

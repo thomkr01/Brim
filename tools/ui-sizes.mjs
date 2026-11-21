@@ -4,7 +4,7 @@
 //   0, a percentage or em (relative to a token). Custom property definitions (--x: 26px) are where new sizes are named.
 // - style.css and design/bundle.css: every spacing (margin, padding, gap, offsets) is 4 px or a multiple of 4 (owner decision 2026-11-20), as a px value or a --space-N token. Box sizes, borders, radii and em values are not spacings.
 // - style.css: font-size uses only the five text sizes plus the phone title and the strong (600) variant of ui (page-title, page-title-phone, figure, section-title, ui, caption; the style guide page #/ui lists them).
-// - style.css: a page-wide max-width (800 px or more) is var(--w-wide) (1200) or var(--w-narrow) (900).
+// - style.css: a page-wide max-width (800 px or more) is var(--w-wide), the one page width.
 // - style.css: the screen scale --z never goes above 1.25.
 // - src/*.rs: no `<div class="head">` or `class="tabs"` outside common.rs (Head and PageTabs are the only header and tab row); style.css: the .tabs rules keep the orange underline on the open tab and no filled pill (tabs are fixed by the owner 2026-11-20).
 // - src/*.rs: no fixed style="..." attribute; a page uses a class. A computed style (a colour, a position) is fine.
@@ -50,10 +50,10 @@ css.split('\n').forEach((line, i) => {
     if (!SIZES.has(m[1])) bad.push(`style.css:${i + 1}: font-size var(--fs-${m[1]}) is not one of the five text sizes`);
   }
 });
-// A page-wide max-width (800 px or more) is var(--w-wide) or var(--w-narrow); smaller ones (dialogs, previews) are free.
+// A page-wide max-width (800 px or more) is var(--w-wide); smaller ones (dialogs, previews) are free.
 css.split('\n').forEach((line, i) => {
   for (const m of line.matchAll(/(?<![-\w(])max-width\s*:\s*(\d+)px/g)) {
-    if (+m[1] >= 800) bad.push(`style.css:${i + 1}: max-width ${m[1]}px, use var(--w-wide) or var(--w-narrow)`);
+    if (+m[1] >= 800) bad.push(`style.css:${i + 1}: max-width ${m[1]}px, use var(--w-wide)`);
   }
 });
 // The screen scale stops at 1.25 (from 1920 px up): a full-page zoom above that made 2560 px look zoomed in (owner decision 2026-11-21).
