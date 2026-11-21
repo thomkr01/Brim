@@ -17,8 +17,8 @@ on:
 permissions:
   contents: read
 
-# - gate: builds only when CI passed on the owner's push to this repository, the tag is a release
-#   tag that names this commit, and the commit is on main.
+# - gate: builds only when CI, e2e included, passed on the owner's push to this repository, the tag
+#   is a release tag that names this commit, and the commit is on main.
 # - push: each image builds its :<sha> and :<version> tags.
 # - latest: moves all four :latest tags together at the end, one run at a time and never cancelled
 #   halfway, and only for the highest release, so :latest never goes back to an older release.
@@ -43,6 +43,7 @@ jobs:
           EVENT: ${{ github.event.workflow_run.event }}
           FROM: ${{ github.event.workflow_run.head_repository.full_name }}
           ACTOR: ${{ github.event.workflow_run.actor.login }}
+          CI_RUN: ${{ github.event.workflow_run.id }}
           OWNER: ${{ github.repository_owner }}
         run: &release_check |
           stop() {
@@ -57,6 +58,10 @@ jobs:
           # Only the owner makes releases: write access alone could tag an old commit as the highest.
           [ "$ACTOR" = "$OWNER" ] || stop "The tag was pushed by $ACTOR, not by $OWNER."
           printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || stop "$TAG is not a release tag (v1.2.3)."
+          # e2e runs only for tags and is skipped elsewhere, and a skipped job counts as passed: so ask.
+          e2e=$(gh api "repos/$GH_REPO/actions/runs/$CI_RUN/jobs?per_page=100" --jq '[.jobs[] | select(.name == "e2e")][0].conclusion') \
+            || { echo "Could not read the jobs of CI run $CI_RUN."; exit 1; }
+          [ "$e2e" = success ] || stop "The e2e job of CI run $CI_RUN is ${e2e:-missing}, not passed."
           tags=$(git ls-remote --tags "https://github.com/$GH_REPO") || { echo "Could not read the tags."; exit 1; }
           # An annotated tag names its commit on the peeled (^{}) line.
           at=$(printf '%s\n' "$tags" | awk -v t="refs/tags/$TAG" '$2 == t "^{}" { p = $1 } $2 == t { l = $1 } END { print p != "" ? p : l }')
