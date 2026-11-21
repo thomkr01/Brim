@@ -68,6 +68,7 @@ async fn review_report_and_appeal() {
             redirect_uri: String::new(),
             api,
             memo: Default::default(),
+            limits: Default::default(),
         },
         secure: false,
         totp: Default::default(),

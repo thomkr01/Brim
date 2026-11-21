@@ -1280,6 +1280,9 @@ pub(crate) async fn discord(
     path: &str,
     body: Option<Value>,
 ) -> Result<Option<Value>, ApiError> {
+    if method == Method::GET {
+        return Ok(st.discord.get_json(path).await?);
+    }
     let r = st.discord.send(method, path, body).await?;
     let status = r.status().as_u16();
     let v: Value = r.json().await.unwrap_or_default();

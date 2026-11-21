@@ -318,6 +318,7 @@ async fn main() -> anyhow::Result<()> {
             api: std::env::var("DISCORD_API_BASE")
                 .unwrap_or_else(|_| "https://discord.com/api/v10".into()),
             memo: Default::default(),
+            limits: Default::default(),
         },
     };
     let ips = st.ips.clone();
@@ -399,6 +400,7 @@ mod tests {
                 redirect_uri: String::new(),
                 api: String::new(),
                 memo: Default::default(),
+                limits: Default::default(),
             },
             secure: false,
             totp: Default::default(),

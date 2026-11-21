@@ -1988,6 +1988,7 @@ pub(crate) mod g3_handler_tests {
             redirect_uri: String::new(),
             api: "http://127.0.0.1:1".into(),
             memo: Default::default(),
+            limits: Default::default(),
         };
         {
             let mut m = discord.memo.lock().unwrap();

@@ -710,6 +710,7 @@ mod db_tests {
                 redirect_uri: String::new(),
                 api,
                 memo: Default::default(),
+                limits: Default::default(),
             },
             secure: false,
             totp: Default::default(),
