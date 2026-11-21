@@ -2,8 +2,7 @@
 //! Save / Cancel. The ids carry executor, target and the picked types, so nothing is stored until Save.
 use anyhow::Result;
 use brim_core::permits::Level;
-use brim_logging::embed::{self, GREEN, NO, ORANGE, YES};
-use brim_logging::emoji::{MODERATOR, TARGET};
+use brim_logging::embed::{self, NO, YES};
 use serde_json::json;
 use twilight_model::{
     application::interaction::{Interaction, InteractionData},
@@ -181,10 +180,9 @@ fn allowed(kind: char, level: &Level) -> Vec<bool> {
         .collect()
 }
 
-fn prompt(kind: char, id: u64) -> Embed {
-    embed::Log::new("📋 Interactive Whitelist", ORANGE)
-        .text(&format!("Target: {}", mention(kind, id)))
-        .build()
+async fn prompt(app: &App, gid: Id<GuildMarker>, kind: char, id: u64) -> Embed {
+    let vars = [("target", mention(kind, id))];
+    crate::reply::answer(app, gid, "reply.whitelist.prompt", &vars).await
 }
 
 /// Resolves the typed target to (kind, id).
@@ -257,7 +255,7 @@ pub async fn run(app: &App, msg: &MessageCreate, args: &str) -> Result<()> {
         Err(e) => return say(e).await,
     };
     let picked = current(&*app.cfg(gid.get()).await?, kind, id);
-    let embeds = [prompt(kind, id)];
+    let embeds = [prompt(app, gid, kind, id).await];
     let mut post = app.http.create_message(msg.channel_id).embeds(&embeds);
     if let Some(to) = crate::cmdcfg::reply_to(msg.channel_id) {
         post = post.reply(to).fail_if_not_exists(false);
@@ -272,6 +270,27 @@ pub async fn run(app: &App, msg: &MessageCreate, args: &str) -> Result<()> {
     .allowed_mentions(Some(&AllowedMentions::default()))
     .await?;
     Ok(())
+}
+
+/// The values of `reply.whitelist.saved`: each list the executor may change, with ✅ or ❌.
+fn saved_vars(
+    now: &[bool],
+    ok: &[bool],
+    actor: u64,
+    kind: char,
+    id: u64,
+) -> [(&'static str, String); 3] {
+    let lists: Vec<String> = TYPES
+        .iter()
+        .enumerate()
+        .filter(|(t, _)| ok[*t])
+        .map(|(t, (_, label, _))| format!("{} {label}", if now[t] { YES } else { NO }))
+        .collect();
+    [
+        ("lists", lists.join("\n")),
+        ("moderator", embed::user(actor)),
+        ("target", mention(kind, id)),
+    ]
 }
 
 /// The select, Save and Cancel components. Returns false for other interactions.
@@ -370,15 +389,15 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             match saved {
                 Ok(doc) => {
                     let now = current(&GuildCfg::parse(&doc), kind, id);
-                    let mut e = embed::Log::new("📋 Interactive Whitelist", GREEN);
-                    for (t, (_, label, _)) in TYPES.iter().enumerate().filter(|(t, _)| ok[*t]) {
-                        e = e.text(&format!("{} {label}", if now[t] { YES } else { NO }));
-                    }
-                    let e = e
-                        .inline(&format!("{MODERATOR} Executor"), &embed::user(actor.get()))
-                        .inline(&format!("{TARGET} Target"), &mention(kind, id));
+                    let e = crate::reply::answer(
+                        app,
+                        gid,
+                        "reply.whitelist.saved",
+                        &saved_vars(&now, &ok, actor.get(), kind, id),
+                    )
+                    .await;
                     InteractionResponseData {
-                        embeds: Some(vec![e.build()]),
+                        embeds: Some(vec![e]),
                         components: Some(vec![]),
                         ..Default::default()
                     }

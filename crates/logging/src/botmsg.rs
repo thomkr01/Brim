@@ -532,7 +532,8 @@ fn build() -> Vec<Def> {
         "You were set aside",
         ORANGE,
     ));
-    out.push(def("dm.rescue_expired", "Rescue key expired", s, false, &["name", "page"], embed("Rescue key expired", ORANGE, &["⚠️ The rescue key of **{name}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {page}. It needs your dashboard 2FA.".into()])));
+    // Locked (owner decision 2026-11-21): no rescue key text is editable.
+    out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["name", "page"], embed("Rescue key expired", ORANGE, &["⚠️ The rescue key of **{name}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {page}. It needs your dashboard 2FA.".into()])));
     out.push(def("dm.dashboard_2fa", "Dashboard 2FA setup code", s, false, &["code"], embed("Your setup code", BLUE, &["🔐 Your Brim authenticator setup code is **{code}**. If you didn't start this, don't share it: someone may have your dashboard session.".into()])));
     feeds(&mut out);
     mod_entries(&mut out);
@@ -544,6 +545,7 @@ fn build() -> Vec<Def> {
     audit_entries(&mut out);
     event_entries(&mut out);
     answer_entries(&mut out);
+    security_answers(&mut out);
     for d in &mut out {
         if shown(&d.template).iter().any(|v| v == "text") {
             d.required = vec!["text"];
@@ -916,6 +918,8 @@ pub const EVENT_LOGS: &[(&str, &str, &[&str])] = &[
 fn is_facts(key: &str) -> bool {
     FACTS.contains(&key)
         || ANSWERS.contains(&key)
+        || WHITELIST_ANSWERS.contains(&key)
+        || panel(key).is_some()
         || SECURITY_LOGS.iter().any(|l| l.0 == key)
         || key
             .strip_prefix("log.")
@@ -1262,6 +1266,11 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "390.11",
     ),
     ("locks", "The active locks, one per line", "🔒 Channels"),
+    (
+        "lists",
+        "Each whitelist with ✅ (on it) or ❌ (not on it), one per line",
+        "✅ Spam Whitelist\n❌ Ping Whitelist",
+    ),
     ("prefix", "The server's command prefix", "t!"),
     ("tries", "How many tries or changes failed", "5"),
     ("backup", "Backup ID", "a1b2c3"),
@@ -2756,7 +2765,7 @@ fn d4_entries(out: &mut Vec<Def>) {
             out,
             (key, name, SECURITY),
             template,
-            (&vars, &required, "the log's facts (who, what and where)"),
+            (&vars, &required, "who did what, to whom and where"),
         );
     }
 }
@@ -3005,7 +3014,7 @@ fn event_entries(out: &mut Vec<Def>) {
             out,
             (&format!("log.{kind}.{}", slug(title)), title, group),
             json!({"content": "", "embeds": [{"title": "{title}", "description": lines.join("\n")}]}),
-            (&vars, &required, "the facts of the log"),
+            (&vars, &required, "the details of the log"),
         );
     }
 }
@@ -3076,6 +3085,247 @@ fn d6(out: &mut Vec<Def>, e: D6) {
         (e.key, e.name, "General commands"),
         template,
         (&vars, e.required, e.what),
+    );
+}
+
+/// A row of a security settings panel: (code, name, value placeholder, how the value shows).
+/// The placeholder is empty for a card heading (its lettered rows follow). How: `""` in code
+/// style, `"raw"` as given (mentions, the dashboard link), `"toggle"` in code style with the on or
+/// off sign after the name. The row's number is its own placeholder, named as the code (`{3}`
+/// shows `[3]`, `{4a}` shows `[A]`): people type it to change the setting, so it is required.
+pub type PanelRow = (&'static str, &'static str, &'static str, &'static str);
+
+/// The security command panels (`t!antinuke`, `t!ancaps`, `t!anpanic`, `t!antinukerestore`,
+/// `t!joinraid`): key, command, title, footer and rows, in the bot's order (a bot test keeps them
+/// equal to `settings::maps` and each default equal to the panel the code built).
+#[allow(clippy::type_complexity)]
+pub const PANELS: &[(&str, &str, &str, &str, &[PanelRow])] = &[
+    (
+        "reply.panel.antinuke",
+        "antinuke",
+        "Anti Nuke Panel:",
+        "Panic Mode: t!anp · Restore Filters: t!anr",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Limits", "limits", "raw"),
+            ("3", "Quarantine On Limit", "quarantine_on_limit", ""),
+            ("4", "Prune", "", ""),
+            ("4a", "Prune Detection", "prune", ""),
+            ("5", "Quarantine Hold", "", ""),
+            ("5a", "Quarantine Hold", "quarantine_hold", ""),
+            ("5c", "Monitor Public Roles", "monitor_public_roles", ""),
+            ("5d", "Vanity Protection", "vanity_protection", ""),
+            ("6", "Ticket Categories", "ticket_categories", "raw"),
+        ],
+    ),
+    (
+        "reply.panel.ancaps",
+        "ancaps",
+        "Anti-Nuke Caps:",
+        "Change one: `1 ?off a` or `6 ?set 1b`. More caps on the dashboard.",
+        &[
+            ("1", "Kicks & Bans", "", ""),
+            ("1a", "Status", "bans.status", ""),
+            ("1b", "Minute Cap", "bans.minute_cap", ""),
+            ("1c", "Hour Cap", "bans.hour_cap", ""),
+            ("1d", "Heat %", "bans.heat", ""),
+            ("2", "Role Creations", "", ""),
+            ("2a", "Status", "role_create.status", ""),
+            ("2b", "Minute Cap", "role_create.minute_cap", ""),
+            ("2c", "Hour Cap", "role_create.hour_cap", ""),
+            ("2d", "Heat %", "role_create.heat", ""),
+            ("3", "Role Deletions", "", ""),
+            ("3a", "Status", "role_delete.status", ""),
+            ("3b", "Minute Cap", "role_delete.minute_cap", ""),
+            ("3c", "Hour Cap", "role_delete.hour_cap", ""),
+            ("3d", "Heat %", "role_delete.heat", ""),
+            ("4", "Channel Creations", "", ""),
+            ("4a", "Status", "channel_create.status", ""),
+            ("4b", "Minute Cap", "channel_create.minute_cap", ""),
+            ("4c", "Hour Cap", "channel_create.hour_cap", ""),
+            ("4d", "Heat %", "channel_create.heat", ""),
+            ("5", "Channel Deletions", "", ""),
+            ("5a", "Status", "channel_delete.status", ""),
+            ("5b", "Minute Cap", "channel_delete.minute_cap", ""),
+            ("5c", "Hour Cap", "channel_delete.hour_cap", ""),
+            ("5d", "Heat %", "channel_delete.heat", ""),
+            ("6", "Webhook Creations", "", ""),
+            ("6a", "Status", "webhook_create.status", ""),
+            ("6b", "Minute Cap", "webhook_create.minute_cap", ""),
+            ("6c", "Hour Cap", "webhook_create.hour_cap", ""),
+            ("6d", "Heat %", "webhook_create.heat", ""),
+            ("7", "Webhook Deletions", "", ""),
+            ("7a", "Status", "webhook_delete.status", ""),
+            ("7b", "Minute Cap", "webhook_delete.minute_cap", ""),
+            ("7c", "Hour Cap", "webhook_delete.hour_cap", ""),
+            ("7d", "Heat %", "webhook_delete.heat", ""),
+        ],
+    ),
+    (
+        "reply.panel.anpanic",
+        "anpanic",
+        "Panic Mode Panel:",
+        "",
+        &[
+            ("1", "Status", "status", ""),
+            ("2", "Heat Algorithm", "heat_algorithm", ""),
+            ("3", "Lockdown Server On Trigger", "lock_on_trigger", ""),
+            ("4", "Unlock Server When Ending", "unlock_when_ending", ""),
+            ("5", "Warned Roles", "warned_roles", "raw"),
+            (
+                "6",
+                "Whitelisted Categories",
+                "whitelisted_categories",
+                "raw",
+            ),
+            ("7", "Lock Mod Cmds On Trigger", "lock_mod_commands", ""),
+            ("8", "Trigger", "trigger", ""),
+            ("9", "Panic Duration", "duration", ""),
+        ],
+    ),
+    (
+        "reply.panel.antinukerestore",
+        "antinukerestore",
+        "Restore System Filters:",
+        "",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Restoring Deleted Roles", "restore_roles", ""),
+            ("3", "Deleting Created Roles", "delete_roles", ""),
+            ("4", "Restoring Deleted Channels", "restore_channels", ""),
+            ("5", "Deleting Created Channels", "delete_channels", ""),
+            ("6", "Deleting Created Webhooks", "delete_webhooks", ""),
+        ],
+    ),
+    (
+        "reply.panel.joinraid",
+        "joinraid",
+        "Join Raid",
+        "",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Action", "action", ""),
+            ("3", "Warned Roles", "warned_roles", "raw"),
+            ("4", "Static Flags", "", ""),
+            ("4a", "Minimum Trigger", "min_trigger", ""),
+            ("4b", "Join History", "join_history", ""),
+            ("4c", "Trigger Duration", "trigger_duration", ""),
+            ("4d", "Accounts Type", "accounts_type", ""),
+            ("5", "String Flag", "string_flag", "raw"),
+            ("6", "Age Flag", "", ""),
+            ("6a", "Status", "age_flag.status", ""),
+            ("6b", "Minimum Age", "age_flag.min_age", ""),
+            ("7", "NoPfP Flag", "no_pfp_flag", ""),
+            ("8", "ID Flag", "", ""),
+            ("8a", "Status", "id_flag.status", ""),
+            ("8b", "Granularity", "id_flag.granularity", ""),
+            ("8c", "Margin", "id_flag.margin", ""),
+            ("8d", "Minimum Matches", "id_flag.min_matches", ""),
+            ("9", "Spammer Flag", "spammer_flag", ""),
+            ("10", "Voice Raid", "", ""),
+            ("10a", "Status", "voice.status", ""),
+            ("10b", "Minimum Trigger", "voice.min_trigger", ""),
+            ("10c", "Join History", "voice.join_history", ""),
+            ("10d", "Trigger Duration", "voice.trigger_duration", ""),
+            ("10e", "Action", "voice.action", ""),
+        ],
+    ),
+];
+
+/// The whitelist command's own answers (the menu's target, the saved result), entries of facts.
+pub const WHITELIST_ANSWERS: &[&str] = &["reply.whitelist.prompt", "reply.whitelist.saved"];
+
+/// The panel's colour (Discord's dark embed grey).
+const GREY: u32 = 0x2B2D31;
+
+fn panel(key: &str) -> Option<&'static [PanelRow]> {
+    PANELS.iter().find(|p| p.0 == key).map(|p| p.4)
+}
+
+/// The security command answers: each panel and the whitelist answers are entries of facts in
+/// group Security (Owner and Extra Owners, 2FA, audited), every value and row number required,
+/// and no `{text}` (a frame around it would skip every fact rule). Each default reads exactly as
+/// the code built it (`crates/bot/src/panel_texts_tests.rs`).
+fn security_answers(out: &mut Vec<Def>) {
+    use crate::embed::ARROW;
+    use crate::emoji::{MODERATOR, TARGET};
+    for (key, word, title, footer, rows) in PANELS {
+        let mut fields: Vec<(String, String)> = Vec::new();
+        let (mut vars, mut required): (Vec<&'static str>, Vec<&'static str>) = (vec![], vec![]);
+        for (code, name, var, how) in rows.iter() {
+            vars.push(code);
+            required.push(code);
+            if !var.is_empty() {
+                vars.push(var);
+                required.push(var);
+            }
+            let val = match *how {
+                "raw" => format!("{{{var}}}"),
+                _ => format!("*`{{{var}}}`*"),
+            };
+            if code
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .is_empty()
+            {
+                let lines = if var.is_empty() {
+                    String::new()
+                } else {
+                    format!("{ARROW} {val}")
+                };
+                let toggle = if *how == "toggle" { "{toggle}" } else { "" };
+                fields.push((format!("{{{code}}} {name}:{toggle}"), lines));
+            } else if let Some((_, lines)) = fields.last_mut() {
+                if !lines.is_empty() {
+                    lines.push('\n');
+                }
+                lines.push_str(&format!("{ARROW} {{{code}}} {name}: {val}"));
+            }
+        }
+        // The on or off sign states the status too: an edit must not leave a fixed one.
+        if rows.iter().any(|r| r.3 == "toggle") {
+            vars.push("toggle");
+            required.push("toggle");
+        }
+        let mut e = json!({"title": title, "color": GREY, "fields": fields
+            .iter()
+            .map(|(n, v)| json!({"name": n, "value": v, "inline": true}))
+            .collect::<Vec<_>>()});
+        // The footer names commands with the default prefix; the bot puts the server's own in
+        // after filling (`settings::with_prefix`). No `{prefix}`: a server's prefix such as `||`
+        // could wrap the facts in a spoiler the save check never sees.
+        if !footer.is_empty() {
+            e["footer"] = json!({ "text": footer });
+        }
+        set(
+            out,
+            (key, &format!("Answer: {word} panel"), SECURITY),
+            json!({"content": "", "embeds": [e]}),
+            (
+                &vars,
+                &required,
+                "the settings and the numbers people type to change them",
+            ),
+        );
+    }
+    let wl = "📋 Interactive Whitelist";
+    set(
+        out,
+        ("reply.whitelist.prompt", "Answer: whitelist menu", SECURITY),
+        json!({"content": "", "embeds": [{"title": wl, "color": ORANGE, "description": "Target: {target}"}]}),
+        (&["target"], &["target"], "what is being whitelisted"),
+    );
+    set(
+        out,
+        ("reply.whitelist.saved", "Answer: whitelist saved", SECURITY),
+        json!({"content": "", "embeds": [{"title": wl, "color": GREEN, "description": "{lists}", "fields": [
+            {"name": format!("{MODERATOR} Executor"), "value": "{moderator}", "inline": true},
+            {"name": format!("{TARGET} Target"), "value": "{target}", "inline": true},
+        ]}]}),
+        (
+            &["lists", "moderator", "target"],
+            &["lists", "moderator", "target"],
+            "which whitelists the target is on, who changed it and the target",
+        ),
     );
 }
 
@@ -3167,7 +3417,7 @@ fn answer_entries(out: &mut Vec<Def>) {
             fields: none(),
             footer: "Page: 1/{pages}".into(),
             required: &["server.name"],
-            what: "the server's facts",
+            what: "the server's details",
         },
     );
     d6(
@@ -5024,6 +5274,35 @@ const FEED_VARS: &[(&str, &str, &str)] = &[
 
 /// The editor name and example of a template variable of entry `key`.
 pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
+    if let Some(rows) = panel(key) {
+        if let Some(r) = rows.iter().find(|r| r.0 == name) {
+            // As the panel shows it: `[3]`, or `[A]` for a lettered row.
+            const SHOWN: [&str; 17] = [
+                "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]", "[11]",
+                "[12]", "[A]", "[B]", "[C]", "[D]", "[E]",
+            ];
+            let tail = r.0.trim_start_matches(|c: char| c.is_ascii_digit());
+            let want = if tail.is_empty() { r.0 } else { tail }.to_uppercase();
+            let shown = SHOWN.iter().find(|s| s[1..s.len() - 1] == want);
+            return (
+                "Row number people type to change it",
+                shown.copied().unwrap_or(r.0),
+            );
+        }
+        if let Some(r) = rows.iter().find(|r| r.2 == name) {
+            return (
+                r.1,
+                if r.3 == "raw" {
+                    "<#123456789012345678>"
+                } else {
+                    "Enabled"
+                },
+            );
+        }
+        if name == "toggle" {
+            return ("On or off sign after Status", " 🟢");
+        }
+    }
     let list = if key.starts_with("feed.") {
         FEED_VARS
     } else {
@@ -5328,6 +5607,28 @@ fn limit(m: &mut Value) {
             }
         }
     }
+    // Still over (no description, or too short to give enough): the last fields go, so Discord
+    // never refuses the whole message.
+    let len = |v: &Value| v.as_str().map_or(0, |s| s.chars().count());
+    let size = |e: &Value| {
+        len(&e["title"])
+            + len(&e["description"])
+            + len(&e["footer"]["text"])
+            + len(&e["author"]["name"])
+            + e["fields"].as_array().map_or(0, |f| {
+                f.iter().map(|x| len(&x["name"]) + len(&x["value"])).sum()
+            })
+    };
+    while embeds.iter().map(size).sum::<usize>() > 6000 {
+        let Some(f) = embeds.iter_mut().rev().find_map(|e| {
+            e.get_mut("fields")
+                .and_then(Value::as_array_mut)
+                .filter(|f| !f.is_empty())
+        }) else {
+            break;
+        };
+        f.pop();
+    }
 }
 
 /// Variables in `msg` that `key` does not offer (the save refuses these).
@@ -5406,8 +5707,9 @@ pub fn missing_text(key: &str, msg: &Value) -> Option<String> {
         } else {
             ""
         };
+        let key = if gone.len() == 1 { "the key variable" } else { "the key variables" };
         format!(
-            "this message must keep {} in {place}{plain}: Brim puts {} there. {insert}, or use Revert to default",
+            "this message must keep {key} {} in {place}{plain}: Brim puts {} there. {insert}, or use Revert to default",
             gone.join(", "),
             d.what
         )
@@ -5437,9 +5739,16 @@ fn fact_strings(d: &Def, msg: &Value) -> Vec<String> {
 /// [`FACT_LINES`] lines, or as many as the default has (a wall of empty lines must not push a fact
 /// out of sight).
 fn fact_places(d: &Def, msg: &Value) -> Vec<String> {
-    let own = d.template["embeds"][0]["description"]
+    let mut own = d.template["embeds"][0]["description"]
         .as_str()
         .map_or(0, |t| t.split('\n').count());
+    // A panel's rows may all go in one list: as many lines as its fields have.
+    if panel(&d.key).is_some() {
+        own = fact_strings(d, &d.template)
+            .iter()
+            .map(|s| s.split('\n').count())
+            .sum();
+    }
     let mut found = Vec::new();
     for s in fact_strings(d, msg) {
         let top: Vec<&str> = s.split('\n').take(FACT_LINES.max(own)).collect();
@@ -5461,7 +5770,7 @@ fn hides_facts(d: &Def, msg: &Value) -> Option<String> {
     };
     all.chars().any(bad).then(|| {
         format!(
-            "“{}” holds facts the recipient needs: it cannot hold invisible, control or text direction characters",
+            "“{}” holds key variables the recipient needs: it cannot hold invisible, control or text direction characters",
             d.name
         )
     })
@@ -5653,7 +5962,6 @@ mod tests {
             "dm.security",
             "dm.mcp_decision",
             "dm.invite_back",
-            "dm.rescue_expired",
             "dm.dashboard_2fa",
             "log.anti_nuke",
             "log.panic",
@@ -5666,10 +5974,17 @@ mod tests {
             assert!(!find(k).unwrap().locked, "{k}");
         }
         assert_eq!(find("log.panic").unwrap().required, ["title", "text"]);
-        assert_eq!(
-            find("dm.rescue_expired").unwrap().required,
-            ["name", "page"]
+        // No rescue key text is editable: a saved copy never applies.
+        let rescue = find("dm.rescue_expired").unwrap();
+        assert!(rescue.locked && rescue.security);
+        let copy =
+            json!({"content": "", "embeds": [{"title": "Hi", "description": "{name} {page}"}]});
+        let m = render(
+            "dm.rescue_expired",
+            Some(&copy),
+            &[("name", "S"), ("page", "https://x")],
         );
+        assert_eq!(m["embeds"][0]["title"], "Rescue key expired");
         assert_eq!(find("dm.dashboard_2fa").unwrap().required, ["code"]);
         let e =
             |d: &str| json!({"content": "", "embeds": [{"title": "{title}", "description": d}]});
@@ -6023,12 +6338,14 @@ mod tests {
             .contains(&d.key.as_str())
                 // The lock command answers  are one embed each.
                 || (d.key.starts_with("reply.lock.") && d.details())
-                || ANSWERS.contains(&d.key.as_str());
+                || ANSWERS.contains(&d.key.as_str())
+                || WHITELIST_ANSWERS.contains(&d.key.as_str())
+                || panel(&d.key).is_some();
             assert_eq!(d.required == ["text"], notice || line, "{}", d.key);
             // The whitelist command is a security command, so its replies are security texts.
             assert_eq!(
                 d.security,
-                d.key.starts_with("reply.whitelist."),
+                d.key.starts_with("reply.whitelist.") || d.key.starts_with("reply.panel."),
                 "{}",
                 d.key
             );

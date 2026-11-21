@@ -503,6 +503,65 @@ pub fn panel(m: &Module, cfg: &GuildCfg, gid: u64, page: usize) -> (Embed, usize
     (e.build(), pages)
 }
 
+/// The values of a security panel's entry (`botmsg::PANELS`): each row's number as shown
+/// (`[3]`, `[A]`), its value and the on or off sign, as [`entries`] shows them.
+pub(crate) fn panel_vars(
+    m: &Module,
+    cfg: &GuildCfg,
+    gid: u64,
+) -> Option<(&'static str, Vec<(&'static str, String)>)> {
+    let (key, .., rows) = brim_logging::botmsg::PANELS
+        .iter()
+        .find(|p| p.1 == m.names[0])?;
+    let dash = dashboard_link(gid);
+    let mut vars: Vec<(&'static str, String)> = vec![];
+    for (row, (code, _, var, how)) in m.rows.iter().zip(rows.iter()) {
+        let letter = code.trim_start_matches(|c: char| c.is_ascii_digit());
+        let shown = if letter.is_empty() { *code } else { letter };
+        vars.push((code, format!("[{}]", shown.to_uppercase())));
+        if var.is_empty() {
+            continue;
+        }
+        let val = match row.kind {
+            Kind::Dashboard | Kind::Users => dash.clone(),
+            _ => (row.get)(cfg),
+        };
+        if *how == "toggle" {
+            let sign = if val == "Enabled" { ON } else { OFF };
+            vars.push(("toggle", format!(" {sign}")));
+        }
+        vars.push((var, val));
+    }
+    Some((key, vars))
+}
+
+/// A panel entry's footer with the server's prefix for `t!`, as [`panel`] writes it.
+pub(crate) fn with_prefix(mut e: Embed, prefix: &str) -> Embed {
+    if let Some(f) = &mut e.footer {
+        f.text = f.text.replace("t!", prefix);
+    }
+    e
+}
+
+/// A module's first page as the server's edited version shows it: a security panel is its own
+/// entry of facts, the other panels are built here.
+async fn shown_panel(
+    app: &App,
+    m: &Module,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    page: usize,
+) -> (Embed, usize) {
+    let (embed, pages) = panel(m, cfg, gid.get(), page);
+    match panel_vars(m, cfg, gid.get()) {
+        Some((key, vars)) if pages == 1 => {
+            let e = crate::reply::answer(app, gid, key, &vars).await;
+            (with_prefix(e, &cfg.misc.prefix), 1)
+        }
+        _ => (embed, pages),
+    }
+}
+
 const PAGE: &str = "pg:";
 
 fn button(icon: Emoji, id: String, style: ButtonStyle, disabled: bool) -> Component {
@@ -800,7 +859,7 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
     let code = match &op {
         Op::Show(page) => {
             let cfg = app.cfg(gid.get()).await?;
-            let (embed, pages) = panel(m, &cfg, gid.get(), *page);
+            let (embed, pages) = shown_panel(app, m, &cfg, gid, *page).await;
             let row = (pages > 1).then(|| {
                 page_row(
                     msg.author.id.get(),

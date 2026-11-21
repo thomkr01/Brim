@@ -395,7 +395,7 @@ pub fn BotMessages(
         })
     };
     let badge = |r: &Value| {
-        let security = (r["security"] == true).then(|| view! { <span class="chip">{crate::icons::icon("lock")}"Security"</span><Tip text="Only the Owner and Extra Owners can change it, with a 2FA code, and every change is in the dashboard log with the old and new version. Brim always puts the facts in it (who, what, the counts), as plain text." icon="info" /> });
+        let security = (r["security"] == true).then(|| view! { <span class="chip">{crate::icons::icon("lock")}"Security"</span><Tip text="Only the Owner and Extra Owners can change it, with a 2FA code, and every change is in the dashboard log with the old and new version. Its key variables (who, what, the counts) must stay in it, as plain text." icon="info" /> });
         let state = if r["locked"] == true {
             view! { <span class="chip">{crate::icons::icon("lock")}"Locked"</span><Tip text="You can look at it, but nobody can change it, so it can never be hidden or blanked." icon="info" /> }.into_any()
         } else if r["message"].is_object() && !missing(r, &r["message"]).is_empty() {
@@ -543,6 +543,7 @@ pub fn BotMessages(
                 let r4 = r3.clone();
                 let all: Vec<String> = r3["required"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|v| format!("{{{v}}}")).collect();
                 let var = all.join(" and ");
+                let key = if all.len() > 1 { "Key variables" } else { "Key variable" };
                 let (place, button) = if r3["in_text"] == true {
                     ("in the message text or the first embed", format!("Insert {var}"))
                 } else if all.len() > 1 {
@@ -553,7 +554,7 @@ pub fn BotMessages(
                 let place = if r3["plain_facts"] == true { format!("{place}, as plain text (not in a spoiler, a link or <...>)") } else { place.to_string() };
                 view! {
                     <div class="note req-text" class:bad=gone>
-                        <b>{if gone { format!("{var} is missing: this message cannot be saved without it.") } else { format!("This message must use {var}.") }}</b>
+                        <b>{if gone { format!("{key} {var} {}: this message cannot be saved without {}.", if all.len() > 1 { "are missing" } else { "is missing" }, if all.len() > 1 { "them" } else { "it" }) } else { format!("This message must use the {} {var}.", key.to_lowercase()) }}</b>
                         <span class="muted">{format!("What is {var}? Brim puts {what} there. Write anything you like around it, but keep {var} {place}.")}</span>
                         {gone.then(|| view! { <button class="ghost" on:click=move |_| { cur.update(|c| insert_required(&r4, &mut c["body"])); ed.reset() }>{button}</button> })}
                     </div>

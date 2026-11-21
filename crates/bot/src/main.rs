@@ -48,6 +48,8 @@ mod msgrules;
 mod native;
 mod nsfw;
 mod owner;
+#[cfg(test)]
+mod panel_texts_tests;
 mod panic;
 mod permit_sync;
 mod prefix;
