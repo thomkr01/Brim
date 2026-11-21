@@ -1,10 +1,8 @@
 name: CI
 
 on:
-  # push only on main: a PR branch is already covered by pull_request (both ran every job twice).
+  # Every branch: a change is checked on its own branch, then main moves to that same commit.
   push:
-    branches: [main]
-  pull_request:
 
 permissions:
   contents: read

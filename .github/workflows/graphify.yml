@@ -2,8 +2,8 @@
 name: Graphify
 
 on:
-  pull_request:
-    paths-ignore: [ '**.md' ]
+  # Every push, docs too: graph is a required check, so main refuses a commit without it.
+  push:
   workflow_dispatch:
 
 permissions:
