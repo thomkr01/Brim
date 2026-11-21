@@ -48,6 +48,7 @@ pub struct GuildCfg {
     pub tickets: TicketsCfg,
     pub catch: CatchCfg,
     pub raider_list: RaiderListCfg,
+    pub modules: brim_core::sections::ModulesCfg,
     /// Per-command settings (`cmdcfg`); empty on a server that changed none.
     pub commands: brim_core::cmdcfg::CommandsCfg,
     /// Sections that failed to parse and run on their defaults; the owner is told.
@@ -96,6 +97,7 @@ pub fn check_section(name: &str, v: &Value, old: &Value) -> Result<(), String> {
         "verification" => t::<VerificationCfg>(v),
         "tickets" => t::<TicketsCfg>(v),
         "raider_list" => t::<RaiderListCfg>(v),
+        "modules" => t::<brim_core::sections::ModulesCfg>(v),
         "commands" => t::<brim_core::cmdcfg::CommandsCfg>(v),
         _ => Ok(()),
     }
@@ -137,10 +139,23 @@ impl GuildCfg {
             tickets: section(cfg, "tickets", &mut f),
             catch: section(cfg, "catch", &mut f),
             raider_list: section(cfg, "raider_list", &mut f),
+            modules: section(cfg, "modules", &mut f),
             commands: section(cfg, "commands", &mut f),
             fallbacks: vec![],
         };
         c.fallbacks = f;
+        // A module switched off turns its parts off here, so every handler sees them off; the
+        // stored settings are kept for when it is on again.
+        if !c.modules.server_joins {
+            c.joingate.enabled = false;
+            if let Some(r) = c.joinraid.as_mut() {
+                r.enabled = false;
+                r.voice.enabled = false;
+            }
+            c.verification.enabled = false;
+            c.raider_list.enabled = false;
+        }
+        c.logging.off = !c.modules.logging;
         c
     }
 }
@@ -732,6 +747,34 @@ mod tests {
         assert_eq!(c.lockdown.main_roles, vec![Id::new(9)]);
         assert!(!GuildCfg::parse(&json!({})).automod.enabled);
         assert_eq!(c.fallbacks, ["joingate"]);
+    }
+
+    /// A module switched off turns its parts off for the bot; a missing switch is on.
+    #[test]
+    fn a_module_off_turns_its_parts_off() {
+        let on = json!({
+            "joingate": {"enabled": true}, "verification": {"enabled": true},
+            "raider_list": {"enabled": true},
+            "joinraid": {"enabled": true, "count": 5, "span_ms": 1000, "suspicious_only": false, "active_ms": 1000, "voice": {"enabled": true}},
+            "logging": {"fallback": "42"},
+        });
+        let c = GuildCfg::parse(&on);
+        assert!(c.joingate.enabled && c.verification.enabled && c.raider_list.enabled);
+        assert!(c
+            .joinraid
+            .as_ref()
+            .is_some_and(|r| r.enabled && r.voice.enabled));
+        assert!(!c.logging.off && c.modules.messages);
+        let mut off = on.clone();
+        off["modules"] = json!({"server_joins": false, "logging": false, "messages": false});
+        let c = GuildCfg::parse(&off);
+        assert!(!c.joingate.enabled && !c.verification.enabled && !c.raider_list.enabled);
+        assert!(c
+            .joinraid
+            .as_ref()
+            .is_some_and(|r| !r.enabled && !r.voice.enabled));
+        assert!(c.logging.off && !c.modules.messages);
+        assert!(c.fallbacks.is_empty());
     }
 
     /// D48: a key a newer version wrote drops only that entry; a broken section is noted.

@@ -112,7 +112,7 @@ fn bot_roles(roles: &[RoleImg]) -> Vec<u64> {
 pub(crate) fn config_gate(config: &Value) -> Option<&'static str> {
     let main = main_roles(config);
     let given = ids(&config["verification"]["roles"]);
-    if config["verification"]["enabled"] != true {
+    if config["verification"]["enabled"] != true || config["modules"]["server_joins"] == false {
         Some("verification is off, so new members would get no role that lets them in")
     } else if main.is_empty() {
         Some("no main role is set")

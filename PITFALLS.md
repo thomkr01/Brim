@@ -1623,3 +1623,8 @@ A webhook feed stores no address (GitHub or GitLab calls Brim), and its reposito
 **Check now said nothing, and a new feed posted nothing to test with.** (feeds, 2026-11-21)
 The first check only remembers items, and Check now on a webhook feed did nothing. *Avoid:* Send latest posts the newest item (website, YouTube) or the newest event of a switched-on kind (GitHub, followed or webhook: the public events list, at most 5 events read), even one posted before, under a new delivery key. One at a time per feed (refused while one waits), not counted as a failed check. GitLab webhook feeds and private repositories say how to test instead (GitLab's Test button, GitHub's Recent Deliveries > Redeliver).
 
+
+## A module switch must reach every reader of its parts (2026-11-21)
+- The `modules` section holds the master switches of Server Joins, Messages and Logging (a missing switch is on). The bot applies them in `GuildCfg::parse`: Server Joins off turns Join Gate, Join Raid (with voice raids), Verification and the Raider List off in memory, and Logging off makes `LogConfig::target` drop event logs. The stored part settings stay as they are.
+- The first version missed readers that use the raw config: the Raider List SQL queries, the dashboard's web captcha, the Overview health list and the standard channel set's gate (`config_gate`), which would hide channels from @everyone while no verification ran. A part write that turned the module on again also fired on any save of a part that was already on.
+- **Rule:** code that reads a part's `enabled` from raw JSON or SQL also reads `modules.<module>` (`brim_core::sections::module_of`). A write turns the module on only when it turns the part on from off, and then needs the `modules` bar (Trusted Admin with 2FA).

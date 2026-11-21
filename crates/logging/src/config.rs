@@ -278,6 +278,9 @@ pub struct LogConfig {
     pub ignored_users: HashSet<Id<UserMarker>>,
     /// Edit and delete logs of messages with embeds are dropped.
     pub ignore_embeds: bool,
+    /// The Logging module is off: event logs are dropped, security and moderation logs still post.
+    #[serde(skip)]
+    pub off: bool,
 }
 
 impl LogKind {
@@ -302,6 +305,9 @@ impl LogConfig {
 
     /// The channel a log goes to, if any. A custom type beats an event route, which beats a kind route.
     pub fn target(&self, kind: LogKind, event: Option<LogEvent>) -> Option<Id<ChannelMarker>> {
+        if self.off && kind.ignorable() {
+            return None;
+        }
         let quiet = event.is_some_and(LogEvent::quiet);
         let routed = event
             .and_then(|e| {
@@ -360,6 +366,23 @@ mod tests {
         cfg.routes.insert(LogKind::Role, Id::new(2));
         assert_eq!(cfg.target(LogKind::Role, None), Some(Id::new(2)));
         assert_eq!(cfg.target(LogKind::Member, None), Some(fallback));
+    }
+
+    /// The Logging module off drops event logs only: security and moderation logs still post.
+    #[test]
+    fn logging_off_keeps_security_logs() {
+        let cfg = LogConfig {
+            fallback: Some(Id::new(1)),
+            off: true,
+            ..Default::default()
+        };
+        assert_eq!(cfg.target(LogKind::Role, None), None);
+        assert_eq!(
+            cfg.target(LogKind::Message, Some(LogEvent::MessageDelete)),
+            None
+        );
+        assert_eq!(cfg.target(LogKind::AntiNuke, None), Some(Id::new(1)));
+        assert_eq!(cfg.target(LogKind::AutoMod, None), Some(Id::new(1)));
     }
 
     #[test]

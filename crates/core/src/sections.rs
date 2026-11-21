@@ -570,6 +570,7 @@ pub const SENSITIVE: &[&str] = &[
     "raider_list",
     "retention",
     "commands",
+    "modules",
 ];
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1293,6 +1294,38 @@ pub enum CatchAction {
     Kick,
     Timeout,
     Log,
+}
+
+/// Master switches of the modules without one of their own. A missing switch is on, so a server
+/// keeps what it does today. Off keeps every setting below it; the bot only stops acting on them.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ModulesCfg {
+    /// Join Gate, Join Raid (with voice raids), Verification and the Raider List.
+    pub server_joins: bool,
+    /// Triggers, sticky messages, "every N messages" and clock schedules, tags and feeds.
+    pub messages: bool,
+    /// Event logs. Security and moderation logs still post (`LogKind::ignorable`).
+    pub logging: bool,
+}
+
+impl Default for ModulesCfg {
+    fn default() -> Self {
+        Self {
+            server_joins: true,
+            messages: true,
+            logging: true,
+        }
+    }
+}
+
+/// The module a part's `enabled` switch belongs to, for a part that has a module switch.
+pub fn module_of(section: &str) -> Option<&'static str> {
+    matches!(
+        section,
+        "joingate" | "joinraid" | "verification" | "raider_list"
+    )
+    .then_some("server_joins")
 }
 
 /// Honeypot channel: hacked accounts spam every channel, so anyone writing here is punished.

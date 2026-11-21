@@ -724,7 +724,24 @@ pub async fn put_section(
         && b.value["enabled"] == true
         && (b.value["category"].as_str().is_none_or(str::is_empty)
             || b.value["log_channel"].as_str().is_none_or(str::is_empty));
+    // Turning a part on (the wizard's recommended setup, a part switch, its page) turns its module
+    // on too, so one switch shows what runs. That needs the module switch's bar as well.
+    let module = brim_core::sections::module_of(&section).filter(|m| {
+        b.value["enabled"] == true
+            && config[&section]["enabled"] != true
+            && config["modules"][*m] == false
+    });
+    if module.is_some() {
+        let (min, step_up) = access::write_bar("modules");
+        require(&st, &s, guild, min, step_up).await?;
+    }
     let mut value = b.value;
+    if let Some(m) = module {
+        if !config["modules"].is_object() {
+            config["modules"] = json!({});
+        }
+        config["modules"][m] = json!(true);
+    }
     if section == "tickets" {
         // Only the bot sets it: it is the channel the bot deletes when the setting goes off.
         value["public_channel_id"] = config["tickets"]["public_channel_id"].clone();
@@ -1576,6 +1593,7 @@ fn reads(section: &str, v: Value) -> Result<(), serde_json::Error> {
         "raider_list" => serde_json::from_value::<RaiderListCfg>(v).map(drop),
         "retention" => serde_json::from_value::<brim_core::sections::RetentionCfg>(v).map(drop),
         "commands" => serde_json::from_value::<brim_core::cmdcfg::CommandsCfg>(v).map(drop),
+        "modules" => serde_json::from_value::<brim_core::sections::ModulesCfg>(v).map(drop),
         _ => Ok(()),
     }
 }
@@ -2157,6 +2175,48 @@ pub(crate) mod g3_handler_tests {
         )
         .await;
         assert!(matches!(r, Err(ApiError::Conflict(2))), "{r:?}");
+        cleanup(&st, g).await;
+    }
+
+    /// Turning a part on while its module is off turns the module on in the same version, and
+    /// needs the module switch's bar (2FA step-up) as well as the part's own.
+    #[tokio::test]
+    async fn a_part_turned_on_turns_its_module_on() {
+        let Some((st, s, g)) = setup(9_878_500_000).await else {
+            return;
+        };
+        put_version(
+            &st,
+            g,
+            1,
+            json!({"modules": {"server_joins": false, "logging": false}}),
+        )
+        .await;
+        let on = || body(json!({"expected_version": 1, "value": {"enabled": true}}));
+        let mut no_2fa = s.clone();
+        no_2fa.stepped_up = false;
+        let r = put_section(
+            State(st.clone()),
+            no_2fa,
+            Path((g, "joingate".to_string())),
+            on(),
+        )
+        .await;
+        assert!(r.is_err(), "turned Server Joins on without the 2FA step-up");
+        let _ = put_section(
+            State(st.clone()),
+            s.clone(),
+            Path((g, "joingate".to_string())),
+            on(),
+        )
+        .await
+        .unwrap();
+        let (_, c) = store::current(&st.db, g).await.unwrap();
+        assert_eq!(
+            c["modules"],
+            json!({"server_joins": true, "logging": false})
+        );
+        assert_eq!(c["joingate"]["enabled"], true);
         cleanup(&st, g).await;
     }
 

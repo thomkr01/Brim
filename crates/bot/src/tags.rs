@@ -129,6 +129,9 @@ pub async fn command(
     if !level.has("tags") {
         return say("reply.tag.no_permit", &[]).await;
     }
+    if !app.cfg(gid.get()).await?.modules.messages {
+        return say("reply.tag.module_off", &[]).await;
+    }
     let Some(ch) = i.channel.as_ref() else {
         return say("reply.tag.use_in_channel", &[]).await;
     };

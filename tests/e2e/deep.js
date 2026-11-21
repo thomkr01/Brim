@@ -66,8 +66,8 @@ const getJson = (page, path) => page.evaluate(async (p) => {
 // ---------- 1. API matrix: nobody may change what their level does not allow ----------
 async function matrix(browser) {
   const g = `/api/guilds/${G}`;
-  const SECT = { misc: ['owner', false], antinuke: ['owner', true], panic: ['owner', true], backups: ['owner', true], whitelist: ['admin', true], catch: ['admin', true], raider_list: ['owner', true], commands: ['owner', true] };
-  const sections = ['wizard', 'whitelist', 'antinuke', 'panic', 'backups', 'automod', 'filters', 'discord_automod', 'joingate', 'joinraid', 'verification', 'tickets', 'lockdown', 'catch', 'appeals', 'misc', 'logging', 'raider_list', 'commands'];
+  const SECT = { misc: ['owner', false], antinuke: ['owner', true], panic: ['owner', true], backups: ['owner', true], whitelist: ['admin', true], catch: ['admin', true], raider_list: ['owner', true], commands: ['owner', true], modules: ['admin', true] };
+  const sections = ['wizard', 'whitelist', 'antinuke', 'panic', 'backups', 'automod', 'filters', 'discord_automod', 'joingate', 'joinraid', 'verification', 'tickets', 'lockdown', 'catch', 'appeals', 'misc', 'logging', 'raider_list', 'commands', 'modules'];
   // [method, path, body(v) or null, min level, step-up, staff perms]
   const routes = () => [
     ...sections.map((s) => ['PUT', `${g}/config/${s}`, (v, cfg) => ({ expected_version: v, value: cfg[s] ?? {} }), ...(SECT[s] || ['editor', false])]),

@@ -576,6 +576,19 @@ pub(crate) async fn tick(st: &AppState) -> Result<bool, ApiError> {
     if !sends {
         return Ok(true);
     }
+    // The claim is stored, so the run is skipped, not kept for later.
+    let off: Option<bool> = sqlx::query_scalar(
+        "select coalesce(config->'modules'->>'messages', 'true') = 'false' from guild_config
+         where guild_id = $1 order by version desc limit 1",
+    )
+    .bind(guild)
+    .fetch_optional(&st.db)
+    .await?;
+    if off == Some(true) {
+        return issue(st, guild, rule, "Skipped a run: the Messages module is off")
+            .await
+            .map(|_| true);
+    }
     // The claim is stored, so an unread level skips this run with the reason; nothing is paused.
     match saver_may_run(st, guild, rule, "schedule").await {
         Ok(true) => {}

@@ -391,10 +391,10 @@ fs.mkdirSync(out, { recursive: true });
   // The sidebar module switch: turning off asks first, turning on does not; both save through the section's PUT.
   await page.goto(`${base}/#/${gid}/module/anti_nuke`);
   const SW = 'nav input.sw[aria-label="Anti Nuke on or off"]';
-  // Every module with a single on/off shows its switch, open or not; the others show none.
+  // Every module with a master switch shows it, open or not; Moderation has none.
   await page.waitForSelector(SW, { timeout: 8000 }).catch(() => {});
   const navSw = await page.$$eval('nav input.sw', (l) => l.map((e) => e.getAttribute('aria-label')).sort().join());
-  if (navSw !== 'Anti Nuke on or off,Auto Mod on or off,Tickets on or off') failed.push(`module switch: sidebar shows ${navSw}`);
+  if (navSw !== 'Anti Nuke on or off,Auto Mod on or off,Logging on or off,Messages on or off,Server Joins on or off,Tickets on or off') failed.push(`module switch: sidebar shows ${navSw}`);
   // A part with its own on/off shows its switch on the module page.
   await page.goto(`${base}/#/${gid}/module/server_joins`);
   const partSw = await page.waitForFunction(() => document.querySelectorAll('main a.card.link input.sw').length === 4, null, { timeout: 8000 }).then(() => true).catch(() => false);

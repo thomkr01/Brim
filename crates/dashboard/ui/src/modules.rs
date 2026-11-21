@@ -39,25 +39,41 @@ pub fn part_on(cfg: &Value, page: &str) -> Option<bool> {
     cfg["config"][flag(page)?]["enabled"].as_bool().or_else(|| cfg["config"].is_object().then_some(false))
 }
 
-/// The config section behind a module's master switch (Auto Mod, Anti Nuke, Tickets). The other
-/// modules have no single on/off: only their parts have one, on the module's page.
-pub fn switch_section(group: &str) -> Option<&'static str> {
+/// The config section and key behind a module's master switch. Auto Mod, Anti Nuke and Tickets use
+/// their own `enabled`; the others a key of the `modules` section. Moderation has none.
+pub fn switch_of(group: &str) -> Option<(&'static str, &'static str)> {
     match group {
-        "Auto Mod" => Some("automod"),
-        "Anti Nuke" => Some("antinuke"),
-        "tickets" => Some("tickets"),
+        "Auto Mod" => Some(("automod", "enabled")),
+        "Anti Nuke" => Some(("antinuke", "enabled")),
+        "tickets" => Some(("tickets", "enabled")),
+        "Server Joins" => Some(("modules", "server_joins")),
+        "Messages" => Some(("modules", "messages")),
+        "logging" => Some(("modules", "logging")),
         _ => None,
     }
 }
 
-/// The module's own on/off state, for modules with a master switch (Auto Mod, Anti Nuke).
+/// Whether a switch is on; `None` while the config is not loaded. A missing module key is on (the
+/// server's default), a missing `enabled` is off.
+pub fn switch_on(cfg: &Value, section: &str, key: &str) -> Option<bool> {
+    if section != "modules" {
+        return part_on(cfg, section);
+    }
+    cfg["config"]["modules"][key].as_bool().or_else(|| cfg["config"].is_object().then_some(true))
+}
+
+/// The module's own on/off state, for modules with a master switch.
 pub fn module_on(cfg: &Value, group: &str) -> Option<bool> {
-    part_on(cfg, switch_section(group)?)
+    let (section, key) = switch_of(group)?;
+    switch_on(cfg, section, key)
 }
 
 /// What turning the module off stops, for the confirm question (same words as the General page's help line).
 fn off_effect(section: &str) -> &'static str {
     match section {
+        "server_joins" => "New members are not checked: Join Gate, Join Raid, Verification and the Raider List stop. Their settings are kept.",
+        "messages" => "Triggers, sticky messages, schedules, tags and automatic feed posts stop. Their settings are kept.",
+        "logging" => "Event logs (messages, members, channels, roles and more) stop. Security and moderation logs still post.",
         "antinuke" => "Nobody is counted or punished for dangerous actions. Changes only permit holders may make (dangerous permissions, the vanity URL) are still undone.",
         "automod" => "Auto Mod checks no messages on this server.",
         "tickets" => "Members can no longer open new tickets.",
@@ -74,10 +90,12 @@ fn off_effect(section: &str) -> &'static str {
 /// `PUT /config/<section>` as the section's own page, so access and the 2FA step-up are the server's. Turning
 /// off asks first; a section the bot could not read is left to its own page, which shows the problem.
 #[component]
-pub fn ModuleSwitch(guild: String, section: &'static str, group: String, on: bool, msg: Msg, need: RwSignal<bool>, busy: RwSignal<bool>) -> impl IntoView {
+pub fn ModuleSwitch(guild: String, section: &'static str, #[prop(default = "enabled")] key: &'static str, group: String, on: bool, msg: Msg, need: RwSignal<bool>, busy: RwSignal<bool>) -> impl IntoView {
     let access = expect_context::<Access>();
     let cfg = expect_context::<Cfg>().0;
     let aria = format!("{group} on or off");
+    // `modules` is no page: its bar is a Trusted Admin (the server checks it, and the 2FA step-up).
+    let may = move || if section == "modules" { access.rank() >= 3 } else { access.of(section) == "full" };
     let click = move |e: leptos::ev::MouseEvent| {
         // The switch sits in the module's link: no navigation, and the checkbox follows the saved state only.
         e.prevent_default();
@@ -89,9 +107,9 @@ pub fn ModuleSwitch(guild: String, section: &'static str, group: String, on: boo
         if v["unread"].as_array().is_some_and(|u| u.iter().any(|x| x == section)) {
             return msg.err(format!("Brim could not read the {group} settings, so open its page to see why."));
         }
-        let (g, group, version, now) = (guild.clone(), group.clone(), v["version"].as_i64().unwrap_or(0), part_on(&v, section).unwrap_or(false));
+        let (g, group, version, now) = (guild.clone(), group.clone(), v["version"].as_i64().unwrap_or(0), switch_on(&v, section, key).unwrap_or(false));
         let mut value = if v["config"][section].is_object() { v["config"][section].clone() } else { json!({}) };
-        value["enabled"] = json!(!now);
+        value[key] = json!(!now);
         let go = move |_: String| {
             busy.set(true);
             run_act(
@@ -113,12 +131,12 @@ pub fn ModuleSwitch(guild: String, section: &'static str, group: String, on: boo
             )
         };
         if now {
-            ask(Ask::new(format!("Turn {group} off?")).text(off_effect(section)).yes("Turn off").danger(), go)
+            ask(Ask::new(format!("Turn {group} off?")).text(off_effect(if section == "modules" { key } else { section })).yes("Turn off").danger(), go)
         } else {
             go(String::new())
         }
     };
-    view! { <input type="checkbox" class="sw" role="switch" aria-label=aria prop:checked=on disabled=move || busy.get() || access.of(section) != "full" on:click=click /> }
+    view! { <input type="checkbox" class="sw" role="switch" aria-label=aria prop:checked=on disabled=move || busy.get() || !may() on:click=click /> }
 }
 
 pub fn blurb(p: &str) -> &'static str {
@@ -161,7 +179,7 @@ pub fn ModulePage(guild: String, group: &'static str) -> impl IntoView {
     view! {
         <Head guild=guild.clone() page="Modules".to_string() big=group.to_string() />
         <Toast msg />
-        {move || module_on(&cfg.get(), group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">"Turn it on or off with the switch in the menu."</span></p> })}
+        {move || module_on(&cfg.get(), group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">{if on { "Turn it on or off with the switch in the menu." } else { "Nothing below runs until you turn it on with the switch in the menu. The settings are kept." }}</span></p> })}
         <div class="stack">
             {items.iter().filter(|(p, _)| access.of(p) != "hidden").map(|(p, t)| {
                 let (g, p, t) = (g.clone(), *p, *t);

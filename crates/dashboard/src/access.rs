@@ -25,6 +25,9 @@ pub fn write_bar(section: &str) -> (Level, bool) {
         "antinuke" | "panic" | "backups" | "raider_list" | "retention" | "commands" => {
             (Level::Owner, true)
         }
+        // A module switch turns off verification, join checks or event logs at once: Owners,
+        // Extra Owners and Trusted Admins, with the 2FA step-up.
+        "modules" => (Level::Admin, true),
         s if SENSITIVE.contains(&s) => (Level::Admin, true),
         _ => (Level::Editor, false),
     }
@@ -51,6 +54,7 @@ pub const SECTIONS: &[&str] = &[
     "raider_list",
     "retention",
     "commands",
+    "modules",
 ];
 
 /// What a dashboard page shows the user: everything, a greyed-out read-only view, or nothing.
@@ -236,6 +240,7 @@ mod tests {
         );
         assert_eq!(page("channel_setup", Level::Admin, &[]), PageAccess::Read);
         assert_eq!(page("raider_list", Level::Editor, &[]), PageAccess::Hidden);
+        assert_eq!(write_bar("modules"), (Level::Admin, true));
         assert_eq!(page("raider_list", Level::Admin, &[]), PageAccess::Read);
         assert_eq!(page("raider_matches", Level::Admin, &[]), PageAccess::Full);
         assert!(PAGES

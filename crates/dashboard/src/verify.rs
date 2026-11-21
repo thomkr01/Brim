@@ -23,7 +23,7 @@ fn keys() -> Option<(String, String)> {
 
 fn gate(cfg: &Value, have_keys: bool) -> Result<bool, &'static str> {
     let v = &cfg["verification"];
-    if v["enabled"] != true || v["mode"] != "Web" {
+    if v["enabled"] != true || v["mode"] != "Web" || cfg["modules"]["server_joins"] == false {
         return Err("Web verification is not turned on for this server.");
     }
     if v["roles"].as_array().is_none_or(|r| r.is_empty()) {

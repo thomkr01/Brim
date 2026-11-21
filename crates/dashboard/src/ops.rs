@@ -189,7 +189,12 @@ pub(crate) async fn live(st: &AppState, guild: i64, config: &Value) -> Result<Li
             mod_log: config["logging"]["routes"]["mod_command"].is_string(),
             // Every module defaults to off, so a missing switch reads as off.
             modules: MODULES
-                .map(|(name, k, _)| (name, config[k]["enabled"] == true))
+                // A part is off while its module is off (`modules`, a missing switch is on).
+                .map(|(name, k, _)| {
+                    let module = brim_core::sections::module_of(k)
+                        .is_none_or(|m| config["modules"][m] != false);
+                    (name, config[k]["enabled"] == true && module)
+                })
                 .to_vec(),
             main_roles: config["lockdown"]["main_roles"]
                 .as_array()
@@ -1439,6 +1444,17 @@ async fn setup_fix(
                 return Err(ApiError::Forbidden("only owners can turn this on"));
             }
             config[*section]["enabled"] = json!(true);
+            // Its module goes on too, or the fix would change nothing (same bar: Trusted Admin).
+            if let Some(m) = brim_core::sections::module_of(section) {
+                if config["modules"][m] == false {
+                    if level < crate::access::write_bar("modules").0 {
+                        return Err(ApiError::Forbidden(
+                            "only owners and trusted admins can turn this on",
+                        ));
+                    }
+                    config["modules"][m] = json!(true);
+                }
+            }
             crate::api::validate(section, &config[*section], &c[*section])?;
             if let Some(e) = brim_automod::join::web_mode_error(&config) {
                 return Err(ApiError::BadRequest(e.into()));

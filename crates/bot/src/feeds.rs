@@ -96,7 +96,10 @@ async fn round(
                 source_picture, send_as_bot, message, primed, asked, fails from feeds
          where kind in ('rss', 'youtube') and (asked = 'test'
             or (state <> 'paused' and asked is not null)
-            or (state = 'on' and (last_check is null or last_check < now() - interval '10 minutes')))
+            or (state = 'on' and (last_check is null or last_check < now() - interval '10 minutes')
+                -- The Messages module is off: no automatic checks; a test or Send latest still runs.
+                and coalesce((select c.config->'modules'->>'messages' from guild_config c
+                              where c.guild_id = feeds.guild_id order by c.version desc limit 1), 'true') <> 'false'))
          order by last_check nulls first limit 200",
     )
     .fetch_all(&app.pool)

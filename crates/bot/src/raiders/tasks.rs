@@ -35,6 +35,7 @@ async fn targets(app: &App, kind: &str, user: i64) -> Result<Vec<i64>> {
              JOIN LATERAL (SELECT config FROM guild_config WHERE guild_id = o.guild_id
                            ORDER BY version DESC LIMIT 1) c ON true
              WHERE c.config->'raider_list'->>'enabled' = 'true'
+               AND coalesce(c.config->'modules'->>'server_joins', 'true') <> 'false'
                AND o.guild_id NOT IN (SELECT guild_id FROM guild_left)",
         ),
         "raider_lift" => {
@@ -144,7 +145,8 @@ pub async fn check_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()>
 pub async fn scan_job(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     let cfg = app.cfg(gid.get()).await?;
     let c = &cfg.raider_list;
-    if !c.scan_members {
+    // Off since it was queued (the list, or the Server Joins module): no scan.
+    if !c.enabled || !c.scan_members {
         return Ok(());
     }
     let mut after = None;
@@ -188,6 +190,7 @@ pub async fn on_saved(app: &App, gid: Id<GuildMarker>, version: Option<i32>) -> 
     let on: Vec<bool> = sqlx::query_scalar(
         "SELECT COALESCE((config->'raider_list'->>'enabled')::boolean, false)
            AND COALESCE((config->'raider_list'->>'scan_members')::boolean, true)
+           AND coalesce(config->'modules'->>'server_joins', 'true') <> 'false'
          FROM guild_config WHERE guild_id = $1 AND ($2::int IS NULL OR version <= $2)
          ORDER BY version DESC LIMIT 2",
     )

@@ -242,6 +242,10 @@ fn claim(i: usize, key: (u64, u64), gap: Duration) -> bool {
 /// message (never a bot's or a webhook's) also counts toward "every N messages" in its channel (at
 /// N the rule is marked due), and may queue a trigger answer.
 pub async fn on_message(app: &App, m: &Message, guild: Id<GuildMarker>) -> Result<()> {
+    // The Messages module is off: no counting, no trigger answers, no sticky moves.
+    if !app.cfg(guild.get()).await?.modules.messages {
+        return Ok(());
+    }
     let rules = rules(app, guild).await?;
     sticky(app, m, guild, &rules).await?;
     if m.author.bot || m.webhook_id.is_some() {

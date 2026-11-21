@@ -5258,6 +5258,13 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "You lack the tags permit.",
     ));
     out.push(say(
+        "reply.tag.module_off",
+        "Reply: Messages module is off",
+        g,
+        &[],
+        "Not posted: the Messages module is off on this server.",
+    ));
+    out.push(say(
         "reply.tag.use_in_channel",
         "Reply: used outside a channel",
         g,
