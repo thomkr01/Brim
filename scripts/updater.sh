@@ -53,14 +53,15 @@ healthy() {
 }
 
 # Up and answering within a minute, then still up 15 seconds later (catches crash loops).
+# SETTLE_TRIES and SETTLE_SECS are set only by the updater test (tests/e2e/updater.sh), to wait less.
 settled() {
   i=0
   until healthy; do
     i=$((i + 1))
-    [ "$i" -lt 30 ] || return 1
+    [ "$i" -lt "${SETTLE_TRIES:-30}" ] || return 1
     sleep 2
   done
-  sleep 15
+  sleep "${SETTLE_SECS:-15}"
   healthy
 }
 

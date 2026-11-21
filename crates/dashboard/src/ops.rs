@@ -2404,7 +2404,10 @@ mod tests {
         let api = format!("http://{}", l.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(l, app).await });
         let st = AppState {
-            db: sqlx::PgPool::connect_lazy("postgres://x@127.0.0.1:1/x").unwrap(),
+            db: sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(200))
+                .connect_lazy("postgres://x@127.0.0.1:1/x")
+                .unwrap(),
             discord: crate::discord::Discord {
                 http: reqwest::Client::builder().no_proxy().build().unwrap(),
                 client_id: String::new(),

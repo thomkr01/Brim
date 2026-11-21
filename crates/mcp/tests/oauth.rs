@@ -115,6 +115,8 @@ fn query(loc: &str, key: &str) -> String {
 async fn owner_gets_a_token_others_do_not() {
     let api = mock_discord().await;
     let db = sqlx::postgres::PgPoolOptions::new()
+        // A pool that never connects: without a short wait each query waits the default 30 s.
+        .acquire_timeout(std::time::Duration::from_millis(200))
         .connect_lazy("postgres://x@127.0.0.1:1/x")
         .unwrap();
     let t = T(brim_mcp::State {

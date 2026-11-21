@@ -49,7 +49,8 @@ services:
   updater:
     image: brim-updater:test
     depends_on: { postgres: { condition: service_healthy } }
-    environment: { DATABASE_URL: "postgres://postgres:x@postgres:5432/postgres", ATTEST_URL: "http://attest:8080" }
+    # Shorter health waits than on a server: these stand-in images start at once.
+    environment: { DATABASE_URL: "postgres://postgres:x@postgres:5432/postgres", ATTEST_URL: "http://attest:8080", SETTLE_TRIES: 10, SETTLE_SECS: 5 }
     volumes: ["/var/run/docker.sock:/var/run/docker.sock", ".:/project:ro", "$dir/b:/backups"]
 YML
 

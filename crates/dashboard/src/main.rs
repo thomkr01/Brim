@@ -161,6 +161,32 @@ fn site_page(html: &str, redirect_uri: &str) -> String {
     html.replace("__SITE__", &base.replace(['"', '<', '>', '&'], ""))
 }
 
+/// Whether trunk named this built file by a hash of its content (`name-1a2b3c4d5e6f7a8b.js`,
+/// `name-1a2b3c4d5e6f7a8b_bg.wasm`): a file of that name never changes. Copied assets keep their names.
+fn hashed_asset(path: &str) -> bool {
+    let Some((stem, ext)) = path.rsplit_once('.') else {
+        return false;
+    };
+    let stem = stem.strip_suffix("_bg").unwrap_or(stem);
+    matches!(ext, "js" | "wasm" | "css")
+        && stem.rsplit_once('-').is_some_and(|(_, h)| {
+            (8..=16).contains(&h.len()) && h.bytes().all(|b| b.is_ascii_hexdigit())
+        })
+}
+
+/// A hashed UI file is kept by the browser, so a page load asks only for index.html again.
+async fn cache_hashed(req: axum::extract::Request, next: middleware::Next) -> Response {
+    let hashed = hashed_asset(req.uri().path());
+    let mut res = next.run(req).await;
+    if hashed && res.status() == StatusCode::OK {
+        res.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+    res
+}
+
 pub fn router(st: AppState, dist: &str) -> Router {
     let g = "/api/guilds/{guild}";
     let page = std::fs::read_to_string(std::path::Path::new(dist).join("index.html"))
@@ -234,11 +260,13 @@ pub fn router(st: AppState, dist: &str) -> Router {
         .layer(middleware::from_fn(auth::edge_only))
         // Hash routing means the server never needs an index.html fallback; one would also hide
         // missing assets by answering a stale hashed .js/.wasm request with HTML.
-        .fallback_service(ServeDir::new(dist).not_found_service(
-            axum::routing::any(|| async {
-                (StatusCode::NOT_FOUND, "Not found. If this is the dashboard root, the web UI was not built into the image: rebuild with docker compose up -d --build.")
-            }),
-        ))
+        .fallback_service(
+            tower::ServiceBuilder::new()
+                .layer(middleware::from_fn(cache_hashed))
+                .service(ServeDir::new(dist).not_found_service(axum::routing::any(|| async {
+                    (StatusCode::NOT_FOUND, "Not found. If this is the dashboard root, the web UI was not built into the image: rebuild with docker compose up -d --build.")
+                }))),
+        )
         .layer(SetResponseHeaderLayer::if_not_present(
             CACHE_CONTROL,
             HeaderValue::from_static("no-cache"),
@@ -393,7 +421,10 @@ mod tests {
     #[tokio::test]
     async fn api_routes_are_rate_limited_and_every_response_has_security_headers() {
         let st = AppState {
-            db: PgPool::connect_lazy("postgres://x@127.0.0.1:1/x").unwrap(),
+            db: sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(200))
+                .connect_lazy("postgres://x@127.0.0.1:1/x")
+                .unwrap(),
             discord: discord::Discord {
                 http: reqwest::Client::new(),
                 client_id: String::new(),
@@ -412,7 +443,11 @@ mod tests {
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let app = router(st, "/nonexistent");
+        let dist = std::env::temp_dir().join(format!("brim-dist-{}", std::process::id()));
+        std::fs::create_dir_all(&dist).unwrap();
+        std::fs::write(dist.join("ui-0123456789abcdef_bg.wasm"), "w").unwrap();
+        std::fs::write(dist.join("logo.svg"), "s").unwrap();
+        let app = router(st, dist.to_str().unwrap());
         tokio::spawn(async move { axum::serve(listener, app).await });
         let http = reqwest::Client::builder()
             .no_proxy()
@@ -446,5 +481,43 @@ mod tests {
         );
         assert_eq!(asset.headers()["x-content-type-options"], "nosniff");
         assert_eq!(asset.headers()["referrer-policy"], "same-origin");
+        assert_eq!(asset.headers()["cache-control"], "no-cache");
+        // Only a file named by its content hash is kept; a copied asset is checked on each load.
+        let wasm = get("/ui-0123456789abcdef_bg.wasm").await.unwrap();
+        assert_eq!(wasm.status(), 200);
+        assert_eq!(
+            wasm.headers()["cache-control"],
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(wasm.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            get("/logo.svg").await.unwrap().headers()["cache-control"],
+            "no-cache"
+        );
+        std::fs::remove_dir_all(dist).unwrap();
+    }
+
+    #[test]
+    fn only_trunk_hashed_names_count_as_hashed() {
+        for yes in [
+            "/brim-ui-0123456789abcdef.js",
+            "/brim-ui-0123456789abcdef_bg.wasm",
+            "/style-89abcdef01234567.css",
+            "/a-1234abcd.js",
+        ] {
+            assert!(hashed_asset(yes), "{yes}");
+        }
+        for no in [
+            "/logo.svg",
+            "/app.wasm",
+            "/emoji.json",
+            "/fonts/poppins-700-latin.woff2",
+            "/snippets/x-0123456789abcdef/inline0.js",
+            "/x-notahash.js",
+            "/a-0123456789abcdef0.js",
+            "/x-0123456789abcdef.png",
+        ] {
+            assert!(!hashed_asset(no), "{no}");
+        }
     }
 }

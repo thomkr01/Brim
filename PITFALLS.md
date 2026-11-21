@@ -1423,7 +1423,7 @@ Two quick merges started two Images runs; if the older one finished last, `:late
 
 **Trunk's prebuilt wasm-bindgen needs a newer glibc.** (#123)
 On the arm64 VPS `trunk build` failed with `GLIBC_2.38 not found`.
-*Avoid:* the Dockerfile builds `wasm-bindgen-cli` itself at the version the UI lockfile resolves to. Don't hardcode the version: read it from the committed UI lockfile (`cargo pkgid wasm-bindgen`).
+*Avoid:* the Dockerfile builds `wasm-bindgen-cli` itself at the version the UI lockfile resolves to. Don't hardcode the version: read it from the committed UI lockfile (the `wasm-bindgen` entry of `crates/dashboard/ui/Cargo.lock`, read before the UI code is copied in, so the build cache keeps this step).
 
 **containerd deletes an untagged image.** (#128)
 Rollback by image id failed because the old image was already gone.
@@ -1454,7 +1454,13 @@ Fix with `cargo update -p <crate>`. A new dependency can also pull a crate back 
 **A new migration was missing from the test binary.** (11-18)
 `sqlx::migrate!` embeds `crates/core/migrations` at compile time, and core had no build script, so after adding a migration an incremental build kept the old list and the tests ran without it. *Avoid:* `crates/core/build.rs` reruns on a change in `migrations`.
 
+**Each release compiled every Rust library again.** (CI speed look, 2026-11-21)
+The builder stage started with `COPY . .`, so any change in the code threw away the layer that held the compiled libraries, and each image build took 8 to 10 minutes. *Avoid:* the Dockerfile copies only the manifests, the lock file and `vendor/` first, builds the libraries against empty stand-in crates, and then deletes every `brim*` artifact before the real code is copied, so no stand-in output can reach an image. A new workspace crate needs its own `COPY crates/<name>/Cargo.toml` line and a stand-in in that step; without it the build stops with a manifest error.
+
 ## 8. Tests
+
+**Two tests waited 30 seconds on a database that never answers.** (CI speed look, 2026-11-21)
+`owner_gets_a_token_others_do_not` (MCP) and `icon_revert_clears_a_new_icon_and_refuses_a_bad_hash` (dashboard) build their state with `connect_lazy("postgres://x@127.0.0.1:1/x")`. A path that reads the database then waits for sqlx's default acquire timeout of 30 seconds before it fails, so each push spent about a minute on nothing. *Avoid:* a pool that must never connect gets `PgPoolOptions::new().acquire_timeout(200 ms)`. Searched: all four such pools (dashboard `main.rs`, `ops.rs`, `sections.rs`, MCP `tests/oauth.rs`) now have it.
 
 **A role setup that never committed passed every local run.** (PR D, 11-21)
 `set_mcp_password` opened a transaction and wrote the password outside it, with no commit, so the role it made was rolled back; locally the role was still there from earlier runs, because roles belong to the whole Postgres server, not to the dropped test database. CI (a new server each run) failed. *Avoid:* test role setup on a fresh Postgres server (`docker run postgres:16`), not only a fresh database, and run every statement of a transaction through `&mut *tx` up to `commit`.
