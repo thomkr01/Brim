@@ -5,13 +5,14 @@ use leptos::{prelude::*, task::spawn_local};
 use serde_json::Value;
 use std::time::Duration;
 
-/// The repository of this server's builds: the old one until its owner moves it to the Brim names.
-fn repo(d: &Value) -> &'static str {
-    if d["old_names"].as_bool() == Some(true) {
-        "https://github.com/thomkr01/TommyBot"
-    } else {
-        "https://github.com/thomkr01/Brim"
-    }
+/// The repository of the builds.
+const GH: &str = "https://github.com/thomkr01/Brim";
+
+/// One change: its line, with a link to its pull request only when it has one (plain text).
+fn change(c: &Value) -> AnyView {
+    let what = c["what"].as_str().unwrap_or("").to_string();
+    let pr = c["pr"].as_u64().map(|pr| view! { <a href=format!("{GH}/pull/{pr}") target="_blank" rel="noopener">{format!("#{pr}")}</a>" " });
+    view! { <li>{pr}{if what.is_empty() { view! { <span class="muted">"No description"</span> }.into_any() } else { what.into_any() }}</li> }.into_any()
 }
 
 /// What the Update button does not update: the updater and docker-compose.yml. As the dashboard's
@@ -71,8 +72,14 @@ pub fn Update() -> impl IntoView {
     // The server's step time is whole seconds and only as fresh as the last answer, so the page
     // counts on from it with its own clock: the time left and the bar move smoothly, not once per
     // slow answer.
-    let (fetched, now) = (StoredValue::new(js_sys::Date::now()), RwSignal::new(js_sys::Date::now()));
-    let clock = set_interval_with_handle(move || now.set(js_sys::Date::now()), Duration::from_millis(250));
+    let (fetched, now) = (
+        StoredValue::new(js_sys::Date::now()),
+        RwSignal::new(js_sys::Date::now()),
+    );
+    let clock = set_interval_with_handle(
+        move || now.set(js_sys::Date::now()),
+        Duration::from_millis(250),
+    );
     on_cleanup(move || {
         if let Ok(h) = clock {
             h.clear()
@@ -80,7 +87,10 @@ pub fn Update() -> impl IntoView {
     });
     let msg = Msg::default();
     let need = step_up();
-    let load = move || {
+    // Set from the click until the page has the queued run, so the button shows the working sign at
+    // once and cannot be pressed twice while the server checks the build (it asks GitHub first).
+    let busy = RwSignal::new(String::new());
+    let load = move |clear: bool| {
         spawn_local(async move {
             let r = api("GET", "/api/update", None).await;
             // The user may have left the page while the request ran (the dashboard restarts mid-update).
@@ -102,9 +112,13 @@ pub fn Update() -> impl IntoView {
                 }
                 Err(_) => away.set(true),
             }
+            // Only the answer after the POST clears it: a poll answering earlier must not re-enable the button.
+            if clear {
+                busy.try_set(String::new());
+            }
         })
     };
-    load();
+    load(false);
     let active = move || {
         matches!(
             data.get()["run"]["status"].as_str(),
@@ -114,7 +128,7 @@ pub fn Update() -> impl IntoView {
     let poll = set_interval_with_handle(
         move || {
             if active() || away.get_untracked() {
-                load()
+                load(false)
             }
         },
         Duration::from_secs(1),
@@ -126,17 +140,27 @@ pub fn Update() -> impl IntoView {
     });
     // Installs exactly this build: the server pulls its images by digest and refuses anything else.
     let start = move |sha: String| {
-        run_act(
-            api("POST", "/api/update", Some(serde_json::json!({"sha": sha}))),
+        run_resumable(
+            move || {
+                busy.set(sha.clone());
+                let sha = sha.clone();
+                async move {
+                    let r = api("POST", "/api/update", Some(serde_json::json!({"sha": sha}))).await;
+                    // Kept on after a good answer: `load` clears it once the queued run is shown.
+                    if r.is_err() {
+                        busy.try_set(String::new());
+                    }
+                    r
+                }
+            },
             msg,
             need,
-            move |_| load(),
+            move |_| load(true),
         )
     };
 
     let head = move || {
         let d = data.get();
-        let gh = repo(&d);
         let (cur, new) = (
             d["current"].as_str().map(String::from),
             d["latest"]["sha"].as_str().map(String::from),
@@ -152,18 +176,17 @@ pub fn Update() -> impl IntoView {
         let more = d["more"].as_u64().unwrap_or(0);
         let changes = (offer && d["changes"].as_array().is_some_and(|a| !a.is_empty())).then(|| view! {
             <ul class="small">
-                {d["changes"].as_array().cloned().unwrap_or_default().into_iter().map(|c| {
-                    let pr = c["pr"].as_u64().unwrap_or(0);
-                    let what = c["what"].as_str().unwrap_or("").to_string();
-                    view! { <li><a href=format!("{gh}/pull/{pr}") target="_blank" rel="noopener">{format!("#{pr}")}</a>" "
-                        {if what.is_empty() { view! { <span class="muted">"No description"</span> }.into_any() } else { what.into_any() }}</li> }
-                }).collect_view()}
+                {d["changes"].as_array().cloned().unwrap_or_default().iter().map(change).collect_view()}
                 {(more > 0).then(|| view! { <li class="muted">{format!("and {more} more")}</li> })}
             </ul>
         });
         let latest_sha = d["latest"]["sha"].as_str().unwrap_or("").to_string();
         // Up to date but on another commit: what runs is newer than the list, so it is the newest.
-        let newest = if fresh { &d["current"] } else { &d["latest"]["sha"] };
+        let newest = if fresh {
+            &d["current"]
+        } else {
+            &d["latest"]["sha"]
+        };
         // An updater from before it reported its commit would pull whatever is tagged: it must go first.
         let old_updater = d["updater"].as_bool().unwrap_or(false) && d["updater_sha"].is_null();
         let behind: Vec<String> = d["behind"]
@@ -192,7 +215,7 @@ pub fn Update() -> impl IntoView {
                 } else if active() {
                     ().into_any()
                 } else {
-                    view! { <button class="go" on:click=move |_| start(latest_sha.clone())>"Update now"</button> }.into_any()
+                    view! { <button class="go" disabled=move || !busy.with(String::is_empty) on:click={ let s = latest_sha.clone(); move |_| start(s.clone()) }>{busy_label(move || !busy.with(String::is_empty), "Update now")}</button> }.into_any()
                 }}
             </div>
         }
@@ -201,7 +224,6 @@ pub fn Update() -> impl IntoView {
     // The other published builds, to go back to one (GHCR keeps the newest 10).
     let earlier = move || {
         let d = data.get();
-        let gh = repo(&d);
         let cur = d["current"].as_str().unwrap_or("").to_string();
         let builds: Vec<Value> = d["builds"].as_array().cloned().unwrap_or_default();
         let can =
@@ -209,14 +231,10 @@ pub fn Update() -> impl IntoView {
         let rows = builds.into_iter().filter(|b| b["sha"].as_str() != Some(cur.as_str())).map(|b| {
             let sha = b["sha"].as_str().unwrap_or("").to_string();
             let at = b["at"].as_str().unwrap_or("").replace('T', " ").chars().take(16).collect::<String>();
-            let pick = sha.clone();
-            let lines = b["changes"].as_array().cloned().unwrap_or_default().into_iter().map(|c| {
-                let pr = c["pr"].as_u64().unwrap_or(0);
-                let what = c["what"].as_str().unwrap_or("").to_string();
-                view! { <li><a href=format!("{gh}/pull/{pr}") target="_blank" rel="noopener">{format!("#{pr}")}</a>" "{if what.is_empty() { view! { <span class="muted">"No description"</span> }.into_any() } else { what.into_any() }}</li> }
-            }).collect_view();
-            view! { <li><a href=format!("{gh}/commit/{sha}") target="_blank" rel="noopener"><code>{short(&b["sha"])}</code></a>" "<span class="muted">{at}" UTC"</span>" "
-                {can.then(|| view! { <button class="ghost" on:click=move |_| start(pick.clone())>"Install"</button> })}
+            let (pick, mine) = (sha.clone(), sha.clone());
+            let lines = b["changes"].as_array().cloned().unwrap_or_default().iter().map(change).collect_view();
+            view! { <li><a href=format!("{GH}/commit/{sha}") target="_blank" rel="noopener"><code>{short(&b["sha"])}</code></a>" "<span class="muted">{at}" UTC"</span>" "
+                {can.then(|| view! { <button class="ghost" disabled=move || !busy.with(String::is_empty) on:click={ let p = pick.clone(); move |_| start(p.clone()) }>{busy_label(move || busy.get() == mine, "Install")}</button> })}
                 <ul class="small builds">{lines}</ul></li> }
         }).collect_view();
         view! {
@@ -230,7 +248,6 @@ pub fn Update() -> impl IntoView {
 
     let run = move || {
         let d = data.get();
-        let gh = repo(&d);
         let r = &d["run"];
         let status = r["status"].as_str()?.to_string();
         let est: Vec<i64> = d["estimate"]
@@ -272,7 +289,6 @@ pub fn Update() -> impl IntoView {
                 };
                 let left = move || progress(&est2, step, elapsed0).1 - more() as i64;
                 view! {
-                    <Show when=move || away.get()><Pose pose=Brim::AsleepOnDuty class="pose-top" /></Show>
                     <div class="pbar" role="progressbar" aria-label="update progress"><i style=move || format!("width:{:.1}%", share() * 100.0)></i></div>
                     <p class="muted">{move || format!("About {} left", dur(left().max(1)))}{move || away.get().then_some(". The dashboard is restarting, this page reconnects by itself.")}</p>
                 }.into_any()
@@ -282,11 +298,7 @@ pub fn Update() -> impl IntoView {
                 let to = r["to_sha"].as_str().unwrap_or("");
                 let found = d["builds"].as_array().into_iter().flatten().find(|b| b["sha"].as_str() == Some(to)).and_then(|b| b["changes"].as_array()).cloned().unwrap_or_default();
                 let n = found.len();
-                let lines = found.into_iter().map(|c| {
-                    let pr = c["pr"].as_u64().unwrap_or(0);
-                    let what = c["what"].as_str().unwrap_or("").to_string();
-                    view! { <li><a href=format!("{gh}/pull/{pr}") target="_blank" rel="noopener">{format!("#{pr}")}</a>" "{if what.is_empty() { view! { <span class="muted">"No description"</span> }.into_any() } else { what.into_any() }}</li> }
-                }).collect_view();
+                let lines = found.iter().map(change).collect_view();
                 let reload = loaded_sha.get_value().is_some_and(|s| s != d["current"]);
                 view! {
                     <p class="ok">{format!("Updated to {}{}", short(&r["to_sha"]), if n == 0 { "." } else { ":" })}</p>

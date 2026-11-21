@@ -5,6 +5,7 @@
 // - style.css and design/bundle.css: every spacing (margin, padding, gap, offsets) is 4 px or a multiple of 4 (owner decision 2026-11-20), as a px value or a --space-N token. Box sizes, borders, radii and em values are not spacings.
 // - style.css: font-size uses only the five text sizes plus the phone title and the strong (600) variant of ui (page-title, page-title-phone, figure, section-title, ui, caption; the style guide page #/ui lists them).
 // - style.css: a page-wide max-width (800 px or more) is var(--w-wide) (1200) or var(--w-narrow) (900).
+// - style.css: the screen scale --z never goes above 1.25.
 // - src/*.rs: no `<div class="head">` or `class="tabs"` outside common.rs (Head and PageTabs are the only header and tab row); style.css: the .tabs rules keep the orange underline on the open tab and no filled pill (tabs are fixed by the owner 2026-11-20).
 // - src/*.rs: no fixed style="..." attribute; a page uses a class. A computed style (a colour, a position) is fine.
 // - src/*.rs: no button whose text starts with "+" and no `label="+..."` outside common.rs (AddButton is the one add button; the number steppers' "+" with aria-label="more" are controls, not add buttons); no dashed wide button.
@@ -50,6 +51,8 @@ css.split('\n').forEach((line, i) => {
     if (+m[1] >= 800) bad.push(`style.css:${i + 1}: max-width ${m[1]}px, use var(--w-wide) or var(--w-narrow)`);
   }
 });
+// The screen scale stops at 1.25 (from 1920 px up): a full-page zoom above that made 2560 px look zoomed in (owner decision 2026-11-21).
+for (const m of css.matchAll(/--z\s*:\s*([\d.]+)/g)) if (+m[1] > 1.25) bad.push(`style.css: --z:${m[1]} is above 1.25; the scale stops at 1920 px (ui PITFALLS, "Screen scale stops at 1920")`);
 // Every rule (inside media queries too) whose selector's last part is .cards itself, not something inside it.
 for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
   if (m[1].split(',').some((sel) => /\.cards(?![\w-])[^\s>+~]*$/.test(sel.trim())) && /display:\s*grid|grid-template/.test(m[2])) bad.push(`style.css: "${m[1].trim()}" makes .cards a grid; it is the two-column flow (Cards in common.rs), so cards move up with no holes`);

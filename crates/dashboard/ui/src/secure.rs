@@ -88,8 +88,8 @@ pub fn SecureAccount(me: Signal<Option<Value>>) -> impl IntoView {
                         Some(s) if s["totp"] != true => view! { <p class="err">"You have no dashboard 2FA, so the button is off. Use the SSH steps in DEPLOY.md section 9 (Stolen Discord account) instead."</p> }.into_any(),
                         Some(s) if s["has_key"] != true => view! { <p class="err">"You have no Rescue Key that works here, so the button is off. Make one on a server you own (Auto Setup, the Rescue Key step), or use the SSH steps in DEPLOY.md section 9, which need no key."</p> }.into_any(),
                         Some(_) => view! {
-                            <label>"Rescue Key"<input type="password" autocomplete="off" spellcheck="false" prop:value=key on:input=move |e| key.set(event_target_value(&e)) /></label>
-                            <label>"Rescue authenticator code"<input inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" prop:value=code on:input=move |e| code.set(event_target_value(&e)) /></label>
+                            <label class="field">"Rescue Key"<input type="password" autocomplete="off" spellcheck="false" prop:value=key on:input=move |e| key.set(event_target_value(&e)) /></label>
+                            <label class="field">"Rescue authenticator code"<input inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" prop:value=code on:input=move |e| code.set(event_target_value(&e)) /></label>
                         }.into_any(),
                     }}
                     <button class="danger" disabled=move || !ready() || key.get().trim().is_empty() || code.get().trim().len() != 6 on:click=press>"Secure my account"</button>

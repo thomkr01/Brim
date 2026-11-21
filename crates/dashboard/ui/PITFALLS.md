@@ -606,3 +606,11 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 **Rule:** a refresh control refetches the data on screen (main.rs `refresh`: the server list, then `page_tick` builds the open page anew) and asks first when a save bar (`main .bar`) shows unsaved edits. A failure shows in the toast. Never put a button inside a link: put it next to the link in a row (`.srv-row`).
 
 **Check:** in the browser, count the `/api/` requests after the tap: more than the server list must go out, and the page content must load again.
+
+## A slow action needs a pending state
+- A button that starts a slow request (the server asks GitHub first) must show the working sign and be disabled from the click until the page has the result. `update.rs` first showed nothing for 2-3 s; use `busy_label` and set busy before the request. Clear it on a refusal (so a 2FA retry can click again), and keep it until the next answer shows the queued run.
+- A failed poll while the dashboard restarts itself is expected: show the same page (text only), never a pose. A pose is a state of its own (empty, error, offline), not a loading flicker.
+
+## Screen scale stops at 1920
+- `zoom` on the root above 1.25 (the old 1.45 to 2.45 steps) made a 2560 px window look zoomed in: text, controls and cards all grew. The scale stops at 1.25 from 1920 px up; more width is margin. `tools/ui-sizes.mjs` fails on a `--z` above 1.25.
+- A label with its field beside it outside a `.row` needs the `field` class, or the text touches the input.

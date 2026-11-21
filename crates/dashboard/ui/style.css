@@ -12,7 +12,7 @@
 :root { color-scheme:dark; } /* native scrollbars, selects and date pickers follow the dark-only design */
 /* One screen scale (owner decision 2026-11-20): `zoom` on the root grows text, cards, controls, sidebar and page width together, in steps with the window width. Media queries still see the real window, so phone and desktop layouts switch where they did. Lengths in vw/vh are not zoomed by the browser, so they go through --vw and --vh (1vw and 1vh in zoomed px); never write a bare vw/vh. */
 :root { --z:1.05; --vw:calc(1vw / var(--z)); --vh:calc(1vh / var(--z)); zoom:var(--z); }
-@media (min-width:900px) { :root { --z:1.1; } } @media (min-width:1800px) { :root { --z:1.2; } } @media (min-width:1920px) { :root { --z:1.25; } } @media (min-width:2240px) { :root { --z:1.45; } } @media (min-width:2560px) { :root { --z:1.65; } } @media (min-width:3200px) { :root { --z:2.05; } } @media (min-width:3840px) { :root { --z:2.45; } }
+@media (min-width:900px) { :root { --z:1.1; } } @media (min-width:1800px) { :root { --z:1.2; } } @media (min-width:1920px) { :root { --z:1.25; } }
 .tb-page { min-height:calc(100 * var(--vh)); }
 :root { --fs-figure:26px; --fs-page-title-phone:32px; --w-wide:1200px; --w-narrow:900px; } /* big figures (score, stats) and the page title on a phone: sizes the design system's components use */
 :root { --dur-fast:120ms; --dur:200ms; --dur-slow:320ms; --ease:cubic-bezier(.2,0,0,1); --quint:cubic-bezier(.23,1,.32,1); --brand:linear-gradient(135deg,#FFA36C,#FF6F91,#9B7BFF,#4FC3F7); }
@@ -87,6 +87,8 @@ textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; fo
 .cards .card { margin:0; scroll-margin-top:96px; } .card.off { box-shadow:0 0 0 2px var(--bad), 0 0 0 6px var(--b1); }
 .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .row .sp { flex:1; }
 .row label { flex:0 0 100%; font-weight:700; }
+/* A label and its field side by side outside a .row (Secure my account): the gap keeps the text off the field. */
+.field { display:inline-flex; align-items:center; gap:var(--space-8); margin:0 var(--space-12) var(--space-8) 0; }
 /* Field titles come from setting names ("max images"): sentence case, not Title Case. */
 .row label::first-letter { text-transform:uppercase; }
 /* A label around a control (a role or channel name) and a switch's text keep their own case. */
