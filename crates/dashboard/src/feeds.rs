@@ -1,7 +1,7 @@
 //! Feeds page: RSS/Atom and YouTube feeds a server follows. Anyone
 //! with dashboard access may look; Owner, Extra Owners and Trusted Admins add, change, pause and
-//! delete (choice P1), each change audited. The bot polls and posts (`bot/src/feeds.rs`); Check now
-//! and Test post ask it through `feeds.asked`. The webhook token never reaches this page.
+//! delete (choice P1), each change audited. The bot polls and posts (`bot/src/feeds.rs`); Send latest
+//! and the check after a feed is turned on ask it through `feeds.asked`. The webhook token never reaches this page.
 use crate::{
     access::Level,
     api::{self, Res},
@@ -77,7 +77,9 @@ async fn rows(st: &AppState, guild: i64, id: Option<i64>) -> Result<Vec<Value>, 
     let r: Vec<FeedRow> = sqlx::query_as(
         "select id, kind, target, channel_id, ping_role, name, picture, source_name, source_picture,
                 send_as_bot, message, state, extract(epoch from last_check)::float8 as last_check,
-                extract(epoch from last_post)::float8 as last_post, last_error, asked, events, primed,
+                extract(epoch from last_post)::float8 as last_post, last_error,
+                case when kind in ('github', 'gitlab') and secret is not null then null else asked end as asked,
+                events, primed,
                 secret is not null as webhook
          from feeds where guild_id = $1 and ($2::bigint is null or id = $2) order by id",
     )
@@ -301,6 +303,14 @@ fn check_events(events: &Option<Vec<String>>) -> Result<Vec<String>, ApiError> {
     Ok(out)
 }
 
+/// "group/project" from a GitLab project link (also self-hosted); `None` for anything else.
+fn gitlab_path(link: &str) -> Option<String> {
+    let u = reqwest::Url::parse(link.trim()).ok()?;
+    let path = u.path().split("/-/").next()?.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    (path.contains('/') && path.len() <= 100).then(|| path.to_string())
+}
+
 /// Adds a feed. The first check only remembers the items already there, so nothing old is posted.
 async fn add(
     State(st): State<AppState>,
@@ -333,15 +343,16 @@ async fn add(
                 None,
             )
         }
+        // The pasted link, if any, names the repository at once; else its first event does.
         "github" => (
             String::new(),
-            "GitHub".into(),
+            crate::feedfollow::repo_of(&b.target).unwrap_or_else(|| "GitHub".into()),
             None,
             Some(crate::feedhooks::new_secret()),
         ),
         "gitlab" => (
             String::new(),
-            "GitLab".into(),
+            gitlab_path(&b.target).unwrap_or_else(|| "GitLab".into()),
             None,
             Some(crate::feedhooks::new_secret()),
         ),
@@ -527,7 +538,7 @@ async fn state(
     let what = label(&st, guild, id).await?;
     sqlx::query(
         "update feeds set state = $3, fails = 0,
-                asked = case when $3 = 'on' then 'check' when asked = 'check' then null else asked end
+                asked = case when $3 = 'on' and (kind not in ('github', 'gitlab') or secret is null) then 'check' when asked = 'check' then null else asked end
          where id = $1 and guild_id = $2",
     )
     .bind(id)
@@ -545,7 +556,7 @@ struct Ask {
     what: String,
 }
 
-/// Check now (also turns a broken feed on again) or Test post (the newest item, now).
+/// Send latest (the newest item, now; a good one also turns a stopped feed on again) or a check.
 async fn ask(
     State(st): State<AppState>,
     s: Sess,
@@ -554,8 +565,8 @@ async fn ask(
 ) -> Res {
     api::require(&st, &s, guild, Level::Admin, false).await?;
     let what = label(&st, guild, id).await?;
-    let (paused, kind, webhook): (bool, String, bool) =
-        sqlx::query_as("select state = 'paused', kind, secret is not null from feeds where id = $1 and guild_id = $2")
+    let (paused, kind, webhook, waiting): (bool, String, bool, bool) =
+        sqlx::query_as("select state = 'paused', kind, secret is not null, asked = 'test' from feeds where id = $1 and guild_id = $2")
             .bind(id)
             .bind(guild)
             .fetch_one(&st.db)
@@ -563,11 +574,24 @@ async fn ask(
     if paused && b.what == "check" {
         return Err(bad("the feed is paused: turn it on to check it"));
     }
-    // A webhook sends its events: nothing to check or fetch. Check now only takes a stopped feed
-    // back. A followed repository is checked like an RSS feed. A test is a real event for both
-    // (Redeliver repeats one Brim already has).
+    // One Send latest at a time per feed, so it cannot flood a channel.
+    if waiting && b.what == "test" {
+        return Err(bad(
+            "Brim is still sending this feed's latest item: wait 30 seconds",
+        ));
+    }
+    // A followed repository posts only while on (its posts go through the event queue).
+    if paused && b.what == "test" && hooked(&kind) {
+        return Err(bad(
+            "the feed is paused: turn it on to send its latest event",
+        ));
+    }
+    // A webhook sends its events: nothing to check or fetch. A check only takes a stopped feed
+    // back. A followed repository is read like an RSS feed.
     let sql = match (b.what.as_str(), hooked(&kind) && webhook) {
-        ("test", _) if hooked(&kind) => return Err(bad("GitHub and GitLab post events as they happen: open an issue or push a commit to test the feed")),
+        // A GitHub webhook feed's repository is read like a followed one (`feedfollow`).
+        ("test", true) if kind == "github" => "update feeds set asked = 'test' where id = $1 and guild_id = $2",
+        ("test", true) => return Err(bad("GitLab sends this feed's events as they happen, so Brim cannot fetch the latest one. To test it, open the webhook in GitLab's settings and click Test.")),
         ("check", true) => "update feeds set fails = 0, last_error = null, state = case when state = 'broken' then 'on' else state end where id = $1 and guild_id = $2",
         _ => match b.what.as_str() {
         "check" => "update feeds set asked = 'check', fails = 0, state = case when state = 'broken' then 'on' else state end where id = $1 and guild_id = $2",
@@ -581,7 +605,7 @@ async fn ask(
         .execute(&st.db)
         .await?;
     let did = if b.what == "test" {
-        "asked for a test post of"
+        "asked for the latest item of"
     } else {
         "asked for a check of"
     };
@@ -738,7 +762,7 @@ pub(crate) async fn overview_check(
                 severity: Severity::Warn,
                 title: "Feed stopped",
                 detail: format!(
-                    "The feed “{name}” in {at} stopped: {why}. Fix that, then click Check now on the Feeds page."
+                    "The feed “{name}” in {at} stopped: {why}. Fix that, then click Send latest on the Feeds page."
                 ),
                 fix: None,
                 steps: steps("feed_broken"),
@@ -749,6 +773,25 @@ pub(crate) async fn overview_check(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_gitlab_link_names_its_project() {
+        use super::gitlab_path;
+        assert_eq!(
+            gitlab_path("https://gitlab.com/group/app").as_deref(),
+            Some("group/app")
+        );
+        assert_eq!(
+            gitlab_path("https://git.example/a/b/c.git/").as_deref(),
+            Some("a/b/c")
+        );
+        assert_eq!(
+            gitlab_path("https://gitlab.com/group/app/-/issues").as_deref(),
+            Some("group/app")
+        );
+        assert_eq!(gitlab_path("https://gitlab.com/group"), None);
+        assert_eq!(gitlab_path(""), None);
+    }
+
     /// Limits and the broken-feed warning, on a real database.
     #[tokio::test]
     async fn limits_and_broken_feeds() {

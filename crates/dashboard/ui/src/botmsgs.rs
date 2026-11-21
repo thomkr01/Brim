@@ -48,6 +48,12 @@ pub(crate) fn missing(row: &Value, body: &Value) -> Vec<String> {
         shown.push_str(e.pointer(p).and_then(Value::as_str).unwrap_or(""));
         shown.push('\n');
     }
+    // A feed's link may be what the first embed's title opens (the GitHub look), as the server
+    // allows (`botmsg::missing_text`).
+    if row["key"].as_str().is_some_and(|k| k.starts_with("feed.")) {
+        shown.push_str(e["url"].as_str().unwrap_or(""));
+        shown.push('\n');
+    }
     for f in e["fields"].as_array().into_iter().flatten() {
         shown.push_str(f["name"].as_str().unwrap_or(""));
         shown.push('\n');
@@ -650,6 +656,17 @@ pub fn BotMessages(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_feed_link_may_be_the_title_link() {
+        // The GitHub default keeps {link} only as the title's link: no error before any edit.
+        let row = json!({"key": "feed.github.push", "required": ["link"]});
+        let default = json!({"embeds": [{"title": "{headline}", "url": "{link}"}]});
+        assert!(missing(&row, &default).is_empty());
+        // Other entries do not count a link.
+        let row = json!({"key": "log.x", "required": ["link"]});
+        assert_eq!(missing(&row, &default), ["link"]);
+    }
 
     #[test]
     fn missing_reads_the_first_embed_only() {

@@ -1,7 +1,7 @@
 //! Followed GitHub repositories: a GitHub feed with no webhook (no secret). Anyone can follow a
 //! public repository this way, with no admin rights on it.
 //!
-//! Every 30 s the dashboard reads the due feeds (each 10 minutes, or asked for by Check now) from
+//! Every 30 s the dashboard reads the due feeds (each 10 minutes, or asked for by Send latest) from
 //! GitHub's public list of the repository's events, and turns each new event into the body the
 //! webhook would have sent. Then the same `feedhooks::github_post` makes the post, and the same
 //! `feed_events` queue takes it, so a followed repository posts the same events, with the same
@@ -23,6 +23,10 @@ const API: &str = "https://api.github.com/";
 const MAX_FAILS: i32 = 5;
 /// Events turned into posts per check: each can cost one more request.
 const PER_CHECK: usize = 20;
+/// Send latest on a webhook feed whose repository Brim cannot read.
+const NO_REPO: &str = "Brim cannot read this repository: it is private, or no event has come yet. To test the webhook, open it in GitHub's settings, then Recent Deliveries, and click Redeliver";
+/// Send latest reads at most this many of the newest events to find one the feed posts.
+const LATEST_TRIES: usize = 5;
 
 fn client() -> &'static reqwest::Client {
     static C: OnceLock<reqwest::Client> = OnceLock::new();
@@ -287,6 +291,8 @@ struct Due {
     asked: Option<String>,
     fails: i32,
     source_picture: Option<String>,
+    /// A webhook feed: only Send latest reads its repository here (its events come by webhook).
+    hook: bool,
 }
 
 /// Checks the due followed repositories every 30 s; never returns.
@@ -303,10 +309,12 @@ pub async fn run(st: AppState) {
 
 async fn round(st: &AppState, etags: &mut HashMap<i64, String>) -> anyhow::Result<()> {
     let due: Vec<Due> = sqlx::query_as(
-        "select id, target, events, primed, asked, fails, source_picture from feeds
-         where kind = 'github' and secret is null
-           and ((state <> 'paused' and asked is not null)
-             or (state = 'on' and (last_check is null or last_check < now() - interval '10 minutes')))
+        "select id, case when secret is null then target else source_name end as target, events,
+                primed, asked, fails, source_picture, secret is not null as hook from feeds
+         where kind = 'github'
+           and ((state <> 'paused' and (asked = 'test' or (secret is null and asked is not null)))
+             or (secret is null and state = 'on'
+                 and (last_check is null or last_check < now() - interval '10 minutes')))
          order by last_check nulls first limit 50",
     )
     .fetch_all(&st.db)
@@ -329,7 +337,9 @@ async fn round(st: &AppState, etags: &mut HashMap<i64, String>) -> anyhow::Resul
             ),
         };
         // The hourly limit is not the feed's fault: it does not count toward stopping it.
-        let stop = error.is_some() && !limit && r.fails + 1 >= MAX_FAILS;
+        // Nor does a failed Send latest: the timer's own checks decide.
+        let count = !limit && r.asked.as_deref() != Some("test");
+        let stop = error.is_some() && count && r.fails + 1 >= MAX_FAILS;
         sqlx::query(
             "update feeds set last_check = now(), last_error = $2,
                     asked = case when asked is not distinct from $5 then null else asked end,
@@ -342,7 +352,7 @@ async fn round(st: &AppState, etags: &mut HashMap<i64, String>) -> anyhow::Resul
         .bind(r.id)
         .bind(&error)
         .bind(stop)
-        .bind(limit)
+        .bind(!count)
         .bind(&r.asked)
         .execute(&st.db)
         .await?;
@@ -356,10 +366,19 @@ async fn round(st: &AppState, etags: &mut HashMap<i64, String>) -> anyhow::Resul
 /// Reads one repository's new events and queues their posts.
 async fn check(st: &AppState, r: &Due, etags: &mut HashMap<i64, String>) -> Result<(), Why> {
     let db = |e: sqlx::Error| Why::Other(format!("the database failed: {e}"));
-    let path = format!("repos/{}/events?per_page=100", r.target);
-    // A first check reads the whole list; otherwise only a changed one.
-    let etag = (r.primed).then(|| etags.get(&r.id).cloned()).flatten();
+    let latest = r.asked.as_deref() == Some("test");
+    // A webhook feed knows its repository from its first delivery (`feedhooks::take`).
+    let named = repo_of(&r.target).filter(|n| *n == r.target);
+    let Some(target) = named else {
+        return Err(Why::Other(NO_REPO.into()));
+    };
+    let path = format!("repos/{target}/events?per_page=100");
+    // A first check and Send latest read the whole list; otherwise only a changed one.
+    let etag = (r.primed && !latest)
+        .then(|| etags.get(&r.id).cloned())
+        .flatten();
     let got = get(&path, etag.as_deref()).await.map_err(|w| match w {
+        Why::Gone if r.hook => Why::Other(NO_REPO.into()),
         Why::Gone => Why::Other("GitHub has no public repository with that name".into()),
         w => w,
     })?;
@@ -390,7 +409,61 @@ async fn check(st: &AppState, r: &Due, etags: &mut HashMap<i64, String>) -> Resu
             .bind(id)
             .execute(&st.db)
     };
-    if !r.primed {
+    let full = r.target.clone();
+    let owner = full.split('/').next().unwrap_or("");
+    let repo = json!({
+        "full_name": full,
+        "name": full.split('/').nth(1).unwrap_or(""),
+        "html_url": format!("https://github.com/{full}"),
+        "owner": {"login": owner, "avatar_url": r.source_picture.clone()
+            .unwrap_or_else(|| format!("https://github.com/{owner}.png"))},
+    });
+    if latest {
+        // Send latest: the newest event of a kind this feed posts, now, even if it was posted
+        // before. Then every listed event is remembered, so the timer does not post them again.
+        let mut sent = false;
+        for e in list.iter().take(LATEST_TRIES) {
+            let read = match body(e, &repo).await {
+                Err(Why::Gone) => None,
+                Err(w) => return Err(w),
+                Ok(b) => b,
+            };
+            let Some((name, p)) = read else { continue };
+            if let Some(out) =
+                feedhooks::github_post(name, &p).filter(|o| r.events.iter().any(|t| t == o.toggle))
+            {
+                // A new delivery key each time, so a second Send latest posts again.
+                let key = format!(
+                    "gh:{}:latest:{}",
+                    e["id"].as_str().unwrap_or(""),
+                    chrono::Utc::now().timestamp_millis()
+                );
+                feedhooks::queue(st, r.id, &key, out.entry, &out.vars, None)
+                    .await
+                    .map_err(db)?;
+                sent = true;
+                break;
+            }
+        }
+        // A webhook feed's `primed` means "connected", and its events come by webhook: no list.
+        if !r.hook {
+            for e in &new {
+                remember(format!("gh:{}", e["id"].as_str().unwrap_or("")))
+                    .await
+                    .map_err(db)?;
+            }
+            sqlx::query("update feeds set primed = true where id = $1")
+                .bind(r.id)
+                .execute(&st.db)
+                .await
+                .map_err(db)?;
+        }
+        if !sent {
+            return Err(Why::Other(format!(
+                "none of the repository's {LATEST_TRIES} newest events is a kind this feed posts"
+            )));
+        }
+    } else if !r.primed {
         // The first check remembers what is there and posts nothing, as for RSS feeds.
         for e in &new {
             remember(format!("gh:{}", e["id"].as_str().unwrap_or("")))
@@ -403,15 +476,6 @@ async fn check(st: &AppState, r: &Due, etags: &mut HashMap<i64, String>) -> Resu
             .await
             .map_err(db)?;
     } else {
-        let full = r.target.clone();
-        let owner = full.split('/').next().unwrap_or("");
-        let repo = json!({
-            "full_name": full,
-            "name": full.split('/').nth(1).unwrap_or(""),
-            "html_url": format!("https://github.com/{full}"),
-            "owner": {"login": owner, "avatar_url": r.source_picture.clone()
-                .unwrap_or_else(|| format!("https://github.com/{owner}.png"))},
-        });
         // Over PER_CHECK new events: the oldest are skipped, as the webhook's limit skips some.
         let skip = new.len().saturating_sub(PER_CHECK);
         for (i, e) in new.iter().rev().enumerate() {

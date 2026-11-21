@@ -33,7 +33,7 @@ html { scrollbar-gutter:stable; }
 a { color:inherit; }
 .shell { display:flex; min-height:calc(calc(100 * var(--vh)) - 80px); }
 header { position:sticky; top:0; z-index:30; height:80px; display:flex; align-items:center; gap:16px; padding:0 var(--space-24); background:var(--b2); }
-header .logo { display:flex; align-items:center; gap:12px; font-weight:700; font-size:var(--fs-section-title); text-decoration:none; } header .sp { flex:1; }
+header .logo { display:flex; align-items:center; gap:12px; font-weight:700; font-size:var(--fs-section-title); text-decoration:none; }
 header .menu-btn { display:none; }
 .i { display:inline-block; width:1.15em; height:1.15em; vertical-align:-.2em; } .i svg { display:block; width:100%; height:100%; }
 header details { position:relative; margin:0; } header summary { list-style:none; cursor:pointer; width:40px; height:40px; border-radius:50%; background:var(--b3); display:grid; place-items:center; font-weight:700; color:var(--fg); }
@@ -88,7 +88,7 @@ textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; fo
 /* Wide windows (owner decision 2026-11-21): the screen scale stops at 1.25, so text and controls stay normal size and the page uses the width instead. A page made of Cards (and the server list) gets 3 columns from 2300 px and 4 from 3200 px; the two .col boxes dissolve and the cards flow down the columns in list order. Every other page (lists, editors, wizard, forms) keeps its normal width and stays centred. `main` in the card selector outranks page rules such as `.home .card { margin:0 }`, which took the gap away (cards touched). */
 @media (min-width:2300px) { main:has(.cards, .gcards) { --w-wide:1600px; } .cards { display:block; column-count:3; column-gap:var(--space-24); } .cards > .col { display:contents; } main .cards .card { break-inside:avoid; margin-bottom:var(--space-24); } }
 @media (min-width:3200px) { main:has(.cards, .gcards) { --w-wide:min(2300px, calc(100 * var(--vw) - 360px)); } .cards { column-count:4; } }
-.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .row .sp { flex:1; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0; } .sp { flex:1; }
 .row label { flex:0 0 100%; font-weight:700; }
 /* A label and its field side by side outside a .row (Secure my account): the gap keeps the text off the field. */
 .field { display:inline-flex; align-items:center; gap:var(--space-8); margin:0 var(--space-12) var(--space-8) 0; }
@@ -186,7 +186,7 @@ details.more { margin:0 0 12px; } details.more summary { cursor:pointer; color:v
 .tabs { display:flex; gap:var(--space-4); margin:0 0 var(--space-24); overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--line); } .tabs::-webkit-scrollbar { display:none; } .tabs a:focus-visible, .tabs button:focus-visible { outline-offset:-2px; } .tabs > :first-child { margin-inline-start:auto; } .tabs > :last-child { margin-inline-end:auto; }
 /* Tabs (fixed by the owner, must not change): a quiet row, an orange underline on the open tab, no pill box, never wraps, scrolls sideways. Guarded by tools/ui-sizes.mjs and the e2e sweep. */
 .tabs a, .tabs button { flex:none; white-space:nowrap; text-decoration:none; background:none; border:0; border-bottom:2px solid transparent; border-radius:0; padding:var(--space-8) var(--space-20); color:var(--muted); font-weight:400; } .tabs a.on, .tabs button.on { color:var(--fg); border-bottom-color:var(--primary); }
-.link { display:flex; align-items:center; gap:16px; text-decoration:none; } .link .ico { width:56px; height:56px; flex:none; } .link .ico .i { width:100%; height:100%; } .link > .i { width:24px; height:24px; flex:none; } .link .sp { flex:1; }
+.link { display:flex; align-items:center; gap:16px; text-decoration:none; } .link .ico { width:56px; height:56px; flex:none; } .link .ico .i { width:100%; height:100%; } .link > .i { width:24px; height:24px; flex:none; }
 .chips { display:flex; flex-wrap:wrap; gap:8px; margin:8px 0; } .chips .chip { font-size:var(--fs-caption); padding:var(--space-4) var(--space-12); } .chip.bad { background:var(--bad); color:var(--on-status); } .chip.info { background:var(--info); color:var(--on-status); }
 .hide { display:none; } header .menu-btn.hide { display:none; }
 /* Server cards on the Servers page, after Discord's own: banner (16:9) on top, round icon overlapping it, name below. */
@@ -200,7 +200,7 @@ details.more { margin:0 0 12px; } details.more summary { cursor:pointer; color:v
 .qr { background:#fff; display:inline-block; padding:var(--space-8); border-radius:var(--radius-row); } .qr svg { width:200px; height:200px; display:block; }
 @media (max-width:900px) { header .menu-btn { display:block; } nav { display:none; position:fixed; top:80px; z-index:20; } .m-srv { display:block; padding:0 var(--space-16); background:var(--b2); } .m-srv .srv-row { margin:0; padding:var(--space-8) 0; } nav .srv-row { display:none; } nav.open { display:flex; animation:fade var(--dur) var(--ease); } main { padding:var(--space-16) var(--space-16) calc(var(--space-56) + var(--space-40)); } .head h1 { font-size:var(--fs-page-title-phone); } }
 .stack { display:flex; flex-direction:column; gap:var(--space-24); max-width:var(--w-narrow); margin:0 auto; } .stack .card { margin:0; }
-.lockrow h3, .card.empty h3 { margin:0; } .lockrow .sp { flex:1; } .chip.ok { background:var(--ok); color:#000; }
+.lockrow h3, .card.empty h3 { margin:0; } .chip.ok { background:var(--ok); color:#000; }
 .card.empty { text-align:center; }
 /* The one add button (AddButton in common.rs): green pill, a circle plus, a text naming the thing. */
 button.add { display:inline-flex; align-items:center; gap:var(--space-8); background:var(--ok); border-color:var(--ok); color:#000; text-transform:none; }
@@ -319,7 +319,7 @@ nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { s
 .cs-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-24); align-items:start; } .cs-grid > .card { margin:0; min-width:0; }
 @media (max-width:900px) { .cs-grid { grid-template-columns:minmax(0,1fr); } .cs .tr .mini { max-width:7em; } .cs .tr.child { padding-left:var(--space-20); } .cs .tr:not(.sel):not(.del) .acts, .cs .tr:not(.sel) .h { display:none; } }
 .cs .ttl { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; } .cs .ttl h2 { margin:0; overflow-wrap:anywhere; } .cs .ttl h2 .i { margin-right:8px; } .cs .ttl input { flex:1; min-width:0; }
-.cs .sp { flex:1; } .cs .end { justify-content:flex-end; align-items:center; } .cs button.link { gap:4px; }
+.cs .end { justify-content:flex-end; align-items:center; } .cs button.link { gap:4px; }
 .cs .tr { display:flex; align-items:center; gap:8px; min-height:32px; padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); cursor:pointer; transition:background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .cs .tr:hover { background:color-mix(in srgb, var(--b3) 60%, transparent); }
 .cs .tr.sel, .cs .tr.sel:hover { background:color-mix(in srgb, var(--primary) 18%, transparent); box-shadow:var(--ol-pick); }
@@ -357,10 +357,10 @@ nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { s
 .cs { padding-bottom:calc(var(--space-56) + var(--space-8)); } .cs-bar { border:1px solid var(--warn); flex-wrap:wrap; justify-content:center; width:max-content; } .cs-bar .dot { width:8px; height:8px; border-radius:50%; background:var(--warn); flex:none; }
 /* One backup (Backups > View) */
 .hide { display:none !important; }
-.bk .bh { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:var(--space-24); } .bk .bh .sp { flex:1; }
+.bk .bh { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:var(--space-24); }
 .bk .bh button { display:inline-flex; align-items:center; gap:8px; }
 .bk > .cards { margin-bottom:var(--space-24); }
-.bk .ttl { display:flex; align-items:center; gap:8px; width:100%; font-size:var(--fs-section-title); font-weight:700; margin:0 0 8px; padding:0; background:none; border:0; color:var(--fg); text-transform:none; text-align:left; } .bk .ttl .i { width:22px; height:22px; } .bk .ttl .sp { flex:1; } .bk .ttl.mt { margin-top:16px; }
+.bk .ttl { display:flex; align-items:center; gap:8px; width:100%; font-size:var(--fs-section-title); font-weight:700; margin:0 0 8px; padding:0; background:none; border:0; color:var(--fg); text-transform:none; text-align:left; } .bk .ttl .i { width:22px; height:22px; } .bk .ttl.mt { margin-top:16px; }
 .bk .chev .i { width:16px; height:16px; transition:transform var(--dur) var(--ease); } .bk .chev.shut .i { transform:rotate(-90deg); }
 .bk .tr { padding:var(--space-4) 0; } .bk .tr .i { opacity:.8; } .bk .tr.cat { font-size:var(--fs-caption); font-weight:600; text-transform:uppercase; color:var(--muted); margin-top:8px; } .bk .tr.child, .bk .perms.child { padding-left:var(--space-20); } .bk .tr.has { cursor:pointer; } .bk .tr.has:hover { color:var(--primary); }
 .bk .perms { font-size:var(--fs-caption); color:var(--muted); margin:4px 0 8px 20px; }
@@ -459,7 +459,7 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .mbhead input.name { font-size:var(--fs-section-title); font-weight:700; min-width:0; flex:1 1 200px; }
 .tabs button .i { width:16px; height:16px; margin-right:8px; vertical-align:-3px; }
 .mcard { max-width:var(--w-narrow); margin:0 auto var(--space-24); }
-.small { font-size:var(--fs-caption); } .pvtop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; } .pvtop h2 { margin:0; } .pvtop .sp { flex:1; }
+.small { font-size:var(--fs-caption); } .pvtop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; } .pvtop h2 { margin:0; }
 /* Base two-choice selector: the open choice is the orange one. Pages may add to it (the scoped rules below). */
 .seg { display:inline-flex; border:1px solid var(--line); border-radius:var(--radius-row); overflow:hidden; flex:none; max-width:100%; }
 .seg button { background:none; border:0; border-radius:0; color:var(--muted); text-transform:none; font-weight:600; padding:var(--space-8) var(--space-16); }
@@ -484,14 +484,14 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .live .ed.need { outline:1px solid var(--bad); box-shadow:0 0 0 3px color-mix(in srgb, var(--bad) 20%, transparent); }
 .live .author > b, .live .ttl > .ed, .live .foot > .ed { flex:1 1 0; min-width:60px; } .live .fbox > b { display:block; }
 .live .fbox { border:1px dashed #ffffff26; border-radius:var(--radius-row); padding:var(--space-4) var(--space-8); } .live .fctl { display:flex; align-items:center; gap:4px; font-size:var(--fs-caption); color:#949ba4; margin-bottom:4px; }
-.live .fctl button { color:#949ba4; padding:0 var(--space-4); font-size:var(--fs-caption); line-height:1.4; min-width:0; } .live .fctl label { display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; } .live .fctl .sp { flex:1; }
+.live .fctl button { color:#949ba4; padding:0 var(--space-4); font-size:var(--fs-caption); line-height:1.4; min-width:0; } .live .fctl label { display:flex; align-items:center; gap:4px; cursor:pointer; white-space:nowrap; }
 .live .addf { margin-top:4px; align-self:flex-start; } .live .addf:not(.add) { border:1px dashed #ffffff33; color:#949ba4; font-size:var(--fs-caption); text-transform:none; padding:var(--space-4) var(--space-12); } .live .addf.inl { margin:0; } .live .addf.inl:not(.add) { padding:0 var(--space-12); line-height:30px; } .live button.add { font-size:var(--fs-caption); padding:var(--space-4) var(--space-12); }
 .dbtn.link-b { border:0; cursor:pointer; text-transform:none; } .dbtn.need { box-shadow:0 0 0 1px var(--bad); }
 .addembed { margin:8px 0 0 52px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .addembed button { text-transform:none; }
 .pvwrap [data-url], .pvwrap a { cursor:pointer; } .pvwrap .spoiler { cursor:pointer; } .spoiler.rev, .spoiler.rev:hover { color:inherit; background:#404249; }
 .popbg { position:fixed; inset:0; z-index:44; }
 .pop { position:absolute; z-index:45; width:min(300px, calc(calc(100 * var(--vw)) - 32px)); background:var(--b2); border:1px solid var(--line); border-radius:var(--radius-card); padding:var(--space-12); box-shadow:0 10px 32px #000b; animation:enter var(--dur) var(--ease); }
-.pop.cpop { width:260px; } .pop h3 { font-size:var(--fs-ui); margin:0 0 8px; display:flex; align-items:center; gap:8px; } .pop h3 .sp { flex:1; } .pop h3 .i { width:16px; height:16px; } .pop h3 button { padding:0 var(--space-8); }
+.pop.cpop { width:260px; } .pop h3 { font-size:var(--fs-ui); margin:0 0 8px; display:flex; align-items:center; gap:8px; } .pop h3 .i { width:16px; height:16px; } .pop h3 button { padding:0 var(--space-8); }
 .pop > input { width:100%; } .pop .row label { min-width:44px; } .pop .row input { flex:1; min-width:0; } .pop input.hm { width:80px; flex:none; text-align:center; } .pop input.num { width:80px; flex:none; }
 .sv { position:relative; height:140px; border-radius:var(--radius-row); cursor:crosshair; touch-action:none; background:linear-gradient(to top,#000,transparent),linear-gradient(to right,#fff,hsl(var(--h),100%,50%)); }
 .sv i { position:absolute; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 1px #0008; transform:translate(-50%,-50%); pointer-events:none; }
@@ -669,6 +669,8 @@ nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active {
 .frow { display:flex; align-items:center; gap:var(--space-12); padding:var(--space-12) var(--space-20); background:var(--b2); border:1px solid var(--line); border-radius:var(--radius-card); } .frow:hover { border-color:var(--muted); } .frow.off .fmain { opacity:.7; }
 .frow .ico, .frow .rowmenu summary { width:24px; height:24px; display:grid; place-items:center; flex:none; } .frow .ico svg, .frow .rowmenu summary svg { width:20px; height:20px; } .frow .fmain { min-width:0; } .frow .fmain .chip { margin-left:var(--space-8); }
 .frow .rowmenu summary { width:40px; height:40px; border-radius:50%; padding:0; }
+/* A phone has no room for the text and the row controls on one line: they go to a second line, at its right end. */
+@media (max-width:600px) { .frow { flex-wrap:wrap; } .frow .fmain { flex:1 1 60%; } .frow .rowmenu { margin-left:auto; } }
 .modal .card.feeds-dialog { width:min(calc(92 * var(--vw)),520px); } .feeds-dialog .hint { margin:calc(-1 * var(--space-4)) 0 var(--space-12); } .feeds-dialog .acts { display:flex; gap:var(--space-8); justify-content:flex-end; margin-top:var(--space-16); }
 .feeds-dialog .row:has(> input.sw) { flex-wrap:nowrap; } .feeds-dialog .row:has(> input.sw) label { flex:1; }
 .feeds-dialog details.more { margin:var(--space-12) 0; } .feeds-dialog details.more summary { cursor:pointer; font-weight:600; }

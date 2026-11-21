@@ -54,7 +54,7 @@ pub async fn on_audit(app: &App, e: &AuditLogEntry) -> Result<()> {
             .collect();
         let log = log.line("Feeds", &names.join(", ")).line(
             "Effect",
-            "Brim makes a new webhook at the next post. During panic mode or an anti-nuke case it does not, and the feeds stop until someone clicks Check now.",
+            "Brim makes a new webhook at the next post. During panic mode or an anti-nuke case it does not, and the feeds stop until someone clicks Send latest on the Feeds page.",
         );
         send_log(app, gid.get(), LogKind::Webhook, log).await?;
     }

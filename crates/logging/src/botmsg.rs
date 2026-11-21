@@ -7258,6 +7258,15 @@ mod tests {
         }
     }
 
+    /// A default never fails its own save check (the editor showed "{link} is missing" on the
+    /// untouched GitHub default).
+    #[test]
+    fn every_default_passes_its_own_check() {
+        for d in defs() {
+            assert_eq!(missing_text(&d.key, &d.template), None, "{}", d.key);
+        }
+    }
+
     /// The editor shows a name and an example for each variable.
     #[test]
     fn every_variable_has_a_name_and_example() {

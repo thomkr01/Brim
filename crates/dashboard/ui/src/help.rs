@@ -32,7 +32,7 @@ pub fn steps(page: &str) -> Option<&'static [&'static str]> {
             "Paste the address of a website, a YouTube channel, or a GitHub or GitLab repository, and pick the channel to post in. Brim finds a website's feed itself. The first check only remembers what is already there.",
             "A GitHub or GitLab feed gets an address and a secret to paste in the repository's webhook settings. Each event then posts at once, with the look of GitHub's own Discord webhook; pick which events post with the switches.",
             "Every 10 minutes Brim looks for new items and posts at most 3 per feed, through its webhook with the source's name and picture, as if the source posted them. Links to scam or NSFW sites are not posted.",
-            "Change the message with Edit message. A feed that fails 5 checks in a row stops and shows a warning on Overview: fix the cause, then click Check now.",
+            "Change the message with Edit message. A feed that fails 5 checks in a row stops and shows a warning on Overview: fix the cause, then click Send latest in its menu.",
         ],
         "lockdown" => &[
             "Lock one channel, a category or the whole server, on a timer if you like.",

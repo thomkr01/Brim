@@ -1,10 +1,10 @@
 //! Feeds: RSS/Atom and YouTube. Every 30 s the poller takes the
-//! feeds that are due (each 10 minutes, or asked for by the dashboard's Check now / Test post),
+//! feeds that are due (each 10 minutes, or asked for by the dashboard's Send latest),
 //! fetches each address once for all servers that follow it, and posts new items: through
 //! Brim's webhook in the channel with the source's name and picture (as if the source posted
 //! it), or as the bot when "Send as Brim" is on. The first check only remembers what is there;
 //! at most 3 posts per feed per check; 5 failed checks in a row, or a webhook that cannot be made
-//! again, make the feed "broken" until someone clicks Check now.
+//! again, make the feed "broken" until someone clicks Send latest.
 //! Automod skips only the posts Brim itself sent (`sent_by_us`, by message id), so every item passes the
 //! scam/malicious and NSFW site lists here first (choice C1).
 use crate::{app::App, events::send_log};
@@ -90,7 +90,7 @@ async fn round(
     client: &reqwest::Client,
     headers: &mut HashMap<String, Headers>,
 ) -> Result<()> {
-    // A paused feed is only read for a test post; Check now on it waits for resume.
+    // A paused feed is only read for Send latest; a check on it waits for resume.
     let due: Vec<Row> = sqlx::query_as(
         "select id, guild_id, channel_id, kind, target, ping_role, name, picture, source_name,
                 source_picture, send_as_bot, message, primed, asked, fails from feeds
@@ -189,7 +189,7 @@ async fn done(app: &App, r: &Row, res: Result<(), Fail>) -> Result<()> {
     };
     let was: Option<String> = sqlx::query_scalar(
         // `asked` is cleared only if it is still the one this check answered: a new click meanwhile
-        // stays. A good check turns a broken feed on again (Check now, Test post).
+        // stays. A good check turns a broken feed on again (Send latest).
         "update feeds f set last_check = now(), last_error = $2,
                 asked = case when f.asked is not distinct from $4 then null else f.asked end,
                 fails = case when $2::text is null then 0 else f.fails + 1 end,
@@ -211,7 +211,7 @@ async fn done(app: &App, r: &Row, res: Result<(), Fail>) -> Result<()> {
             .line("Why", &error.unwrap_or_default())
             .line(
                 "Effect",
-                "Brim stops checking it. Fix the cause, then click Check now on the dashboard's Feeds page.",
+                "Brim stops checking it. Fix the cause, then click Send latest on the dashboard's Feeds page.",
             );
         send_log(app, r.guild_id as u64, LogKind::Webhook, log).await?;
     }
@@ -220,13 +220,20 @@ async fn done(app: &App, r: &Row, res: Result<(), Fail>) -> Result<()> {
 
 /// "**Name** (`address`)" for logs.
 fn feed_label(r: &Row) -> String {
-    let name = r.name.as_deref().unwrap_or(&r.source_name);
-    let name = if name.is_empty() { "Feed" } else { name };
-    format!(
-        "**{}** (`{}`)",
-        name.replace('*', ""),
-        r.target.replace('`', "")
-    )
+    label_of(r.name.as_deref(), &r.source_name, &r.target)
+}
+
+/// "**name** (`address`)". A webhook feed stores no address (GitHub or GitLab calls Brim), so it
+/// shows the repository's name, which its first delivery stores, and no empty code span.
+fn label_of(name: Option<&str>, source: &str, target: &str) -> String {
+    let name = name.filter(|n| !n.is_empty()).unwrap_or(source);
+    let name = if name.is_empty() { "Feed" } else { name }.replace('*', "");
+    let target = target.replace('`', "");
+    if target.is_empty() || target == name {
+        format!("**{name}**")
+    } else {
+        format!("**{name}** (`{target}`)")
+    }
 }
 
 /// One feed against a fresh read of its address.
@@ -261,7 +268,7 @@ async fn handle(app: &App, r: &Row, f: &feed::Feed) -> Result<(), Fail> {
             .await
             .map_err(db)?;
     }
-    // Test post: only the newest item, also on a paused feed; new items wait for the next check.
+    // Send latest: only the newest item, also on a paused feed; new items wait for the next check.
     if r.asked.as_deref() == Some("test") {
         let Some(newest) = f.items.first() else {
             return Err(Fail::Check("the feed has no items to post yet".into()));
@@ -549,7 +556,7 @@ async fn post(app: &App, r: &Row, p: &Piece, item: Option<&str>) -> Result<(), F
         _ => Fail::Check(format!("Discord did not take the post: {e}")),
     }
     };
-    // A message Discord refuses (400) is refused every time: remember the item, so Check now
+    // A message Discord refuses (400) is refused every time: remember the item, so Send latest
     // moves past it. The feed still breaks, so a bad edited message is seen.
     let mut skip_400 = false;
     let mut skip = |e: twilight_http::Error| {
@@ -869,7 +876,10 @@ async fn events_round(app: &App, prune: bool, wait: &mut HashMap<i64, Instant>) 
                 .line("Channel", &format!("<#{}>", r.channel_id))
                 .line(
                     "Effect",
-                    "GitHub or GitLab reached Brim with the right secret: the event types switched on post here.",
+                    &format!(
+                        "{} reached Brim with the right secret: the event types switched on post here.",
+                        if r.kind == "gitlab" { "GitLab" } else { "GitHub" }
+                    ),
                 );
             let _ = send_log(app, r.guild_id as u64, LogKind::Webhook, log).await;
             Ok(())
@@ -913,6 +923,20 @@ pub async fn channel_deleted(app: &App, channel: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_label_never_shows_an_empty_address() {
+        // A webhook feed has no address: before its first delivery it shows the source alone.
+        assert_eq!(label_of(None, "GitHub", ""), "**GitHub**");
+        assert_eq!(label_of(Some(""), "owner/repo", ""), "**owner/repo**");
+        // A followed repository's address is its name: shown once.
+        assert_eq!(label_of(None, "owner/repo", "owner/repo"), "**owner/repo**");
+        assert_eq!(
+            label_of(Some("News"), "Site", "https://x.example/feed"),
+            "**News** (`https://x.example/feed`)"
+        );
+        assert_eq!(label_of(None, "", "a`b"), "**Feed** (`ab`)");
+    }
 
     fn row() -> Row {
         Row {

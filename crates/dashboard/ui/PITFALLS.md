@@ -218,7 +218,7 @@ Greeting, closing, pause reason and ban appeal message are plain strings in the 
 ## 24. The account menu stayed open after a choice
 
 The account menu and the bell are `<details>` in the header. A link in them changes only the hash, so the page changed and the menu stayed open on top of it, and it moved with its button when the header changed (the Update page has no search box). A tap outside did not close it either.
-*Avoid:* `close_header_menus` (main.rs) closes every open header `<details>` on any click outside its own button, on a hash change and on Escape. A new dropdown in the header is a `<details>` inside `header`, so it gets this for free; a dropdown made another way must close on the same three events.
+*Avoid:* `close_menus` (main.rs) closes every open header `<details>` and every row ⋯ menu (`details.rowmenu`) on any click outside its own button, on a hash change and on Escape. A new dropdown is a `<details>` inside `header` or with the class `rowmenu`, so it gets this for free; a dropdown made another way must close on the same three events (the message builder's popups have a `.popbg` backdrop). The Feeds ⋯ menu stayed open on a click outside (2026-11-21): the rule above covered only the header.
 
 ## 25. A system toggle jumped left while its toast showed
 
@@ -634,3 +634,10 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 - `md::inline` does not draw `{e:name}` tags; embed titles and field names in previews need `icons::fill_tags` too.
 - A class used for two layouts (`.facts` as a `dl` grid and as the Details/stat row) broke the second: the grid rule pushed Overview Details off a phone. Scope such rules by element (`dl.facts`).
 - The Update page showed "Update now" when the newest build was unknown (GitHub not reachable). A button shows only when its action can work: Update now needs a known newer build. The server refuses such a start too.
+
+## Feed rows (2026-11-21)
+- **Row buttons moved with the text.** `<span class="sp">` grew only inside parents with their own `X .sp { flex:1 }` rule; the Feeds row (`.frow`) had none, so Edit and ⋯ sat right after the text and jumped when the status line changed. *Avoid:* `.sp { flex:1 }` is one global rule; a spacer works in every flex row. A row's controls sit after the `.sp`, and the text block has `min-width:0` so long text wraps before it pushes them.
+- **An untouched default showed "{link} is missing".** The editor's `botmsgs::missing` read only the first embed's text, but the GitHub look keeps `{link}` as the title's link (`url`), which the server allows for `feed.*` entries. *Avoid:* the UI check follows `botmsg::missing_text` exactly; `every_default_passes_its_own_check` proves each default passes the server check, and `a_feed_link_may_be_the_title_link` the UI one.
+- **"last post in a minute ago".** `relative()` takes the time from now and adds "in" or "ago" itself; Feeds passed now minus the time and added "ago" again. *Avoid:* pass `time - now`; a past time is clamped below 0 so a slow clock never reads "in".
+- **"Asked" stayed on a row.** The row line for a requested check showed until a reload, and a webhook feed turned on kept `asked = 'check'` for ever (nothing checks a webhook feed). *Avoid:* the page reads the list again every 10 s while a feed waits; the server sets a check only on feeds it reads and hides `asked` on webhook rows.
+

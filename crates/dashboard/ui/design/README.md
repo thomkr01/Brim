@@ -59,11 +59,11 @@ Built: Add button (`AddButton` in `common.rs`, also inside `Empty`; `tools/ui-si
 
 ## Feeds page (feeds plan F1, 2026-11-20)
 
-- A list page in the narrow 900 px column (`--w-narrow`): one row per feed (a card-like row: on switch, source icon, name with a "Stopped" or "Paused" chip, details line, ⋮ menu). The ⋮ menu holds Check now, Test post, Edit message, Change and Delete; it is a round 40 px button. The menu look is the Channel Setup row menu (`.rowmenu`).
+- A list page in the narrow 900 px column (`--w-narrow`): one row per feed (a card-like row: on switch, source icon, name with a "Stopped" or "Paused" chip, details line, ⋮ menu). The ⋮ menu holds Send latest, Edit message and Delete; Edit is a button at the right end of the row; it is a round 40 px button. The menu look is the Channel Setup row menu (`.rowmenu`).
 - Above the list: the limit counter ("3 / 10 feeds"), the per-channel limit, a sort control (Name, Channel, Last post) and the "Add new feed" add button (`AddButton`). An empty list shows one card with what to do first and the same add button.
 - Add and Change open one dialog: source (RSS / YouTube / GitHub / GitLab), address, channel, ping role, and a folded "Name, picture and sender" part with the "Send as Brim" switch (off by default).
 - Edit message opens the message editor on the feed's own version, with "Own version" or "Server's version" and a "Use the server's version" button.
-- GitHub and GitLab feeds: the dialog has no address; it shows one switch per event type in a framed group ("Post these events"). After Add, a setup window shows the steps, the address and the secret (blurred until Show) with Copy buttons; the secret is shown only then. Their ⋮ menu holds Turn on again (only when stopped), Show setup, Make new secret, Edit message, Change and Delete (no Check now or Test post). Edit message has an Event picker above the editor: each event has its own message.
+- GitHub and GitLab feeds: the dialog has no address; it shows one switch per event type in a framed group ("Post these events"). After Add, a setup window shows the steps, the address and the secret (blurred until Show) with Copy buttons; the secret is shown only then. Their ⋮ menu holds Turn on again (only when stopped), Show setup, Make new secret, Send latest (it says that a webhook feed cannot fetch), Edit message and Delete. Edit message has an Event picker above the editor: each event has its own message.
 - The required placeholder notice of the Bot messages editor names the entry's placeholder: `{link}` for feed entries, which may sit in the message text (their default is the plain link), `{text}` for the others.
 
 ## Bot Profile page (owner decision, 2026-11-20)

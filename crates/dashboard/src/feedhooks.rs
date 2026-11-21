@@ -165,6 +165,20 @@ async fn take(st: &AppState, id: i64, h: &HeaderMap, body: &[u8]) -> Result<Stat
     let Ok(p) = serde_json::from_slice::<Value>(body) else {
         return Err(Taken::Bad("the body is not JSON"));
     };
+    // The repository's name from any signed delivery, the ping too: a webhook feed stores no
+    // address, so this is the name its rows and log lines show.
+    let named = if github {
+        &p["repository"]["full_name"]
+    } else {
+        &p["project"]["path_with_namespace"]
+    };
+    if let Some(n) = named.as_str().filter(|n| !n.is_empty()) {
+        sqlx::query("update feeds set source_name = $2 where id = $1 and source_name <> $2")
+            .bind(id)
+            .bind(n.chars().take(100).collect::<String>())
+            .execute(&st.db)
+            .await?;
+    }
     let first = !primed;
     if first {
         // The first signed delivery shows the feed works ("connected" on the Feeds page, one log line).

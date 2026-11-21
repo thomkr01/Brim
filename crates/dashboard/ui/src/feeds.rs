@@ -1,5 +1,5 @@
 //! Feeds page: the RSS and YouTube feeds a server follows, one
-//! row each with its on switch and a menu and Edit button (Check now, Test post, Edit message, Delete in the menu).
+//! row each with its on switch and a menu, then an Edit button at the right end (Send latest, Edit message, Delete in the menu).
 //! Posts look as if the source posted them; "Send as Brim" is an option, off by default.
 //! Owner, Extra Owners and Trusted Admins change feeds; others only look.
 //! GitHub and GitLab feeds  get no address: GitHub or GitLab sends each event to Brim,
@@ -42,10 +42,9 @@ fn sorted(mut list: Vec<Value>, by: &str, channel: impl Fn(&str) -> String) -> V
 
 fn ago(t: &Value) -> String {
     match t.as_i64() {
-        Some(t) => format!(
-            "{} ago",
-            crate::discord::relative((js_sys::Date::now() / 1000.0) as i64 - t)
-        ),
+        // `relative` takes the time from now and says "ago" itself; a clock a little behind the
+        // server's must not read "in a few seconds".
+        Some(t) => crate::discord::relative((t - (js_sys::Date::now() / 1000.0) as i64).min(-1)),
         None => "never".into(),
     }
 }
@@ -230,6 +229,12 @@ pub fn Feeds(guild: String) -> impl IntoView {
         })
     };
     load();
+    // A requested check or test shows on its row until Brim has done it, so read the list again until none waits.
+    Effect::new(move |_| {
+        if feeds.with(|l| l.as_ref().is_some_and(|l| l.iter().any(|f| !f["asked"].is_null()))) {
+            set_timeout(move || if !feeds.is_disposed() { load() }, std::time::Duration::from_secs(10));
+        }
+    });
     spawn_local(async move {
         if let Ok(v) = api(
             "GET",
@@ -447,7 +452,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             "paused" => Some(view! { <span class="chip">"Paused"</span> }),
             _ => None,
         };
-        let asked = (!f["asked"].is_null()).then(|| view! { <div class="muted small">"Asked: Brim does it within 30 seconds."</div> });
+        let asked = f["asked"].as_str().map(|a| view! { <div class="muted small">{if a == "test" { "Sending the latest item. It shows in the channel within 30 seconds." } else { "Checking the feed. This takes up to 30 seconds." }}</div> });
         let error = f["last_error"]
             .as_str()
             .map(|e| view! { <div class="err small">{format!("Last check: {e}")}</div> });
@@ -476,16 +481,15 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 <span class="sp"></span>
                 {move || (busy.get() && doing.get().starts_with(&format!("{i3}:"))).then(|| view! { <Working /> })}
                 {admin().then(|| view! {
-                    <button class="ghost" disabled=move || busy.get() aria-label=format!("edit {}", name_of(&f2)) on:click={ let f = f2.clone(); move |_| open_dialog(f.clone()) }>{icon("edit")}" Edit"</button>
                     <details class="rowmenu"><summary aria-label=format!("actions for {}", name_of(&f4))>{icon("more")}</summary><div>
-                        {(state != "paused" && !hook).then(|| menu_btn("Check now", Box::new(move || act(format!("{i2}/ask"), json!({"what": "check"}), format!("{i2}:ask"), "Asked. Brim checks the feed within 30 seconds."))))}
+                        {menu_btn("Send latest", Box::new(move || act(format!("{i2}/ask"), json!({"what": "test"}), format!("{i2}:ask"), "Sending. Brim posts the latest item within 30 seconds.")))}
                         {(hook && state == "broken").then(|| { let i = id.clone(); menu_btn("Turn on again", Box::new(move || act(format!("{i}/ask"), json!({"what": "check"}), format!("{i}:ask"), "Feed on again. New events post from now."))) })}
-                        {(!repo(&f)).then(|| menu_btn("Test post", { let i = id.clone(); Box::new(move || act(format!("{i}/ask"), json!({"what": "test"}), format!("{i}:ask"), "Asked. Brim posts the newest item within 30 seconds.")) }))}
                         {hook.then(|| menu_btn("Show setup", Box::new(move || setup.set(Some(f5.clone())))))}
                         {hook.then(|| menu_btn("Make new secret", Box::new(move || new_secret(f6.clone()))))}
                         {menu_btn("Edit message", Box::new(move || edit_message(f1.clone())))}
                         {menu_btn("Delete", Box::new(move || remove(f3.clone())))}
                     </div></details>
+                    <button class="ghost" disabled=move || busy.get() aria-label=format!("edit {}", name_of(&f2)) on:click={ let f = f2.clone(); move |_| open_dialog(f.clone()) }>{icon("edit")}" Edit"</button>
                 })}
             </li>
         }
@@ -561,9 +565,6 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 let hook = webhook_of(&v);
                 v["kind"] = json!(kind_of(&v));
                 v["webhook"] = json!(hook);
-                if hook {
-                    v["target"] = json!("");
-                }
                 save_dialog(v, link)
             };
             let r = NodeRef::<leptos::html::Div>::new();
@@ -685,12 +686,18 @@ pub fn Feeds(guild: String) -> impl IntoView {
             let u = url.clone();
             let steps: &[&str] = if gitlab {
                 &["In GitLab, open the project, then Settings > Webhooks > Add new webhook.",
-                  "Paste the address as URL and the secret as Secret token.",
-                  "Tick every trigger you may want (Brim posts only the events switched on here), then Add webhook."]
+                  "URL: paste the address below.",
+                  "Secret token: paste the secret below.",
+                  "Trigger: tick every event you may want. Brim posts only the events switched on here.",
+                  "SSL verification: leave \"Enable SSL verification\" ticked. Then click Add webhook."]
             } else {
                 &["In GitHub, open the repository, then Settings > Webhooks > Add webhook.",
-                  "Paste the address as Payload URL, pick Content type application/json, and paste the secret as Secret.",
-                  "Pick \"Send me everything\" (Brim posts only the events switched on here), then Add webhook."]
+                  "Payload URL: paste the address below.",
+                  "Content type: pick application/json.",
+                  "Secret: paste the secret below.",
+                  "SSL verification: leave \"Enable SSL verification\" on.",
+                  "Which events: pick \"Send me everything\". Brim posts only the events switched on here.",
+                  "Leave \"Active\" ticked. Then click Add webhook."]
             };
             view! {
                 <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Feed setup" on:keydown=move |e| dialog_keys(&e, close)><div class="card feeds-dialog">

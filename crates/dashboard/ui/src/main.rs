@@ -648,11 +648,13 @@ fn History(guild: String) -> impl IntoView {
     }
 }
 
-/// Closes every open header menu, except the one whose button `click` hit (the browser toggles that).
-fn close_header_menus(click: Option<web_sys::EventTarget>) {
+/// Closes every open dropdown (header menus and row ⋯ menus), except the one whose button `click`
+/// hit (the browser toggles that). A click inside an open menu's list is outside its button, so a
+/// list must stop its own clicks (Channel Setup) or close itself after a choice (Feeds).
+fn close_menus(click: Option<web_sys::EventTarget>) {
     use wasm_bindgen::JsCast;
     let doc = web_sys::window().unwrap().document().unwrap();
-    let Ok(open) = doc.query_selector_all("header details[open]") else {
+    let Ok(open) = doc.query_selector_all("header details[open], details.rowmenu[open]") else {
         return;
     };
     let hit = click.and_then(|t| t.dyn_into::<web_sys::Node>().ok());
@@ -832,12 +834,12 @@ fn App() -> impl IntoView {
     window_event_listener(leptos::ev::keydown, move |e| {
         if e.key() == "Escape" {
             set_nav_open.set(false);
-            close_header_menus(None)
+            close_menus(None)
         }
     });
-    // A header menu (account, bell) is a <details>: it stays open until closed, also across a page change.
-    window_event_listener(leptos::ev::click, |e| close_header_menus(e.target()));
-    window_event_listener(leptos::ev::hashchange, |_| close_header_menus(None));
+    // A dropdown is a <details>: it stays open until closed, also across a page change.
+    window_event_listener(leptos::ev::click, |e| close_menus(e.target()));
+    window_event_listener(leptos::ev::hashchange, |_| close_menus(None));
     let (filter, set_filter) = signal(String::new());
     let (guilds_note, set_guilds_note) = signal(String::from("Loading servers..."));
     let load_guilds = move || async move {

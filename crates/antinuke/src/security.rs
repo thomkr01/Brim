@@ -1064,7 +1064,7 @@ pub fn steps(id: &str) -> Vec<String> {
         "feed_broken" => &[
             "Fix the cause named here: give Brim Manage Webhooks in that channel, pick another channel, or correct the feed address.",
             "Open the Feeds page (the link here).",
-            "Click Check now in the feed's menu.",
+            "Click Send latest in the feed's menu.",
         ],
         "channel_setup_draft" => &[
             "Open the Channel Setup page.",

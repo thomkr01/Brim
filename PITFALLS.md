@@ -1610,3 +1610,10 @@ Staff paste a site's normal address, and the add failed with "this is not an RSS
 
 **GitHub's public list of events leaves out most of each event.** (followed repositories, 2026-11-21)
 A push in `/repos/<repo>/events` has no commits, and a pull request has no title, link or author. *Avoid:* `feedfollow::body` reads each part again from its own `url` (only `https://api.github.com/`), and a push from the compare API, so `feedhooks::github_post` gets the body the webhook sends. The list says `merged` and `created` where the webhook says `closed` and `submitted`. The hourly limit (60 without `GITHUB_TOKEN`) does not count toward stopping a feed, and an unchanged list (304) costs nothing.
+
+**A feed log line showed "Feed: GitHub (``)".** (feeds, 2026-11-21)
+A webhook feed stores no address (GitHub or GitLab calls Brim), and its repository name came only with the first event that posts, after the "Feed Connected" line was queued; `feed_label` printed the empty address in a code span. *Avoid:* the name is taken from every signed delivery, the ping too (`feedhooks::take`), and from the pasted link when the feed is added (`repo_of`, `gitlab_path`); `label_of` leaves out an empty address, and one equal to the name. The poster name of posts stays GitHub or GitLab. Test: `a_label_never_shows_an_empty_address`.
+
+**Check now said nothing, and a new feed posted nothing to test with.** (feeds, 2026-11-21)
+The first check only remembers items, and Check now on a webhook feed did nothing. *Avoid:* Send latest posts the newest item (website, YouTube) or the newest event of a switched-on kind (GitHub, followed or webhook: the public events list, at most 5 events read), even one posted before, under a new delivery key. One at a time per feed (refused while one waits), not counted as a failed check. GitLab webhook feeds and private repositories say how to test instead (GitLab's Test button, GitHub's Recent Deliveries > Redeliver).
+
