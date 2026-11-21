@@ -94,13 +94,17 @@ GitHub Actions builds the images only for a **release**: a version tag such as `
 
 ### Making a release
 
-Pick a commit of `main` whose checks are green, normally its tip, and tag it with the next version: `vMAJOR.MINOR.PATCH`, starting at `v1.0.0`. Raise PATCH for fixes only, MINOR for new functions, MAJOR for a change that needs work on the server (for example a new line in `.env`).
+Only the repository owner makes releases; the Images run refuses a tag that anyone else pushed. Use the next version, `vMAJOR.MINOR.PATCH`, starting at `v1.0.0`: raise PATCH for fixes only, MINOR for new functions, MAJOR for a change that needs work on the server (for example a new line in `.env`).
 
-```bash
-git fetch origin main && git tag -a v1.0.0 -m v1.0.0 origin/main && git push origin v1.0.0
-```
+1. On GitHub, open the repository > **Releases** (right side) > **Draft a new release**.
+2. **Choose a tag** > type the version, for example `v1.0.0` > **Create new tag: v1.0.0 on publish**.
+3. **Target**: `main`. This tags `main`'s newest commit.
+4. **Release title**: the version. Optional: **Generate release notes**.
+5. **Publish release**.
 
-Or on GitHub: **Releases** > **Draft a new release** > **Choose a tag** > type `v1.0.0` > **Create new tag on publish**, target `main`, then **Publish release**. CI runs on the tag, with the slow **e2e** job (the dashboard in a browser and the updater against Docker), which a branch push skips; then **Images** builds it (about 35 minutes in all). To run e2e on a branch before you tag: Actions > **CI** > **Run workflow** > pick the branch. The Images run refuses, and cancels itself, when CI failed or its e2e job did not pass (a failed e2e: fix it on `main` and tag the next PATCH version), when the tag was pushed by anyone but the repository owner, when the tag is not `v` plus three numbers, when the tag does not name the commit CI checked, or when the commit is not on `main`. Tag one release at a time and wait for its run: GitHub keeps only one waiting `latest` job, so with three at once the middle run is cancelled (re-run it from the Actions tab). Do not move or delete a tag after its images are out: the Update page and rollbacks name releases by it. A change to `scripts/updater.sh` or `docker-compose.yml` reaches a server only with the server command (section 5), so make a release before you run that command for such a change.
+The same from a terminal: `git fetch origin main && git tag -a v1.0.0 -m v1.0.0 origin/main && git push origin v1.0.0`.
+
+CI runs on the tag, with the slow **e2e** job (the dashboard in a browser and the updater against Docker), which a branch push skips; then **Images** builds it (about 35 minutes in all). To run e2e on a branch before you tag: Actions > **CI** > **Run workflow** > pick the branch. The Images run refuses, and cancels itself, when CI failed or its e2e job did not pass (a failed e2e: fix it on `main` and tag the next PATCH version), when the tag was pushed by anyone but the repository owner, when the tag is not `v` plus three numbers, when the tag does not name the commit CI checked, or when the commit is not on `main`. Tag one release at a time and wait for its run: GitHub keeps only one waiting `latest` job, so with three at once the middle run is cancelled (re-run it from the Actions tab). Do not move or delete a tag after its images are out: the Update page and rollbacks name releases by it. A change to `scripts/updater.sh` or `docker-compose.yml` reaches a server only with the server command (section 5), so make a release before you run that command for such a change.
 
 - **Using these images as they are:** nothing to do; they are public.
 - **Running your own fork:** your Actions publish to `ghcr.io/<your-github-name>/brim-*`. Change the four `image:` lines in `docker-compose.yml` to your name. New packages start **private**, and the server then gets `denied` when it pulls. Make each package public once: GitHub > your profile > **Packages** > the package > **Package settings** (bottom right) > **Danger Zone** > **Change visibility** > **Public**, and type the name to confirm. A package only appears after its first build. This makes the image public, not your code or `.env`. To keep them private instead, log in on the server once with a classic personal access token that has only `read:packages`: `echo <token> | docker login ghcr.io -u <your-github-name> --password-stdin`.
