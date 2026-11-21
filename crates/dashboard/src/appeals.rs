@@ -658,7 +658,7 @@ pub(crate) fn sent_log(kind: &str, username: &str, user_id: i64, id: i64) -> bri
         embed::ORANGE,
     )
     .entry("log.appeal.appeal_sent")
-    .line("Member", &format!("{username} [{user_id}]"))
+    .user("Member", user_id as u64)
     .line("Appeal", &format!("`#{id}`"))
     .time()
     .text(&format!("{} Review it on the dashboard.", embed::ARROW))

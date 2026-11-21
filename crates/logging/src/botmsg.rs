@@ -2126,7 +2126,7 @@ fn d3_entries(out: &mut Vec<Def>) {
     );
     let result_lines = || {
         vec![
-            l("Member", "{member.username} [{member.id}]"),
+            l("Member", "<@{member.id}> *`{member.id}`*"),
             l("Creation", "{member.created_at}"),
         ]
     };
@@ -2141,7 +2141,7 @@ fn d3_entries(out: &mut Vec<Def>) {
             lines: result_lines(),
             fields: vec![fact_field(
                 "Status:",
-                &format!("{YES} `{{member.username}}` has passed verification successfully."),
+                &format!("{YES} <@{{member.id}}> has passed verification successfully."),
                 false,
             )],
             vars: &["member.username", "member.id", "member.created_at"],
@@ -2161,7 +2161,7 @@ fn d3_entries(out: &mut Vec<Def>) {
             fields: vec![fact_field(
                 "Status:",
                 &format!(
-                    "{NO} `{{member.username}}` did not verify in time: **{{outcome}}**{{dm_note}}"
+                    "{NO} <@{{member.id}}> did not verify in time: **{{outcome}}**{{dm_note}}"
                 ),
                 false,
             )],
@@ -2618,7 +2618,7 @@ fn d7_entries(out: &mut Vec<Def>) {
         "A {kind} appeal by {member.username} has been sent!",
         ORANGE,
         &[
-            l("Member", "{member.username} [{member.id}]"),
+            l("Member", "<@{member.id}> *`{member.id}`*"),
             l("Appeal", "`#{appeal}`"),
             "{when}".into(),
             format!("{ARROW} Review it on the dashboard."),

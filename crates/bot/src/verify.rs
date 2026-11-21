@@ -1143,7 +1143,7 @@ fn result_log(u: &User, color: u32, status: &str) -> Log {
     let created = format!("<t:{}:F>", account_created_ms(u.id.get()) / 1000);
     Log::new(&format!("{}'s Verification Result:", u.name), color)
         .thumbnail(u)
-        .line("Member", &format!("{} [{}]", u.name, u.id))
+        .user("Member", u.id.get())
         .line("Creation", &created)
         .field("Status:", status)
         .var("member.username", &u.name)
@@ -1153,15 +1153,15 @@ fn result_log(u: &User, color: u32, status: &str) -> Log {
 
 /// The result log of a member who passed.
 pub(crate) fn passed_log(u: &User) -> Log {
-    let status = format!("{YES} `{}` has passed verification successfully.", u.name);
+    let status = format!("{YES} <@{}> has passed verification successfully.", u.id);
     result_log(u, DONE, &status).entry("log.verification.passed")
 }
 
 /// The result log of a member who did not verify in time.
 pub(crate) fn not_verified_log(u: &User, outcome: &str, dm_note: &str) -> Log {
     let status = format!(
-        "{NO} `{}` did not verify in time: **{outcome}**{dm_note}",
-        u.name
+        "{NO} <@{}> did not verify in time: **{outcome}**{dm_note}",
+        u.id
     );
     result_log(u, ALERT, &status)
         .entry("log.verification.not_verified")
