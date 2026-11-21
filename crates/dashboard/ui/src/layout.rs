@@ -67,10 +67,7 @@ pub fn LayoutGuard(
                 move |v| {
                     if v["saved"] == true {
                         blocking.set(vec![]);
-                        msg.done(format!(
-                            "Done. The server is saved as layout v{}.",
-                            v["layout"]["version"]
-                        ));
+                        msg.done("Saved.");
                         data.set(v);
                     } else {
                         blocking.set(list(&v["blocking"]));

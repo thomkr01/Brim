@@ -245,7 +245,7 @@ fn embed(e: &Value) -> AnyView {
             {(!s("author.name").is_empty()).then(|| view! { <small class="author blk">
                 {(!img("author.icon_url").is_empty()).then(|| view! { <img class="ico" src=img("author.icon_url") alt="" /> })}
                 <b class:link=!s("author.url").is_empty() data-url=Some(s("author.url")).filter(|u| !u.is_empty())>{s("author.name")}</b></small> })}
-            {(!s("title").is_empty()).then(|| view! { <b class="blk" class:link=!s("url").is_empty() data-url=Some(s("url")).filter(|u| !u.is_empty()) inner_html=inline(&esc(&s("title"))) /> })}
+            {(!s("title").is_empty()).then(|| view! { <b class="blk" class:link=!s("url").is_empty() data-url=Some(s("url")).filter(|u| !u.is_empty()) inner_html=crate::icons::fill_tags(&inline(&esc(&s("title")))) /> })}
             {(!s("description").is_empty()).then(|| view! { <div class="md" inner_html=md(&s("description")) /> })}
             {e["fields"].as_array().filter(|f| !f.is_empty()).map(|fs| {
                 let inl: Vec<bool> = fs.iter().map(|f| f["inline"] == true).collect();
@@ -253,7 +253,7 @@ fn embed(e: &Value) -> AnyView {
                     let span = 12 / r.len();
                     r.into_iter().map(move |i| (i, span))
                 }).map(|(i, span)| { let f = &fs[i]; view! {
-                    <div class="blk" style=format!("grid-column:span {span}")><b inner_html=inline(&esc(f["name"].as_str().unwrap_or(""))) /><div class="md" inner_html=md(f["value"].as_str().unwrap_or("")) /></div> } }).collect_view()}</div> }
+                    <div class="blk" style=format!("grid-column:span {span}")><b inner_html=crate::icons::fill_tags(&inline(&esc(f["name"].as_str().unwrap_or("")))) /><div class="md" inner_html=md(f["value"].as_str().unwrap_or("")) /></div> } }).collect_view()}</div> }
             })}
             {(!image.is_empty()).then(|| view! { <img src=image alt="" /> })}
             {(!footer.is_empty()).then(|| view! { <small class="muted author blk">

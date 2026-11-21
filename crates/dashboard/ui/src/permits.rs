@@ -35,6 +35,11 @@ pub fn Permits(guild: String) -> impl IntoView {
     let deleting = RwSignal::new(None::<usize>);
     let g = guild.clone();
     spawn_local(async move {
+        // Role names first: a permit opened before they came showed no roles to tick.
+        match api("GET", &format!("/api/guilds/{g}/discord"), None).await {
+            Ok(v) => dc.set(v),
+            Err(e) => msg.err(format!("The role names could not be loaded, so the role lists are empty: {e}")),
+        }
         if let Ok(v) = api("GET", &format!("/api/guilds/{g}/config"), None).await {
             version.set(v["version"].as_i64().unwrap_or(0));
             // Old stored ranks may tie; the list order becomes the hierarchy from the first save.
@@ -45,9 +50,6 @@ pub fn Permits(guild: String) -> impl IntoView {
         }
         if let Ok(v) = api("GET", "/api/permit-catalog", None).await {
             catalog.set(v);
-        }
-        if let Ok(v) = api("GET", &format!("/api/guilds/{g}/discord"), None).await {
-            dc.set(v);
         }
     });
     let access = expect_context::<Access>();

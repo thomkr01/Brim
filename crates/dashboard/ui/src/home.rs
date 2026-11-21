@@ -18,12 +18,17 @@ const CARDS: &[(&str, &str, &str)] = &[
 pub fn Home(guild: String) -> impl IntoView {
     let access = expect_context::<Access>();
     let score = RwSignal::new(None::<Value>);
+    // A failed request shows its error: without it the card kept its loading line forever.
+    let failed = RwSignal::new(None::<String>);
     let g = guild.clone();
     spawn_local(async move {
         let r = api("GET", &format!("/api/guilds/{g}/score"), None).await;
         // Leaving the page while the request runs disposes the signal.
         if !score.is_disposed() {
-            score.set(r.ok());
+            match r {
+                Ok(v) => score.set(Some(v)),
+                Err(e) => failed.set(Some(e)),
+            }
         }
     });
     // The server's score ignores notes (ids "note_..."), as the Overview does.
@@ -49,7 +54,10 @@ pub fn Home(guild: String) -> impl IntoView {
             <div class="home-score-text">
                 <h2>"Overview"</h2>
                 {move || match score.get() {
-                    None => view! { <p><Working /></p> }.into_any(),
+                    None => match failed.get() {
+                        Some(e) => view! { <p class="err">{format!("The overview could not be loaded: {e}")}</p> }.into_any(),
+                        None => view! { <p><Working /></p> }.into_any(),
+                    },
                     Some(_) => match to_fix() {
                         0 => view! { <p class="muted">"Nothing to fix."</p> }.into_any(),
                         1 => view! { <p class="muted">"1 thing to fix."</p> }.into_any(),

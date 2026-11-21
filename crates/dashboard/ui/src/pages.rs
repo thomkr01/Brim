@@ -1428,13 +1428,32 @@ pub fn Tickets(guild: String) -> impl IntoView {
             },
         );
     };
+    // The setup button hides once the ticket category and log channel are set and still exist in Discord.
+    let set_up = RwSignal::new(true);
+    let g3 = guild.clone();
+    Effect::new(move |_| {
+        fresh.track();
+        saved.track();
+        let g = g3.clone();
+        spawn_local(async move {
+            let (c, d) = (api("GET", &format!("/api/guilds/{g}/config"), None).await, api("GET", &format!("/api/guilds/{g}/discord"), None).await);
+            let done = match (c, d) {
+                (Ok(c), Ok(d)) => ["category", "log_channel"].iter().all(|k| {
+                    let key = if *k == "category" { "categories" } else { "channels" };
+                    c["config"]["tickets"][k].as_str().is_some_and(|id| crate::form::items(&d, key).iter().any(|(i, _)| i == id))
+                }),
+                _ => false,
+            };
+            set_up.try_set(done);
+        });
+    });
     // The parts stay mounted and are only hidden, so unsaved settings survive a tab change.
     let tab = RwSignal::new("settings");
     let tabs: [(&str, &str); 4] = [("settings", "Settings"), ("publish", "Panels"), ("cases", "Cases"), ("stats", "Stats")];
     view! {
         <PageTabs tabs=tabs.map(|(k, t)| Tab::state(k, t)).to_vec() active=Signal::derive(move || tab.get().to_string()) on_pick=Callback::new(move |k| tab.set(k)) />
         <div class:hide=move || tab.get() != "settings">
-        <div class="row"><button disabled=move || dirty.get() || busy.get() on:click=setup>{busy_label(move || busy.get(), "Set up the ticket category and log")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show><Toast msg /></div>
+        <div class="row"><Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up the ticket category and log")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="tickets".to_string() dirty on_save=Callback::new(move |_| saved.update(|n| *n += 1)) /> } }}
         </div>
         <div class:hide=move || tab.get() != "publish">

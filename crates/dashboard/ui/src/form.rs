@@ -704,9 +704,11 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                     <h3>"The ticket button"</h3>
                     <p class="muted">"Members press it in #open-a-ticket. Save, and Brim edits the posted message."</p>
                     <p class="muted">"The message's title, text and color are on Default messages."</p>
-                    <a class="btn ghost" href=entry>"Edit embed"</a>
+                    // One row, so the two buttons keep the row gap and do not touch.
+                    <div class="row"><a class="btn ghost" href=entry>"Edit embed"</a>
+                    {move || (count.get() == 0).then(|| view! { <button on:click=start>"Edit the ticket button"</button> })}</div>
                     {move || if count.get() == 0 {
-                        view! { <button on:click=start>"Edit the ticket button"</button> }.into_any()
+                        ().into_any()
                     } else {
                         view! {
                             {first("enabled", "bool", "Members can open tickets with this button", "Off: the button is left out of the message.", json!({"default": true}))}
@@ -828,6 +830,8 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                 _ => set(if s.is_empty() { Value::Null } else { json!(s) }),
             } }>
                 <option value="" prop:selected=move || get().is_null()>"none"</option>
+                // A set id missing from the list (deleted, or the list did not load) is shown, not "none".
+                {move || get().as_str().filter(|id| !items(&dc.get(), key).iter().any(|(i, _)| i == id)).map(|id| view! { <option value=id.to_string() selected>"not found (deleted, or not loaded)"</option> })}
                 {move || items(&dc.get(), key).into_iter().map(|(id, l)| view! { <option value=id.clone() prop:selected=move || get().as_str() == Some(id.as_str())>{l}</option> }).collect_view()}
             </select> }.into_any()
         }
@@ -1099,6 +1103,15 @@ pub fn Section(
                         })
                         .map(|f| f["default"].as_bool().unwrap_or(false)),
                 );
+                // The channel and role names come before the fields: drawn first, a set channel showed "none" until they came.
+                let d = api("GET", &format!("/api/guilds/{g}/discord"), None).await;
+                if val.is_disposed() {
+                    return;
+                }
+                match d {
+                    Ok(d) => dc.set(d),
+                    Err(e) => msg.err(format!("The channel and role names could not be loaded, so set channels and roles show as not found: {e}")),
+                }
                 fields.set(
                     sec["fields"]
                         .as_array()
@@ -1140,9 +1153,6 @@ pub fn Section(
                 }
                 orig.set(c.clone());
                 val.set(c);
-                if let Ok(d) = api("GET", &format!("/api/guilds/{g}/discord"), None).await {
-                    dc.set(d);
-                }
             }
         }
         loaded.set(true);

@@ -1103,7 +1103,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                     .as_i64()
                     .map_or(String::new(), |b| format!(" Backup #{b} was taken first."));
                 let layout = match &v["layout"] {
-                    l if l["version"].is_number() => format!(" Saved as layout v{}.", l["version"]),
+                    l if l["version"].is_number() => " Saved.".into(),
                     l if l["unsafe"].is_array() => format!(" Not saved in the server layout, it has a serious problem: {}.", strs(&l["unsafe"]).join("; ")),
                     l if l["skipped"] == true => " The server layout changed during the push, so the push is not in it: check Layout Guard.".into(),
                     l if l["failed"] == true => " The server layout could not be saved: check Layout Guard.".into(),

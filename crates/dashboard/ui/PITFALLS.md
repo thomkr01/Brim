@@ -625,3 +625,11 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 ## Signals after an await
 - `try_set` gives the value back (`Some`) only when the signal is gone, so "page gone, stop" is `if busy.try_set(false).is_some() { return }`. The Feeds page had `is_none()`: each feed action stopped on success, so the dialog stayed open, the list did not reload and no message showed (2026-11-21). `try_update` is the other way round: `Some` means it ran.
 - A signal made in a click handler belongs to the view that drew the button. When that view draws again (channel names arrive, a list reloads), the signal is gone while a dialog still reads it, and the page panics. Make the dialog's draft signal once in the component and set its value on open (`feeds.rs` `open_dialog`, the `open_editing` of Sticky, Auto Responder and Triggers).
+
+## Wide columns, loading names, mention text (2026-11-21)
+- The wide-window column rule set the card gap with `.cards .card`, but the later `.home .card { margin:0 }` has the same weight and won, so Home cards touched in 3 and 4 columns. Page rules that reset card margins win over a shared rule of equal weight: the shared rule uses `main .cards .card`.
+- A form drawn before `/discord` answered showed every set channel and role as "none" (and empty role lists), which reads as "not set". Load the name list before the fields; a set id missing from the list shows "not found (deleted, or not loaded)", never "none"; a failed name list shows an error.
+- Text with Discord mentions from the server (`<#id>`, `<@&id>`) is shown with names from `/discord`, never as raw ids (Lockdown check). Load the names before the list.
+- A request with no error branch left its loading line forever (Home Overview card on a failed score). Every loading state needs an error state.
+- `md::inline` does not draw `{e:name}` tags; embed titles and field names in previews need `icons::fill_tags` too.
+- A class used for two layouts (`.facts` as a `dl` grid and as the Details/stat row) broke the second: the grid rule pushed Overview Details off a phone. Scope such rules by element (`dl.facts`).

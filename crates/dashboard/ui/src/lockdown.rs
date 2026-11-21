@@ -8,6 +8,32 @@ fn s(v: &Value) -> String {
     v.as_str().unwrap_or("").to_string()
 }
 
+/// The check's Discord mentions (`<#id>`, `<@&id>`, `<@id>`) as names; an id missing from `dc` says so.
+fn named(text: &str, dc: &Value) -> String {
+    let find = |key: &str, id: &str| {
+        crate::form::items(dc, key).into_iter().find(|(i, _)| i == id).map(|(_, l)| l)
+    };
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find('<') {
+        let Some(j) = rest[i..].find('>') else { break };
+        out.push_str(&rest[..i]);
+        let tok = &rest[i + 1..i + j];
+        out.push_str(&if let Some(id) = tok.strip_prefix("@&") {
+            find("roles", id).unwrap_or_else(|| "an unknown role".into())
+        } else if let Some(id) = tok.strip_prefix('#') {
+            find("channels", id).or_else(|| find("categories", id)).unwrap_or_else(|| "an unknown channel".into())
+        } else if let Some(id) = tok.strip_prefix('@') {
+            format!("member {id}")
+        } else {
+            rest[i..=i + j].to_string()
+        });
+        rest = &rest[i + j + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn later(ms: i32, f: impl Fn() + 'static) {
     let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(f);
     if let Some(w) = web_sys::window() {
@@ -191,8 +217,19 @@ pub fn LockdownSettings(guild: String) -> impl IntoView {
     let problems = RwSignal::new(None::<Vec<Value>>);
     let (msg, need) = (Msg::default(), step_up());
     let g = StoredValue::new(guild.clone());
+    let dc = RwSignal::new(Value::Null);
     let check = move || {
         spawn_local(async move {
+            // The names first, so the list never shows bare ids.
+            if dc.get_untracked().is_null() {
+                match api("GET", &format!("/api/guilds/{}/discord", g.get_value()), None).await {
+                    Ok(d) => dc.set(d),
+                    // Left null, so Check again tries the names again.
+                    Err(e) => {
+                        msg.err(format!("The channel and role names could not be loaded, so the list says unknown: {e}"));
+                    }
+                }
+            }
             match api(
                 "GET",
                 &format!("/api/guilds/{}/lockdown/check", g.get_value()),
@@ -235,7 +272,7 @@ pub fn LockdownSettings(guild: String) -> impl IntoView {
             <p class="muted">"Checks that only the main roles can view and send, so a lockdown works in a few calls. Apply Fix corrects the role and channel permissions. An @everyone allow in a channel can be on purpose, so it is only changed when you tick it."</p>
             <Show when=move || problems.get().is_some_and(|p| p.is_empty())><p class="ok">"No lockdown compatibility issues found."</p></Show>
             {move || problems.get().unwrap_or_default().into_iter().map(|p| {
-                let text = s(&p["text"]).replace("<@&", "role ").replace("<#", "channel ").replace('>', "");
+                let text = named(&s(&p["text"]), &dc.get());
                 let id = s(&p["id"]);
                 let tick = (p["opt_in"] == true && !p["fix"].is_null()).then(|| {
                     let (id2, label) = (id.clone(), format!("also fix {text}"));
@@ -422,6 +459,8 @@ pub fn DiscordRules(guild: String) -> impl IntoView {
         .await
         {
             dc.set(d);
+        } else {
+            msg.err("The channel and role names could not be loaded. Reload the page to try again.");
         }
     });
     // One request after another, then one reload whatever the answers: a refused switch can still
@@ -526,5 +565,19 @@ pub fn DiscordRules(guild: String) -> impl IntoView {
             let done = move || { editing.set(None); load(); };
             view! { <RuleEditor guild=g.get_value() rule=editing dc=dc done /> }
         })}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::named;
+    use serde_json::json;
+
+    #[test]
+    fn mentions_become_names() {
+        let dc = json!({"roles": [{"id": "2", "name": "Member"}], "channels": [{"id": "5", "name": "general", "kind": "text"}, {"id": "6", "name": "Info", "kind": "category"}]});
+        assert_eq!(named("Channel <#5> allows Send Messages for <@&2>.", &dc), "Channel #general allows Send Messages for @Member.");
+        assert_eq!(named("<#6> and <@&9> and <@7> and <t:1>", &dc), "Info and an unknown role and member 7 and <t:1>");
+        assert_eq!(named("a < b", &dc), "a < b");
     }
 }
