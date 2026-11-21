@@ -212,7 +212,8 @@ pub fn Update() -> impl IntoView {
                     view! { <p class="warn">"The updater on the server is too old to install an approved build. On the server run "<code>{server_cmd(&d)}</code>" once."</p> }.into_any()
                 } else if fresh {
                     view! { <p class="ok">"Brim is up to date."</p> }.into_any()
-                } else if active() {
+                // Only a known newer build offers the button: with Newest unknown it would start nothing.
+                } else if active() || !offer {
                     ().into_any()
                 } else {
                     view! { <button class="go" disabled=move || !busy.with(String::is_empty) on:click={ let s = latest_sha.clone(); move |_| start(s.clone()) }>{busy_label(move || !busy.with(String::is_empty), "Update now")}</button> }.into_any()

@@ -633,3 +633,4 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 - A request with no error branch left its loading line forever (Home Overview card on a failed score). Every loading state needs an error state.
 - `md::inline` does not draw `{e:name}` tags; embed titles and field names in previews need `icons::fill_tags` too.
 - A class used for two layouts (`.facts` as a `dl` grid and as the Details/stat row) broke the second: the grid rule pushed Overview Details off a phone. Scope such rules by element (`dl.facts`).
+- The Update page showed "Update now" when the newest build was unknown (GitHub not reachable). A button shows only when its action can work: Update now needs a known newer build. The server refuses such a start too.
