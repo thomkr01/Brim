@@ -1,0 +1,71 @@
+name: Image cache
+run-name: Image cache for ${{ github.event.workflow_run.head_branch }} at ${{ github.event.workflow_run.head_sha }}
+
+# Builds the images of a release while CI still runs on its tag, and keeps only the build cache.
+# The Images workflow then builds the same images from that cache in a few minutes, after CI passed.
+# This workflow publishes nothing: no image, no tag, no signed build record. It runs as main's copy
+# (workflow_run), like Images, and writes the same cache scopes.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [requested]
+    branches: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+jobs:
+  # The checks of the Images gate that are known before CI ends. The cache must hold only the owner's
+  # code from main: a later build of a release takes layers from it.
+  gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: A release on main
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          FROM: ${{ github.event.workflow_run.head_repository.full_name }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          [ "$EVENT" = push ] && [ "$FROM" = "$GH_REPO" ] || { echo "$EVENT from $FROM: not a push to this repository."; exit 1; }
+          [ "$ACTOR" = "$OWNER" ] || { echo "The tag was pushed by $ACTOR, not by $OWNER."; exit 1; }
+          printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || { echo "$TAG is not a release tag."; exit 1; }
+          tags=$(git ls-remote --tags "https://github.com/$GH_REPO") || { echo "Could not read the tags."; exit 1; }
+          at=$(printf '%s\n' "$tags" | awk -v t="refs/tags/$TAG" '$2 == t "^{}" { p = $1 } $2 == t { l = $1 } END { print p != "" ? p : l }')
+          [ "$at" = "$SHA" ] || { echo "Tag $TAG names ${at:-no commit}, not $SHA."; exit 1; }
+          main=$(git ls-remote "https://github.com/$GH_REPO" refs/heads/main | cut -f1)
+          [ -n "$main" ] || { echo "Could not read main's tip."; exit 1; }
+          on=$(gh api "repos/$GH_REPO/compare/$SHA...$main" --jq .status) || { echo "Could not compare $SHA with main."; exit 1; }
+          case $on in ahead | identical) ;; *) echo "$SHA is not on main ($on)."; exit 1 ;; esac
+
+  build:
+    needs: gate
+    runs-on: ubuntu-24.04-arm
+    # The same groups as the Images builds would cancel them: these have their own.
+    concurrency:
+      group: image-cache-${{ matrix.target }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        target: [bot, dashboard, mcp, updater]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      # The same inputs as the Images build, so it finds every layer. Not pushed.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: false
+          build-args: |
+            GIT_SHA=${{ github.event.workflow_run.head_sha }}
+            VERSION=${{ github.event.workflow_run.head_branch }}
+          provenance: false
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
