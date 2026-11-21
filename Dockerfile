@@ -29,6 +29,9 @@ WORKDIR /app
 ARG GIT_SHA=dev
 LABEL org.opencontainers.image.revision=$GIT_SHA
 ENV BRIM_SHA=$GIT_SHA
+# The release (v1.2.3), set only by the Images workflow: the updater installs nothing without it.
+ARG VERSION=
+LABEL org.opencontainers.image.version=$VERSION
 
 FROM base AS bot
 COPY --from=builder /src/target/release/brim /usr/local/bin/brim
@@ -72,4 +75,6 @@ COPY scripts/updater.sh /usr/local/bin/updater
 ARG GIT_SHA=dev
 LABEL org.opencontainers.image.revision=$GIT_SHA
 ENV BRIM_SHA=$GIT_SHA
+ARG VERSION=
+LABEL org.opencontainers.image.version=$VERSION
 ENTRYPOINT ["updater"]

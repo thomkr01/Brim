@@ -468,8 +468,12 @@ fs.mkdirSync(out, { recursive: true });
   // An update found: each merged pull request's line shows under Newest, as plain text (GitHub is not reachable here).
   const a = 'a'.repeat(40), b = 'b'.repeat(40);
   await page.route('**/api/update', (r) => r.fulfill({ json: { current: a, latest: { sha: b, title: 'Merge pull request #244 from x/y' }, newer: true, updater: true, run: null, estimate: [2, 60, 10, 10, 20],
-    changes: [{ pr: 244, what: 'Message Builder phase 8: drop the old embed column' }, { pr: 243, what: '<b>Setup wizard</b> redesign' }, { pr: 242, what: '' }], more: 2 } }));
+    changes: [{ pr: 244, what: 'Message Builder phase 8: drop the old embed column' }, { pr: 243, what: '<b>Setup wizard</b> redesign' }, { pr: 242, what: '' }], more: 2,
+    builds: [{ sha: b, version: 'v1.1.0', at: '2026-11-21T18:00:00Z' }, { sha: a, version: 'v1.0.0', at: '2026-11-20T18:00:00Z' }] } }));
   await page.reload();
+  // Releases show by version: Running is v1.0.0, Newest v1.1.0.
+  await page.waitForSelector('p:has-text("Newest: v1.1.0")', { timeout: 5000 }).catch(() => failed.push('update: Newest does not name the release'));
+  if (!(await page.locator('p', { hasText: 'Running: v1.0.0' }).count())) failed.push('update: Running does not name the release');
   await page.waitForSelector('li:has-text("Message Builder phase 8")', { timeout: 5000 }).catch(() => failed.push('update: no change lines'));
   if (!(await page.locator('li', { hasText: '<b>Setup wizard</b>' }).count())) failed.push('update: a change line is not shown as plain text');
   if (!(await page.locator('li', { hasText: 'and 2 more' }).count())) failed.push('update: no "and N more"');

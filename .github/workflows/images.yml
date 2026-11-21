@@ -1,58 +1,73 @@
 name: Images
-# The dashboard's Update page reads the published commit from this title: a workflow_run run's own
-# head_sha is main's tip when it was queued, not the commit CI checked.
-run-name: Images for ${{ github.event.workflow_run.head_sha }}
+# The dashboard's Update page reads the release and its commit from this title: a workflow_run run's
+# own head_sha is main's tip when it was queued, not the commit CI checked.
+run-name: Release ${{ github.event.workflow_run.head_branch }} at ${{ github.event.workflow_run.head_sha }}
 
-# Runs after CI finished on main, and publishes only when every check passed on a push: a commit
-# that fails clippy or tests never becomes :latest.
+# Builds only releases: a version tag (v1.2.3) pushed on a commit of main. CI runs on every push, the
+# tag push too, and this runs after that CI run finished. A workflow_run run always runs this file as
+# it is on main, so a tag on a branch commit cannot bring its own copy of it, and the signed build
+# record names images.yml on refs/heads/main, which the dashboard and the updater ask for. For a tag
+# push, GitHub gives the tag name as the CI run's head_branch.
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]
+    branches: ['v[0-9]*']
 
 permissions:
   contents: read
 
-# CI runs can finish out of order, so the commit CI checked last is not always the newest.
-# - gate: a commit that is no longer main's tip is not built at all.
-# - push: each image builds only its :<sha> tag; a newer commit's build cancels an older one still
-#   running (one group per image, since one group for the matrix would make its legs cancel each other).
+# - gate: builds only when CI passed on the owner's push to this repository, the tag is a release
+#   tag that names this commit, and the commit is on main.
+# - push: each image builds its :<sha> and :<version> tags.
 # - latest: moves all four :latest tags together at the end, one run at a time and never cancelled
-#   halfway, so bot, dashboard, mcp and updater never point at different commits.
+#   halfway, and only for the highest release, so :latest never goes back to an older release.
 # A run that does not publish cancels itself (a skipped job would count as success): the dashboard
-# takes the newest successful run as the newest published version.
+# takes the successful runs as the published releases.
 jobs:
-  # No job-level `if`: a run whose jobs are all skipped can count as successful, and a fork's pull
-  # request from a branch named main also starts this workflow; the dashboard would list its commit.
+  # No job-level `if`: a run whose jobs are all skipped can count as successful.
   gate:
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       actions: write
     steps:
-      - name: Still main's tip
-        env: &tip_env
+      - name: A release on main
+        env: &release_env
           SHA: ${{ github.event.workflow_run.head_sha }}
+          TAG: ${{ github.event.workflow_run.head_branch }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN: ${{ github.run_id }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           EVENT: ${{ github.event.workflow_run.event }}
           FROM: ${{ github.event.workflow_run.head_repository.full_name }}
-        run: &tip_check |
-          if [ "$CONCLUSION" != success ] || [ "$EVENT" != push ] || [ "$FROM" != "$GH_REPO" ]; then
-            echo "CI run: $CONCLUSION, $EVENT from $FROM. Only a passed push to this repository's main is published."
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          OWNER: ${{ github.repository_owner }}
+        run: &release_check |
+          stop() {
+            echo "$1 Nothing is published."
             gh run cancel "$RUN"
             sleep 300
             exit 1
+          }
+          if [ "$CONCLUSION" != success ] || [ "$EVENT" != push ] || [ "$FROM" != "$GH_REPO" ]; then
+            stop "CI run: $CONCLUSION, $EVENT from $FROM. Only a passed push to this repository is published."
           fi
-          tip=$(git ls-remote "https://github.com/$GH_REPO" refs/heads/main | cut -f1)
-          [ -n "$tip" ] || { echo "Could not read main's tip."; exit 1; }
-          [ "$tip" = "$SHA" ] && exit 0
-          echo "main is at $tip now, so $SHA is not published; the newer commit's run publishes."
-          gh run cancel "$RUN"
-          sleep 300
-          exit 1
+          # Only the owner makes releases: write access alone could tag an old commit as the highest.
+          [ "$ACTOR" = "$OWNER" ] || stop "The tag was pushed by $ACTOR, not by $OWNER."
+          printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || stop "$TAG is not a release tag (v1.2.3)."
+          tags=$(git ls-remote --tags "https://github.com/$GH_REPO") || { echo "Could not read the tags."; exit 1; }
+          # An annotated tag names its commit on the peeled (^{}) line.
+          at=$(printf '%s\n' "$tags" | awk -v t="refs/tags/$TAG" '$2 == t "^{}" { p = $1 } $2 == t { l = $1 } END { print p != "" ? p : l }')
+          [ "$at" = "$SHA" ] || stop "Tag $TAG names ${at:-no commit}, not $SHA (a branch of that name, or the tag moved)."
+          # Compared with main's commit, not the name main: a tag named main would win over the branch.
+          main=$(git ls-remote "https://github.com/$GH_REPO" refs/heads/main | cut -f1)
+          [ -n "$main" ] || { echo "Could not read main's tip."; exit 1; }
+          # ahead or identical: main holds the commit.
+          on=$(gh api "repos/$GH_REPO/compare/$SHA...$main" --jq .status) || { echo "Could not compare $SHA with main."; exit 1; }
+          case $on in ahead | identical) ;; *) stop "$SHA is not on main ($on)." ;; esac
+          echo "Release $TAG at $SHA."
 
   push:
     needs: gate
@@ -62,8 +77,10 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+    # One group per image and release: a re-run of a release replaces its own build, never another
+    # release's (one group for the matrix would make its legs cancel each other).
     concurrency:
-      group: images-${{ matrix.target }}
+      group: images-${{ matrix.target }}-${{ github.event.workflow_run.head_branch }}
       cancel-in-progress: true
     strategy:
       matrix:
@@ -89,8 +106,13 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           push: true
-          build-args: GIT_SHA=${{ github.event.workflow_run.head_sha }}
-          tags: ghcr.io/thomkr01/brim-${{ matrix.target }}:${{ env.SHORT }}
+          # The gate checked the tag name. The updater installs only images with a version label.
+          build-args: |
+            GIT_SHA=${{ github.event.workflow_run.head_sha }}
+            VERSION=${{ github.event.workflow_run.head_branch }}
+          tags: |
+            ghcr.io/thomkr01/brim-${{ matrix.target }}:${{ env.SHORT }}
+            ghcr.io/thomkr01/brim-${{ matrix.target }}:${{ github.event.workflow_run.head_branch }}
           # One plain manifest per build. The default (an index plus an untagged attestation manifest)
           # made 3 package versions per build, and the cleanup below deleted the image manifests of
           # tags it kept, so those tags could not be pulled. The signed provenance is the next step.
@@ -105,40 +127,57 @@ jobs:
         with:
           subject-name: ghcr.io/thomkr01/brim-${{ matrix.target }}
           subject-digest: ${{ steps.build.outputs.digest }}
-      # Keeps the newest 10 versions (one per build) so old images do not pile up. Cleanup only: a
+      # Keeps the newest 15 versions (one per release build) so old images do not pile up. More than
+      # the 10 releases the Update page lists: a re-run of an old release adds a version too. Cleanup only: a
       # failed delete (a version GHCR already removed with its index) must not stop the build.
       - continue-on-error: true
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
         with:
           package-name: brim-${{ matrix.target }}
           package-type: container
-          min-versions-to-keep: 10
+          min-versions-to-keep: 15
 
   latest:
     needs: push
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       packages: write
       actions: write
     concurrency:
       group: images-latest
       cancel-in-progress: false
     steps:
-      # A newer commit can have merged while this one built.
-      - name: Still main's tip
-        env: *tip_env
-        run: *tip_check
+      # Checked again: the tag can have moved while this release built.
+      - name: A release on main
+        env: *release_env
+        run: *release_check
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # --prefer-index=false copies the sha tag's manifest as it is, so :latest has the same digest.
+      # A re-run of an older release, or two releases close together, must not move :latest back.
+      # Compared with the release :latest holds now, not with the tags: a higher tag that never built
+      # would hold :latest back for good. A build from before releases has no version label.
+      - name: Higher than the release in latest
+        id: top
+        env: *release_env
+        run: |
+          cur=$(docker buildx imagetools inspect ghcr.io/thomkr01/brim-bot:latest --format '{{json .Image.Config.Labels}}' \
+            | jq -r '.["org.opencontainers.image.version"] // ""') || { echo "Could not read the release in :latest."; exit 1; }
+          if [ -z "$cur" ] || [ "$(printf '%s\n%s\n' "$cur" "$TAG" | sort -V | tail -n 1)" = "$TAG" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo ":latest holds $cur, which is higher than $TAG, so it stays. $TAG is published under its own tags."
+      # --prefer-index=false copies the version tag's manifest as it is, so :latest has the same
+      # digest. Not the sha tag: two releases on one commit share it.
       - name: Move all four latest tags
-        env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
+        if: steps.top.outputs.move == 'true'
+        env: *release_env
         run: |
           for t in bot dashboard mcp updater; do
-            docker buildx imagetools create --prefer-index=false -t "ghcr.io/thomkr01/brim-$t:latest" "ghcr.io/thomkr01/brim-$t:${SHA::7}"
+            docker buildx imagetools create --prefer-index=false -t "ghcr.io/thomkr01/brim-$t:latest" "ghcr.io/thomkr01/brim-$t:$TAG"
           done

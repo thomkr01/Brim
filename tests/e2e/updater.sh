@@ -12,11 +12,12 @@ docker run -d --rm --name updtest-registry -p 5555:5000 registry:2 > /dev/null
 dc() { docker compose --project-directory "$dir" "$@"; }
 trap 'dc down -v -t 1 > /dev/null 2>&1; docker rm -f updtest-registry > /dev/null; rm -rf "$dir"' EXIT
 
-# push <service> <sha> <cmd>: publishes a tiny image standing in for a Brim build and keeps its
+# push <service> <sha> <cmd>: publishes a tiny image standing in for a Brim release ($VER, v1.0.0
+# by default, is its version label) and keeps its
 # registry digest in $dir/<service>.digest (what the dashboard approves). It is tagged under
 # 127.0.0.1 so the local build does not take the tag of the image compose runs, as CI never would.
 push() {
-  printf 'FROM busybox:1.36\nLABEL org.opencontainers.image.revision=%s %s=%s\nCMD ["sh", "-c", "%s"]\n' "$2" "${LABEL:-org.brim.update}" "${4:-digest}" "$3" \
+  printf 'FROM busybox:1.36\nLABEL org.opencontainers.image.revision=%s org.opencontainers.image.version=%s %s=%s\nCMD ["sh", "-c", "%s"]\n' "$2" "${VER:-v1.0.0}" "${LABEL:-org.brim.update}" "${4:-digest}" "$3" \
     | docker build -q -t "127.0.0.1:5555/$1:latest" - > /dev/null
   docker push -q "127.0.0.1:5555/$1:latest" > /dev/null
   docker inspect -f '{{index .RepoDigests 0}}' "127.0.0.1:5555/$1:latest" | sed 's/.*@//' > "$dir/$1.digest"
@@ -124,6 +125,17 @@ r=$(update "$(sha b)")
 case $r in failed*) ;; *) fail "dashboard with only the old label: $r" ;; esac
 [ "$(label)" = "$(sha a)" ] || fail "dashboard changed by a build with only the old label"
 echo "ok: dashboard build from before the rename refused"
+
+# A build of main from before releases (no release version label) is refused, nothing changed.
+attest bot
+VER=none push dashboard "$(sha b)" "$serve"
+r=$(update "$(sha b)")
+case $r in failed*) ;; *) fail "build that is not a release: $r" ;; esac
+case $(sql "select error from update_runs order by id desc limit 1") in
+  *"not a release"*) ;; *) fail "build that is not a release not explained" ;;
+esac
+[ "$(label)" = "$(sha a)" ] || fail "dashboard changed by a build that is not a release"
+echo "ok: build that is not a release refused"
 
 # The good update: records name Brim, the dashboard carries only the new label.
 push dashboard "$(sha b)" "$serve"

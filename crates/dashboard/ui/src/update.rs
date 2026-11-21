@@ -1,5 +1,5 @@
-//! Bot-owner page that installs a published build of a self-hosted Brim (the newest, or one of
-//! the last 10 to go back to), with live progress.
+//! Bot-owner page that installs a release of a self-hosted Brim (the newest, or one of the last
+//! 10 to go back to), with live progress.
 use crate::common::*;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::Value;
@@ -37,6 +37,18 @@ fn short(v: &Value) -> String {
     v.as_str()
         .map(|s| s.chars().take(7).collect())
         .unwrap_or_else(|| "unknown".into())
+}
+
+/// The release name (v1.2.3) of commit `sha` from the release list, else its short commit (a build
+/// from before releases, or one older than the list).
+fn name(d: &Value, sha: &Value) -> String {
+    d["builds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|b| sha.is_string() && b["sha"] == *sha)
+        .and_then(|b| b["version"].as_str())
+        .map_or_else(|| short(sha), String::from)
 }
 
 /// The updater is down only when the server said so: before the first answer nothing is known.
@@ -202,8 +214,8 @@ pub fn Update() -> impl IntoView {
         });
         view! {
             <div class="card">
-                <p><b>"Running: "</b><code>{short(&d["current"])}</code></p>
-                <p><b>"Newest: "</b>{if d["latest"].is_null() { view! { <span class="muted">"Could not reach GitHub right now."</span> }.into_any() } else { view! { <code>{short(newest)}</code>" "{news} }.into_any() }}</p>
+                <p><b>"Running: "</b><code>{name(&d, &d["current"])}</code></p>
+                <p><b>"Newest: "</b>{if d["latest"].is_null() { view! { <span class="muted">"Could not reach GitHub right now."</span> }.into_any() } else { view! { <code>{name(&d, newest)}</code>" "{news} }.into_any() }}</p>
                 {changes}
                 {side}
                 {if updater_down(&d) {
@@ -222,7 +234,7 @@ pub fn Update() -> impl IntoView {
         }
     };
 
-    // The other published builds, to go back to one (GHCR keeps the newest 10).
+    // The other releases, to go back to one (GHCR keeps the newest 10).
     let earlier = move || {
         let d = data.get();
         let cur = d["current"].as_str().unwrap_or("").to_string();
@@ -234,14 +246,15 @@ pub fn Update() -> impl IntoView {
             let at = b["at"].as_str().unwrap_or("").replace('T', " ").chars().take(16).collect::<String>();
             let (pick, mine) = (sha.clone(), sha.clone());
             let lines = b["changes"].as_array().cloned().unwrap_or_default().iter().map(change).collect_view();
-            view! { <li><a href=format!("{GH}/commit/{sha}") target="_blank" rel="noopener"><code>{short(&b["sha"])}</code></a>" "<span class="muted">{at}" UTC"</span>" "
+            let label = b["version"].as_str().map_or_else(|| short(&b["sha"]), String::from);
+            view! { <li><a href=format!("{GH}/commit/{sha}") target="_blank" rel="noopener"><code>{label}</code></a>" "<span class="muted">{at}" UTC"</span>" "
                 {can.then(|| view! { <button class="ghost" disabled=move || !busy.with(String::is_empty) on:click={ let p = pick.clone(); move |_| start(p.clone()) }>{busy_label(move || busy.get() == mine, "Install")}</button> })}
                 <ul class="small builds">{lines}</ul></li> }
         }).collect_view();
         view! {
             <div class="card">
-                <h3>"Older published builds"</h3>
-                <p class="muted">"Install any of the recent builds, for example to go back to one that worked. The database stays as it is: the server keeps a backup from before each update."</p>
+                <h3>"Older releases"</h3>
+                <p class="muted">"Install any of the recent releases, for example to go back to one that worked. The database stays as it is: the server keeps a backup from before each update."</p>
                 <ul class="checks">{rows}</ul>
             </div>
         }
@@ -302,7 +315,7 @@ pub fn Update() -> impl IntoView {
                 let lines = found.iter().map(change).collect_view();
                 let reload = loaded_sha.get_value().is_some_and(|s| s != d["current"]);
                 view! {
-                    <p class="ok">{format!("Updated to {}{}", short(&r["to_sha"]), if n == 0 { "." } else { ":" })}</p>
+                    <p class="ok">{format!("Updated to {}{}", name(&d, &r["to_sha"]), if n == 0 { "." } else { ":" })}</p>
                     <ul class="small">{lines}</ul>
                     {reload.then(|| view! { <button on:click=|_| { web_sys::window().unwrap().location().reload().ok(); }>"Reload the dashboard"</button> })}
                 }.into_any()
@@ -328,6 +341,14 @@ pub fn Update() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_shows_its_version_and_other_builds_their_commit() {
+        let d = serde_json::json!({"builds": [{"sha": "a".repeat(40), "version": "v1.2.0"}]});
+        assert_eq!(name(&d, &serde_json::json!("a".repeat(40))), "v1.2.0");
+        assert_eq!(name(&d, &serde_json::json!("b".repeat(40))), "bbbbbbb");
+        assert_eq!(name(&d, &Value::Null), "unknown");
+    }
 
     #[test]
     fn no_warning_before_the_first_answer() {

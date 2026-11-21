@@ -1,4 +1,4 @@
-//! Self-host updates: the bot owner picks a published build here and the updater container
+//! Self-host updates: the bot owner picks a published release here and the updater container
 //! (`scripts/updater.sh`) installs exactly that build (by image digest), writing its progress to
 //! `update_runs`. The dashboard never touches Docker itself.
 use crate::{api::Res, auth::Sess, ApiError, AppState};
@@ -29,10 +29,11 @@ fn package(img: &str) -> String {
     format!("thomkr01/brim-{img}")
 }
 
-/// The Images runs on main, newest first. Not `status=success`: GitHub's filtered list left out a
+/// The Images runs, newest first. Only `workflow_run` runs: those run images.yml as it is on main,
+/// whatever branch or tag started them. Not `status=success`: GitHub's filtered list left out a
 /// finished run for over 15 minutes, so the page showed an older build as the newest (PITFALLS).
-const LATEST_PATH: &str = "actions/workflows/images.yml/runs?branch=main&per_page=100";
-/// GHCR keeps the 10 most recent versions of each image, one per build.
+const LATEST_PATH: &str = "actions/workflows/images.yml/runs?event=workflow_run&per_page=100";
+/// GHCR keeps the 10 most recent versions of each image, one per release.
 const KEPT: usize = 10;
 /// The only repository a build record may name.
 const REPO: &str = "https://github.com/thomkr01/Brim";
@@ -77,7 +78,7 @@ async fn get_json(st: &AppState, url: &str) -> Option<Value> {
         .ok()
 }
 
-/// The published builds, newest first ({sha, at}), cached for a minute (GitHub allows 60 calls an
+/// The published releases, newest first ({sha, version, at}), cached for a minute (GitHub allows 60 calls an
 /// hour without a token). Empty when GitHub cannot be reached; a failure is not cached.
 async fn builds(st: &AppState) -> Vec<Value> {
     static CACHE: Mutex<Option<(Instant, Vec<Value>)>> = Mutex::new(None);
@@ -94,30 +95,51 @@ async fn builds(st: &AppState) -> Vec<Value> {
     v
 }
 
-/// Each successful run's published commit once (a re-run publishes the same build again), newest
-/// first, at most `KEPT`.
+/// Each successful run's release once (a re-run publishes the same release again), highest version
+/// first (a re-run of an older release is not the newest), at most `KEPT`. Builds of main from
+/// before releases ("Images for <sha>") are not listed.
 fn runs_to_builds(r: &Value) -> Vec<Value> {
     let mut seen = std::collections::HashSet::new();
-    r["workflow_runs"]
+    let mut v: Vec<(Vec<u64>, Value)> = r["workflow_runs"]
         .as_array()
         .into_iter()
         .flatten()
         .filter(|run| run["conclusion"] == "success")
         .filter_map(|run| {
-            let sha = published_sha(run["display_title"].as_str()?)?;
-            seen.insert(sha)
-                .then(|| json!({"sha": sha, "at": run["created_at"]}))
+            let (version, sha) = published(run["display_title"].as_str()?)?;
+            let key = version[1..]
+                .split('.')
+                .map(|n| n.parse().unwrap_or(u64::MAX))
+                .collect();
+            seen.insert(sha).then(|| {
+                (
+                    key,
+                    json!({"sha": sha, "version": version, "at": run["created_at"]}),
+                )
+            })
         })
-        .take(KEPT)
-        .collect()
+        .collect();
+    v.sort_by(|a, b| b.0.cmp(&a.0));
+    v.into_iter().take(KEPT).map(|(_, b)| b).collect()
 }
 
-/// The commit an Images run published, from its title ("Images for <sha>"). Not the run's
-/// head_sha: for a run started by CI finishing, that is main's tip when it was queued, so an older
-/// commit whose CI finished last showed as the newest (PITFALLS: update loop).
-fn published_sha(title: &str) -> Option<&str> {
-    let sha = title.strip_prefix("Images for ")?;
-    is_sha(sha).then_some(sha)
+/// The release and commit an Images run published, from its title ("Release v1.2.3 at <sha>").
+/// Not the run's head_sha: for a run started by CI finishing, that is main's tip when it was
+/// queued, so an older commit whose CI finished last showed as the newest (PITFALLS: update loop).
+fn published(title: &str) -> Option<(&str, &str)> {
+    let (version, sha) = title.strip_prefix("Release ")?.split_once(" at ")?;
+    (is_version(version) && is_sha(sha)).then_some((version, sha))
+}
+
+/// A release tag: v, then three numbers (v1.2.3).
+fn is_version(v: &str) -> bool {
+    v.strip_prefix('v').is_some_and(|n| {
+        let parts: Vec<&str> = n.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    })
 }
 
 fn is_sha(s: &str) -> bool {
@@ -162,13 +184,14 @@ fn side_changes(compare: &Value) -> Option<Vec<&'static str>> {
     )
 }
 
-/// The registry digest of each image of build `sha`, accepted only when GitHub holds the signed
-/// build record (attestation) the Images workflow made for it. The updater pulls these digests and
-/// nothing else, so a tag moved in the registry after the owner chose cannot reach the server.
-async fn approved(st: &AppState, sha: &str) -> Result<Value, String> {
-    let short = &sha[..7];
+/// The registry digest of each image of release `version`, accepted only when GitHub holds the
+/// signed build record (attestation) the Images workflow made for it. The updater pulls these
+/// digests and nothing else, so a tag moved in the registry after the owner chose cannot reach the
+/// server. Looked up by the version tag, not the sha tag: two releases on one commit share that.
+async fn approved(st: &AppState, version: &str) -> Result<Value, String> {
+    let short = version;
     let unreachable = |what: &str| {
-        format!("Could not reach {what} to check build {short}. Nothing was started; try again in a minute.")
+        format!("Could not reach {what} to check release {short}. Nothing was started; try again in a minute.")
     };
     let mut out = serde_json::Map::new();
     for img in IMAGES {
@@ -183,7 +206,7 @@ async fn approved(st: &AppState, sha: &str) -> Result<Value, String> {
         let r = st
             .discord
             .http
-            .head(format!("https://ghcr.io/v2/{repo}/manifests/{short}"))
+            .head(format!("https://ghcr.io/v2/{repo}/manifests/{version}"))
             .bearer_auth(token)
             .header("User-Agent", UA)
             .header(
@@ -194,7 +217,7 @@ async fn approved(st: &AppState, sha: &str) -> Result<Value, String> {
             .await
             .map_err(|_| unreachable("the image registry"))?;
         if r.status() == reqwest::StatusCode::NOT_FOUND {
-            return Err(format!("The {img} image of build {short} is no longer in the registry (it keeps the 10 most recent builds)."));
+            return Err(format!("The {img} image of release {short} is no longer in the registry (it keeps the 10 most recent releases)."));
         }
         let digest = r
             .error_for_status()
@@ -229,7 +252,7 @@ async fn approved(st: &AppState, sha: &str) -> Result<Value, String> {
             _ => return Err(unreachable("GitHub")),
         };
         if !signed {
-            return Err(format!("The {img} image of build {short} has no signed build record on GitHub, so it is not installed. Builds from before signing started have none."));
+            return Err(format!("The {img} image of release {short} has no signed build record on GitHub, so it is not installed."));
         }
         out.insert(img.into(), json!(digest));
     }
@@ -508,7 +531,7 @@ async fn status(State(st): State<AppState>, s: Sess) -> Res {
         "updater_sha": updater_sha,
         // The files only the command on the server updates that changed since the updater's commit.
         "behind": behind,
-        // The published builds to install, newest first: {sha, at}.
+        // The published releases to install, newest first: {sha, version, at}.
         "builds": builds,
         "run": run,
         "estimate": estimate(&done),
@@ -519,7 +542,7 @@ async fn status(State(st): State<AppState>, s: Sess) -> Res {
 
 #[derive(Deserialize)]
 struct Start {
-    /// The build to install: one of `builds`.
+    /// The commit of the release to install: one of `builds`.
     sha: String,
 }
 
@@ -564,16 +587,20 @@ async fn start(State(st): State<AppState>, s: Sess, Json(b): Json<Start>) -> Res
     let builds = builds(&st).await;
     if builds.is_empty() {
         return Err(ApiError::BadRequest(
-            "Could not reach GitHub to list the published builds. Nothing was started; try again in a minute.".into(),
+            "Could not reach GitHub to list the published releases. Nothing was started; try again in a minute.".into(),
         ));
     }
-    if !builds.iter().any(|x| x["sha"] == b.sha) {
+    let Some(version) = builds
+        .iter()
+        .find(|x| x["sha"] == b.sha)
+        .and_then(|x| x["version"].as_str())
+    else {
         return Err(ApiError::BadRequest(
-            "That build is not one of the 10 most recent published builds. Reload the page and pick again."
+            "That version is not one of the 10 most recent releases. Reload the page and pick again."
                 .into(),
         ));
-    }
-    let digests = approved(&st, &b.sha).await.map_err(ApiError::BadRequest)?;
+    };
+    let digests = approved(&st, version).await.map_err(ApiError::BadRequest)?;
     queue(&st, s.user_id, &b.sha, &digests).await
 }
 
@@ -606,13 +633,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_published_commit_comes_from_the_run_title() {
+    fn the_published_release_comes_from_the_run_title() {
         let sha = "0d89861a4e8d47d58ee773cc5ea1e4fff8fc3810";
-        assert_eq!(published_sha(&format!("Images for {sha}")), Some(sha));
-        // Runs from before the title carried it, and anything else, give no commit.
-        assert_eq!(published_sha("Images"), None);
-        assert_eq!(published_sha("Images for 0d89861"), None);
-        assert_eq!(published_sha(&format!("Images for {sha}x")), None);
+        assert_eq!(
+            published(&format!("Release v1.20.3 at {sha}")),
+            Some(("v1.20.3", sha))
+        );
+        // Builds of main from before releases, other tags and anything else give no release.
+        assert_eq!(published(&format!("Images for {sha}")), None);
+        assert_eq!(published("Images"), None);
+        assert_eq!(published("Release v1.0.0 at 0d89861"), None);
+        assert_eq!(published(&format!("Release v1.0.0 at {sha}x")), None);
+        for v in [
+            "v1.0",
+            "1.0.0",
+            "v1.0.0-rc1",
+            "v1..0",
+            "va.b.c",
+            "v1.0.0.0",
+            "feature-x",
+        ] {
+            assert_eq!(published(&format!("Release {v} at {sha}")), None, "{v}");
+        }
     }
 
     /// Runs only on a scratch Postgres. `POST /api/update` makes the host pull and start new code:
@@ -721,22 +763,36 @@ mod tests {
         let ok = "success";
         let runs = json!({"workflow_runs": [
             // A cancelled or running build is not published.
-            {"display_title": format!("Images for {c}"), "created_at": "3", "conclusion": "cancelled"},
-            {"display_title": format!("Images for {c}"), "created_at": "3", "conclusion": null},
-            {"display_title": format!("Images for {b}"), "created_at": "2", "conclusion": ok},
-            // A re-run publishes the same build again; a run from before titles carried it is no build.
-            {"display_title": format!("Images for {b}"), "created_at": "1", "conclusion": ok},
+            {"display_title": format!("Release v1.2.0 at {c}"), "created_at": "3", "conclusion": "cancelled"},
+            {"display_title": format!("Release v1.2.0 at {c}"), "created_at": "3", "conclusion": null},
+            {"display_title": format!("Release v1.1.0 at {b}"), "created_at": "2", "conclusion": ok},
+            // A re-run publishes the same release again; a build of main from before releases is none.
+            {"display_title": format!("Release v1.1.0 at {b}"), "created_at": "1", "conclusion": ok},
+            {"display_title": format!("Images for {c}"), "created_at": "1", "conclusion": ok},
             {"display_title": "Images", "created_at": "0", "conclusion": ok},
-            {"display_title": format!("Images for {a}"), "created_at": "0", "conclusion": ok},
+            {"display_title": format!("Release v1.0.0 at {a}"), "created_at": "0", "conclusion": ok},
         ]});
         let v = runs_to_builds(&runs);
         assert_eq!(
             v,
-            vec![json!({"sha": b, "at": "2"}), json!({"sha": a, "at": "0"})]
+            vec![
+                json!({"sha": b, "version": "v1.1.0", "at": "2"}),
+                json!({"sha": a, "version": "v1.0.0", "at": "0"})
+            ]
         );
-        // Only the builds GHCR still keeps.
+        // A re-run of an older release is listed after the higher one.
+        let rerun = json!({"workflow_runs": [
+            {"display_title": format!("Release v1.9.0 at {a}"), "created_at": "5", "conclusion": ok},
+            {"display_title": format!("Release v1.10.0 at {b}"), "created_at": "4", "conclusion": ok},
+        ]});
+        let order: Vec<Value> = runs_to_builds(&rerun)
+            .iter()
+            .map(|x| x["version"].clone())
+            .collect();
+        assert_eq!(order, [json!("v1.10.0"), json!("v1.9.0")]);
+        // Only the releases GHCR still keeps.
         let many: Vec<Value> = (0..12)
-            .map(|i| json!({"display_title": format!("Images for {i:040x}"), "conclusion": ok}))
+            .map(|i| json!({"display_title": format!("Release v1.{i}.0 at {i:040x}"), "conclusion": ok}))
             .collect();
         assert_eq!(runs_to_builds(&json!({"workflow_runs": many})).len(), KEPT);
 

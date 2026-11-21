@@ -1,6 +1,6 @@
 #!/bin/sh
 # Runs in the updater container. Waits for an update request from the dashboard (a queued row in
-# update_runs), pulls exactly the build the bot owner approved there (by image digest) for bot,
+# update_runs), pulls exactly the release the bot owner approved there (by image digest) for bot,
 # dashboard and the MCP server when it runs, recreates them, checks they stay up, and rolls back to the
 # previous images if anything fails. Progress goes to the same row for the dashboard.
 set -u
@@ -138,6 +138,10 @@ SQL
     fi
     got=$(rev "$img")
     [ "$got" = "$target" ] || { finish failed "The $svc image of the approved build says it is version ${got:-unknown}, not $(echo "$target" | cut -c1-7). Nothing was changed."; return; }
+    # Only releases are installed: the Images workflow sets this label only for a release tag on main,
+    # and the label is part of the signed digest. A build of main from before releases has none.
+    ver=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$img" 2> /dev/null)
+    printf '%s\n' "$ver" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || { finish failed "The $svc image of build $(echo "$target" | cut -c1-7) is not a release. Only releases are installed. Nothing was changed."; return; }
     # A dashboard from before approved builds queues runs this updater refuses, and one from before
     # the rename to Brim (no org.brim.update) checks only the old repository: installing either would
     # leave the Update button with no way forward.
