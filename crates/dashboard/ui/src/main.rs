@@ -951,7 +951,9 @@ fn App() -> impl IntoView {
                             let page = route.get().get(1).cloned().unwrap_or_default();
                             let hits = search::counts(search);
                             let open = if page == "module" { route.get().get(2).and_then(|s| modules::group_by_slug(s)) } else if modules::MODULE_ORDER.contains(&nav_key(&page)) { None } else { modules::group_of(&page).filter(|g| modules::is_module(g)) };
-                            let link = |p: &str, t: &str| { if access.of(p) == "hidden" { return ().into_any(); } let n: usize = hits.iter().filter(|(k, _)| *k == p || k.starts_with(&format!("{p}/"))).map(|(_, n)| n).sum(); let on = nav_key(&page) == p; view! { <a class:on=on href=format!("#/{g}/{p}")>{icons::icon(page_icon(p))}<span>{t.to_string()}</span>{(n > 0).then(|| view! { <span class="chip hits">{n}</span> })}</a> }.into_any() };
+                            // Every module row with a single on/off shows its switch, open or not (owner decision 2026-11-21).
+                            let switch = |entry: &str| modules::switch_section(entry).and_then(|sec| modules::part_on(&cfg.0.get(), sec).map(|on| view! { <modules::ModuleSwitch guild=g.clone() section=sec group=modules::label(entry) on msg=switch_msg need=two_fa busy=switch_busy /> }));
+                            let link = |p: &str, t: &str| { if access.of(p) == "hidden" { return ().into_any(); } let n: usize = hits.iter().filter(|(k, _)| *k == p || k.starts_with(&format!("{p}/"))).map(|(_, n)| n).sum(); let on = nav_key(&page) == p; view! { <a class:on=on href=format!("#/{g}/{p}")>{icons::icon(page_icon(p))}<span>{t.to_string()}</span>{switch(p)}{(n > 0).then(|| view! { <span class="chip hits">{n}</span> })}</a> }.into_any() };
                             view! {
                                 {srv_row(g.clone())}
                                 <a class:on=page.is_empty() href=format!("#/{g}")>{icons::icon("dashboard")}<span>"Home"</span></a>
@@ -963,8 +965,7 @@ fn App() -> impl IntoView {
                                         if items.iter().all(|(p, _)| access.of(p) == "hidden") { return ().into_any(); }
                                         let n: usize = hits.iter().filter(|(k, _)| items.iter().any(|(p, _)| k == p || k.starts_with(&format!("{p}/")))).map(|(_, n)| n).sum();
                                         let is_open = open == Some(*grp);
-                                        let state = is_open.then(|| modules::module_on(&cfg.0.get(), grp)).flatten();
-                                        view! { <a class:on=is_open href=format!("#/{g}/module/{}", modules::slug(grp))>{icons::icon(page_icon(grp))}<span>{*grp}</span>{state.map(|on| view! { <modules::ModuleSwitch guild=g.clone() group=grp on msg=switch_msg need=two_fa busy=switch_busy /> })}{(n > 0).then(|| view! { <span class="chip hits">{n}</span> })}</a> }.into_any()
+                                        view! { <a class:on=is_open href=format!("#/{g}/module/{}", modules::slug(grp))>{icons::icon(page_icon(grp))}<span>{*grp}</span>{switch(grp)}{(n > 0).then(|| view! { <span class="chip hits">{n}</span> })}</a> }.into_any()
                                     }
                                 }).collect_view()}
                                 <p class="nav-label">"Tools"</p>

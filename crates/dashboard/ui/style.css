@@ -292,7 +292,7 @@ header details div p { margin:0; padding:var(--space-8) var(--space-12); }
 button.link.err { color:var(--bad); } button.link.err.on { border:1px solid var(--bad); border-radius:var(--radius-row); padding:var(--space-4) var(--space-8); background:color-mix(in srgb, var(--bad) 15%, transparent); }
 /* Wizard: the sub-options of a switch, ringed red with a note while the switch is off. */
 .atit { background:var(--b3); border-radius:var(--radius-row); padding:var(--space-8) var(--space-12); margin:8px 0; box-shadow:0 0 0 2px transparent; transition:box-shadow var(--dur) var(--ease); } .atit.off { box-shadow:0 0 0 2px var(--bad); }
-.atit .sw, nav a .sw { width:36px; height:20px; } .atit .sw::after, nav a .sw::after { width:12px; height:12px; } .atit .sw:checked::after, nav a .sw:checked::after { transform:translateX(16px); }
+.atit input[type=checkbox].sw, nav a input[type=checkbox].sw { width:36px; height:20px; } .atit input[type=checkbox].sw::after, nav a input[type=checkbox].sw::after { width:12px; height:12px; } .atit input[type=checkbox].sw:checked::after, nav a input[type=checkbox].sw:checked::after { transform:translateX(16px); }
 .atit > i { display:block; font-size:var(--fs-ui); font-weight:600; margin-bottom:4px; }
 .chip.dot::before { content:""; display:inline-block; width:6px; height:6px; border-radius:50%; background:#fff; margin-right:8px; vertical-align:middle; }
 /* A field that belongs to a switch slides open under it. */
@@ -697,9 +697,8 @@ nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active {
 /* "How it works" box on hard pages: folded by default, three numbered steps. */
 details.how { margin:0 0 var(--space-24); } details.how summary { cursor:pointer; font-weight:600; } details.how ol { margin:var(--space-8) 0 0; padding-left:var(--space-20); } details.how li { margin:var(--space-4) 0; }
 nav .nav-label { margin:var(--space-16) var(--space-16) var(--space-4); font-size:var(--fs-caption); text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
-nav a .chip { float:right; } nav a .sw { float:right; }
+nav a .chip { float:right; } nav a .sw { float:right; margin:0; }
 .mod-state { display:flex; align-items:center; gap:var(--space-8); margin:0 0 var(--space-16); }
-.setup { background:var(--info); color:#000; font-weight:600; padding:var(--space-8) var(--space-16); border-radius:var(--radius-row); }
 .home { display:flex; flex-direction:column; gap:var(--space-24); } .home .card { margin:0; display:flex; flex-direction:column; gap:var(--space-8); align-items:flex-start; } .home .card > * { margin:0; } .home .row { align-self:stretch; justify-content:space-between; } .home .card .btn, .home .card a { margin-top:auto; } .home .home-score { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--space-16); } .home .home-score-text { display:flex; flex-direction:column; align-items:flex-start; align-self:center; gap:var(--space-8); min-width:0; } .home .home-score-text > * { margin:0; }
 .cmds details.card { padding:0; } .cmds summary { list-style:none; padding:var(--space-12) var(--space-16); } .cmds summary::-webkit-details-marker { display:none; } .cmds summary::after { content:""; width:var(--space-8); height:var(--space-8); border:solid var(--muted); border-width:0 2px 2px 0; transform:rotate(-45deg); transition:transform var(--dur) var(--ease); } .cmds details[open] summary::after { transform:rotate(45deg); } .cmds summary code { font-weight:700; } .cmds .cmd-body { padding:0 var(--space-16) var(--space-12); border-top:1px solid var(--line); }
 .logcats { display:flex; flex-direction:column; gap:var(--space-12); } .logcat summary { display:flex; align-items:center; gap:var(--space-12); cursor:pointer; } .logcat .logrow { margin:var(--space-8) 0; } .logcat .logrow label { display:flex; align-items:center; gap:var(--space-8); }

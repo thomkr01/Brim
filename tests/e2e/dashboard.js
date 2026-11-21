@@ -390,18 +390,28 @@ fs.mkdirSync(out, { recursive: true });
   require('child_process').execSync(`psql "${process.env.DATABASE_URL}" -qc "update dash_session set step_up_until = now() + interval '1 hour', step_up_guild = ${gid}"`);
   // The sidebar module switch: turning off asks first, turning on does not; both save through the section's PUT.
   await page.goto(`${base}/#/${gid}/module/anti_nuke`);
-  const sw = page.locator('nav input.sw');
+  const SW = 'nav input.sw[aria-label="Anti Nuke on or off"]';
+  // Every module with a single on/off shows its switch, open or not; the others show none.
+  await page.waitForSelector(SW, { timeout: 8000 }).catch(() => {});
+  const navSw = await page.$$eval('nav input.sw', (l) => l.map((e) => e.getAttribute('aria-label')).sort().join());
+  if (navSw !== 'Anti Nuke on or off,Auto Mod on or off,Tickets on or off') failed.push(`module switch: sidebar shows ${navSw}`);
+  // A part with its own on/off shows its switch on the module page.
+  await page.goto(`${base}/#/${gid}/module/server_joins`);
+  const partSw = await page.waitForFunction(() => document.querySelectorAll('main a.card.link input.sw').length === 4, null, { timeout: 8000 }).then(() => true).catch(() => false);
+  if (!partSw) failed.push('part switch: Server Joins does not show 4 part switches');
+  await page.goto(`${base}/#/${gid}/module/anti_nuke`);
+  const sw = page.locator(SW);
   await sw.waitFor({ timeout: 8000 }).catch(() => failed.push('module switch: none in the sidebar'));
   const swWas = await sw.isChecked().catch(() => null);
   if (swWas !== null) {
     if (!swWas) await sw.click(); // make sure it starts On
-    await page.waitForFunction(() => document.querySelector('nav input.sw')?.checked, null, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn on'));
+    await page.waitForFunction((SW) => document.querySelector(SW)?.checked, SW, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn on'));
     await sw.click();
     if (!(await page.locator('.modal').waitFor({ timeout: 3000 }).then(() => true).catch(() => false))) failed.push('module switch: no confirm before turning off');
     await page.locator('.modal button.danger').click();
-    await page.waitForFunction(() => document.querySelector('nav input.sw') && !document.querySelector('nav input.sw').checked, null, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn off'));
+    await page.waitForFunction((SW) => document.querySelector(SW) && !document.querySelector(SW).checked, SW, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn off'));
     await sw.click(); // On again: no dialog
-    await page.waitForFunction(() => document.querySelector('nav input.sw')?.checked, null, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn back on'));
+    await page.waitForFunction((SW) => document.querySelector(SW)?.checked, SW, { timeout: 8000 }).catch(() => failed.push('module switch: did not turn back on'));
     if (await page.locator('.modal').count()) failed.push('module switch: asked before turning on');
     if (!swWas) { await sw.click(); await page.locator('.modal button.danger').click(); }
   }

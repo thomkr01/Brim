@@ -35,15 +35,17 @@ fn flag(page: &str) -> Option<&'static str> {
 }
 
 /// Whether a part is on; `None` when it has no switch or the config is not loaded.
-fn part_on(cfg: &Value, page: &str) -> Option<bool> {
+pub fn part_on(cfg: &Value, page: &str) -> Option<bool> {
     cfg["config"][flag(page)?]["enabled"].as_bool().or_else(|| cfg["config"].is_object().then_some(false))
 }
 
-/// The config section behind a module's master switch (Auto Mod, Anti Nuke); other modules have none.
-fn switch_section(group: &str) -> Option<&'static str> {
+/// The config section behind a module's master switch (Auto Mod, Anti Nuke, Tickets). The other
+/// modules have no single on/off: only their parts have one, on the module's page.
+pub fn switch_section(group: &str) -> Option<&'static str> {
     match group {
         "Auto Mod" => Some("automod"),
         "Anti Nuke" => Some("antinuke"),
+        "tickets" => Some("tickets"),
         _ => None,
     }
 }
@@ -57,18 +59,25 @@ pub fn module_on(cfg: &Value, group: &str) -> Option<bool> {
 fn off_effect(section: &str) -> &'static str {
     match section {
         "antinuke" => "Nobody is counted or punished for dangerous actions. Changes only permit holders may make (dangerous permissions, the vanity URL) are still undone.",
-        _ => "Auto Mod checks no messages on this server.",
+        "automod" => "Auto Mod checks no messages on this server.",
+        "tickets" => "Members can no longer open new tickets.",
+        "joingate" => "New members are no longer checked against your join filters.",
+        "joinraid" => "Brim no longer looks for many accounts joining in a short time.",
+        "verification" => "New members no longer pass a check before they get access.",
+        "catch" => "Brim no longer punishes anyone who writes in the catch channel.",
+        "raider_list" => "New members are no longer checked against the Raider List.",
+        _ => "",
     }
 }
 
-/// The open module's on/off switch in the sidebar. It saves the module's section through the same
-/// `PUT /config/<section>` as the General page, so access and the 2FA step-up are the server's. Turning
-/// off asks first; a section the bot could not read is left to the General page, which shows the problem.
+/// The on/off switch of a module (sidebar) or a part (module page). It saves the section through the same
+/// `PUT /config/<section>` as the section's own page, so access and the 2FA step-up are the server's. Turning
+/// off asks first; a section the bot could not read is left to its own page, which shows the problem.
 #[component]
-pub fn ModuleSwitch(guild: String, group: &'static str, on: bool, msg: Msg, need: RwSignal<bool>, busy: RwSignal<bool>) -> impl IntoView {
+pub fn ModuleSwitch(guild: String, section: &'static str, group: String, on: bool, msg: Msg, need: RwSignal<bool>, busy: RwSignal<bool>) -> impl IntoView {
     let access = expect_context::<Access>();
     let cfg = expect_context::<Cfg>().0;
-    let section = switch_section(group).unwrap_or_default();
+    let aria = format!("{group} on or off");
     let click = move |e: leptos::ev::MouseEvent| {
         // The switch sits in the module's link: no navigation, and the checkbox follows the saved state only.
         e.prevent_default();
@@ -78,9 +87,9 @@ pub fn ModuleSwitch(guild: String, group: &'static str, on: bool, msg: Msg, need
             return;
         }
         if v["unread"].as_array().is_some_and(|u| u.iter().any(|x| x == section)) {
-            return msg.err(format!("Brim could not read the {group} settings, so open General to see why."));
+            return msg.err(format!("Brim could not read the {group} settings, so open its page to see why."));
         }
-        let (g, version, now) = (guild.clone(), v["version"].as_i64().unwrap_or(0), module_on(&v, group).unwrap_or(false));
+        let (g, group, version, now) = (guild.clone(), group.clone(), v["version"].as_i64().unwrap_or(0), part_on(&v, section).unwrap_or(false));
         let mut value = if v["config"][section].is_object() { v["config"][section].clone() } else { json!({}) };
         value["enabled"] = json!(!now);
         let go = move |_: String| {
@@ -109,7 +118,7 @@ pub fn ModuleSwitch(guild: String, group: &'static str, on: bool, msg: Msg, need
             go(String::new())
         }
     };
-    view! { <input type="checkbox" class="sw" role="switch" aria-label=format!("{group} module") prop:checked=on disabled=move || busy.get() || access.of(section) != "full" on:click=click /> }
+    view! { <input type="checkbox" class="sw" role="switch" aria-label=aria prop:checked=on disabled=move || busy.get() || access.of(section) != "full" on:click=click /> }
 }
 
 pub fn blurb(p: &str) -> &'static str {
@@ -148,17 +157,22 @@ pub fn ModulePage(guild: String, group: &'static str) -> impl IntoView {
     let cfg = expect_context::<Cfg>().0;
     let items = NAV.iter().find(|(g, _)| *g == group).map_or(&[][..], |(_, i)| *i);
     let g = guild.clone();
+    let (msg, need, busy) = (Msg::default(), step_up(), RwSignal::new(false));
     view! {
         <Head guild=guild.clone() page="Modules".to_string() big=group.to_string() />
+        <Toast msg />
         {move || module_on(&cfg.get(), group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">"Turn it on or off with the switch in the menu."</span></p> })}
         <div class="stack">
             {items.iter().filter(|(p, _)| access.of(p) != "hidden").map(|(p, t)| {
-                let (g, p) = (g.clone(), *p);
+                let (g, p, t) = (g.clone(), *p, *t);
+                let g2 = g.clone();
+                // A part with its own on/off shows its switch; the others are pages without one.
                 view! { <a class="card link" href=format!("#/{g}/{p}")>
                     <span class="ico">{icons::icon(page_icon(p))}</span>
-                    <span><h3>{*t}</h3><span class="muted">{blurb(p)}</span></span>
+                    <span><h3>{t}</h3><span class="muted">{blurb(p)}</span></span>
                     <span class="sp"></span>
-                    {move || if part_on(&cfg.get(), p) == Some(false) { view! { <span class="setup">"Set up"</span> }.into_any() } else { icons::icon("chevron_right") }}
+                    {move || part_on(&cfg.get(), p).map(|on| view! { <ModuleSwitch guild=g2.clone() section=p group=t.to_string() on msg need busy /> })}
+                    {icons::icon("chevron_right")}
                 </a> }
             }).collect_view()}
         </div>
