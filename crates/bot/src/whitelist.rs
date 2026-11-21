@@ -346,7 +346,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         // Whitelist and anti-nuke are protected sections: saving needs a fresh 2FA, as on the dashboard.
         ("save", Some(_)) if !crate::settings::fresh_2fa(app, actor.get(), gid.get()).await? => {
             InteractionResponseData {
-                content: Some(crate::settings::needs_2fa(gid.get())),
+                content: Some(crate::settings::needs_2fa_line(app, gid).await),
                 flags: Some(MessageFlags::EPHEMERAL),
                 ..Default::default()
             }

@@ -334,3 +334,162 @@ fn a_security_or_owner_only_change_answers_in_the_security_copy() {
     assert_eq!(key("heat", "1"), "reply.settings.changed");
     assert_eq!(key("verification", "1"), "reply.settings.changed");
 }
+
+/// The settings error replies  read exactly as the code wrote them before the entries: every
+/// row of every panel is refused the way the old text did.
+#[test]
+fn settings_errors_read_as_the_code_wrote_them() {
+    use settings::{edit_for, Kind, Op};
+    let s = |t: &str| t.to_string();
+    let mut checked = 0;
+    for word in settings::words() {
+        let Some(m) = settings::module(word).filter(|m| m.names[0] == word) else {
+            continue;
+        };
+        for row in m.rows {
+            let (c, label) = (
+                row.code,
+                format!("[{}] {}", row.code.to_uppercase(), row.name),
+            );
+            let err = |op: Op, ids: &[u64]| edit_for(row, &op, ids, None).unwrap_err().text();
+            let set = |v: &str| Op::Set(s(c), s(v));
+            let mut want: Vec<(String, String)> = vec![];
+            match row.kind {
+                Kind::Dashboard | Kind::Users => want.push((
+                    err(set("x"), &[]),
+                    format!("{label} can only be changed on the dashboard"),
+                )),
+                Kind::Group => want.push((
+                    err(set("x"), &[]),
+                    format!("{label} has sub-settings, use {c}a, {c}b..."),
+                )),
+                Kind::Bool | Kind::Switch(..) => want.push((
+                    err(set("x"), &[]),
+                    format!("{label} is a switch: use `{c} ?on` or `{c} ?off`"),
+                )),
+                kind => {
+                    want.push((
+                        err(Op::Toggle(s(c), true), &[]),
+                        format!("{label} is not a switch: use `VALUE ?set {c}`"),
+                    ));
+                    if !matches!(kind, Kind::Roles | Kind::Channels) {
+                        want.push((
+                            err(Op::Add(s(c), s("x")), &[]),
+                            format!("{label} is not a list: use `VALUE ?set {c}`"),
+                        ));
+                    }
+                    match kind {
+                        Kind::Int(min, max) => {
+                            want.push((
+                                err(set("x"), &[]),
+                                format!("`x` is not a valid value for {label}"),
+                            ));
+                            want.push((
+                                err(set(&(max + 1).to_string()), &[]),
+                                format!("{label} must be between {min} and {max}"),
+                            ));
+                        }
+                        Kind::Secs | Kind::Ms => {
+                            want.push((
+                                err(set("999w"), &[]),
+                                format!("{label}: {}", brim_core::duration::TOO_LONG),
+                            ));
+                            want.push((err(set("abc"), &[]), format!("`abc` is not a valid value for {label}. Give a number with a unit, like `15d`, `12h` or `30m`.")));
+                        }
+                        Kind::Age => {
+                            want.push((
+                                err(set("1.5"), &[]),
+                                format!(
+                                    "`1.5` is not a valid value for {label}. Give a whole number."
+                                ),
+                            ));
+                            want.push((err(set("abc"), &[]), format!("`abc` is not a valid value for {label}. Give days, or a number with a unit, like `12h` or `30m`.")));
+                            want.push((
+                                err(set("1s"), &[]),
+                                format!("{label} ranges from 5 seconds to 100 days"),
+                            ));
+                        }
+                        Kind::Choice(opts) => {
+                            let names: Vec<_> = opts.iter().map(|o| o.0).collect();
+                            want.push((
+                                err(set("zzz-none"), &[]),
+                                format!("{label} takes one of: {}", names.join(", ")),
+                            ));
+                        }
+                        Kind::Role | Kind::Channel => want
+                            .push((err(set("x"), &[1, 2]), format!("{label} takes exactly one"))),
+                        Kind::Text if row.path == "misc.prefix" => want.push((
+                            err(set("a b"), &[]),
+                            format!("{label} must be 1-32 characters with no spaces"),
+                        )),
+                        _ => {}
+                    }
+                }
+            }
+            for (got, old) in want {
+                assert_eq!(got, old, "{word} {c}");
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 150, "{checked}");
+}
+
+/// Every settings error reply is an entry of facts: what went wrong is a key variable, no
+/// `{text}`, and the Security copy reads as the settings copy and is a security text.
+#[test]
+fn settings_errors_keep_what_went_wrong() {
+    let link = settings::dashboard_link(1);
+    let vars = [
+        ("row", "[3C]"),
+        ("setting", "Minimum Age"),
+        ("number", "3c"),
+        ("typed", "abc"),
+        ("min", "1"),
+        ("max", "9"),
+        ("options", "kick, ban"),
+        ("reason", "why"),
+        ("target", "<@&5>"),
+        ("dashboard", link.as_str()),
+    ];
+    let text = |key: &str| botmsg::render(key, None, &vars)["content"].clone();
+    for (key, _, _, required, _) in botmsg::SETTINGS_ERRORS {
+        let copy = botmsg::security_copy(key);
+        let (d, sec) = (botmsg::find(key).unwrap(), botmsg::find(&copy).unwrap());
+        assert!(!d.security && sec.security, "{key}");
+        assert_eq!(d.group, "Settings panels", "{key}");
+        assert_eq!(text(key), text(&copy), "{key}");
+        assert!(!required.is_empty() && d.required == *required, "{key}");
+        for d in [d, sec] {
+            assert!(!d.vars.contains(&"text"), "{}", d.key);
+            let lost = json!({"content": "Something went wrong", "embeds": []});
+            assert!(botmsg::missing_text(&d.key, &lost).is_some(), "{}", d.key);
+        }
+    }
+    for (key, ..) in botmsg::SECURITY_ERRORS {
+        let d = botmsg::find(key).unwrap();
+        assert!(d.security && !d.vars.contains(&"text"), "{key}");
+    }
+    // The texts that are not built from a row, as the code wrote them.
+    let old = [
+        ("reply.settings.needs_2fa", format!("This change needs 2FA for this server. Open this server on the {link}, choose Confirm 2FA in the account menu, then try again within 10 minutes.")),
+        ("reply.settings.needs_2fa_dashboard", format!("This setting needs 2FA, so change it on the {link}")),
+        ("reply.settings.main_roles_owners", s("Anti-nuke monitors the main roles, so only the owner and Extra Owners can change them")),
+        ("reply.settings.not_main_role", s("<@&5> cannot be a main role: why")),
+        ("reply.settings.ta_usage", s("[10] Trusted Admins: use `USER ?add 10` or `USER ?remove 10`")),
+        ("reply.settings.ta_owners", s("Only the owner and Extra Owners can change Trusted Admins")),
+        ("reply.settings.ta_no_user", s("Give at least one user mention or ID")),
+        ("reply.settings.not_saved", s("Not saved: why")),
+        ("reply.settings.not_a_role", s("`abc` is not a role of this server")),
+        ("reply.settings.not_a_channel", s("`abc` is not a channel of this server")),
+        ("reply.settings.nothing_found", s("Nothing found for `abc`")),
+        ("reply.settings.ambiguous", s("`abc` is ambiguous, use a mention or id")),
+        ("reply.settings.not_your_panel", s("Only the person who opened this panel can use it.")),
+    ];
+    for (key, want) in old {
+        assert_eq!(text(key), json!(want), "{key}");
+    }
+    fn s(t: &str) -> String {
+        t.to_string()
+    }
+}

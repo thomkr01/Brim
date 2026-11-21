@@ -546,6 +546,7 @@ fn build() -> Vec<Def> {
     event_entries(&mut out);
     answer_entries(&mut out);
     security_answers(&mut out);
+    settings_errors(&mut out);
     for d in &mut out {
         if shown(&d.template).iter().any(|v| v == "text") {
             d.required = vec!["text"];
@@ -920,6 +921,7 @@ fn is_facts(key: &str) -> bool {
         || ANSWERS.contains(&key)
         || WHITELIST_ANSWERS.contains(&key)
         || CHANGED.contains(&key)
+        || settings_error(key)
         || panel(key).is_some()
         || SECURITY_LOGS.iter().any(|l| l.0 == key)
         || key
@@ -940,6 +942,12 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ("row", "Number of the setting, as its panel shows it", "[7B]"),
     ("setting", "Name of the setting", "Regular Strike Duration"),
     ("value", "New value of the setting", "1 hour"),
+    ("number", "Number of the setting, as typed", "7"),
+    ("typed", "What was typed", "abc"),
+    ("min", "Lowest allowed value", "1"),
+    ("max", "Highest allowed value", "100"),
+    ("options", "The values the setting takes", "kick, ban, quarantine"),
+    ("dashboard", "Link to the dashboard", "[Dashboard](https://example.com/#/1)"),
     ("case", "Case number", "12"),
     ("kind", "Kind of case or command", "ban"),
     (
@@ -3685,6 +3693,268 @@ fn security_answers(out: &mut Vec<Def>) {
 /// The reply after a setting changed: the settings panels' copy, then the security one.
 pub const CHANGED: &[&str] = &["reply.settings.changed", "reply.settings.changed_security"];
 
+/// The settings commands' error replies: (entry, editor name, variables, key variables,
+/// default). Each has a Security copy (`<entry>_security`) for a setting of a security panel or
+/// one only the Owner and Extra Owners may change, as [`CHANGED`]. What went wrong (the row, the
+/// refused value, the limits) is a key variable, so an edit always says it. Each default reads
+/// exactly as the code wrote it (`crates/bot/src/panel_texts_tests.rs`).
+#[allow(clippy::type_complexity)]
+pub const SETTINGS_ERRORS: &[(&str, &str, &[&str], &[&str], &str)] = &[
+    (
+        "reply.settings.dashboard_only",
+        "only on the dashboard",
+        &["row", "setting"],
+        &["row"],
+        "{row} {setting} can only be changed on the dashboard",
+    ),
+    (
+        "reply.settings.sub_settings",
+        "has sub-settings",
+        &["row", "setting", "number"],
+        &["row", "number"],
+        "{row} {setting} has sub-settings, use {number}a, {number}b...",
+    ),
+    (
+        "reply.settings.is_switch",
+        "is a switch",
+        &["row", "setting", "number"],
+        &["row", "number"],
+        "{row} {setting} is a switch: use `{number} ?on` or `{number} ?off`",
+    ),
+    (
+        "reply.settings.not_switch",
+        "is not a switch",
+        &["row", "setting", "number"],
+        &["row", "number"],
+        "{row} {setting} is not a switch: use `VALUE ?set {number}`",
+    ),
+    (
+        "reply.settings.not_list",
+        "is not a list",
+        &["row", "setting", "number"],
+        &["row", "number"],
+        "{row} {setting} is not a list: use `VALUE ?set {number}`",
+    ),
+    (
+        "reply.settings.bad_value",
+        "not a valid value",
+        &["typed", "row", "setting"],
+        &["typed", "row"],
+        "`{typed}` is not a valid value for {row} {setting}",
+    ),
+    (
+        "reply.settings.bad_whole",
+        "not a whole number",
+        &["typed", "row", "setting"],
+        &["typed", "row"],
+        "`{typed}` is not a valid value for {row} {setting}. Give a whole number.",
+    ),
+    (
+        "reply.settings.bad_duration",
+        "not a duration",
+        &["typed", "row", "setting"],
+        &["typed", "row"],
+        "`{typed}` is not a valid value for {row} {setting}. Give a number with a unit, like `15d`, `12h` or `30m`.",
+    ),
+    (
+        "reply.settings.bad_age",
+        "not an age",
+        &["typed", "row", "setting"],
+        &["typed", "row"],
+        "`{typed}` is not a valid value for {row} {setting}. Give days, or a number with a unit, like `12h` or `30m`.",
+    ),
+    (
+        "reply.settings.out_of_range",
+        "out of range",
+        &["row", "setting", "min", "max"],
+        &["row", "min", "max"],
+        "{row} {setting} must be between {min} and {max}",
+    ),
+    (
+        "reply.settings.too_long",
+        "duration too long",
+        &["row", "setting"],
+        &["row"],
+        "{row} {setting}: A duration can be at most 365 days (52w).",
+    ),
+    (
+        "reply.settings.age_range",
+        "age out of range",
+        &["row", "setting"],
+        &["row"],
+        "{row} {setting} ranges from 5 seconds to 100 days",
+    ),
+    (
+        "reply.settings.prefix_rule",
+        "prefix not allowed",
+        &["row", "setting"],
+        &["row"],
+        "{row} {setting} must be 1-32 characters with no spaces",
+    ),
+    (
+        "reply.settings.one_of",
+        "takes one of",
+        &["row", "setting", "options"],
+        &["row", "options"],
+        "{row} {setting} takes one of: {options}",
+    ),
+    (
+        "reply.settings.exactly_one",
+        "takes exactly one",
+        &["row", "setting"],
+        &["row"],
+        "{row} {setting} takes exactly one",
+    ),
+    (
+        "reply.settings.not_a_role",
+        "not a role of this server",
+        &["typed"],
+        &["typed"],
+        "`{typed}` is not a role of this server",
+    ),
+    (
+        "reply.settings.not_a_channel",
+        "not a channel of this server",
+        &["typed"],
+        &["typed"],
+        "`{typed}` is not a channel of this server",
+    ),
+    (
+        "reply.settings.nothing_found",
+        "nothing found",
+        &["typed"],
+        &["typed"],
+        "Nothing found for `{typed}`",
+    ),
+    (
+        "reply.settings.ambiguous",
+        "more than one match",
+        &["typed"],
+        &["typed"],
+        "`{typed}` is ambiguous, use a mention or id",
+    ),
+    (
+        "reply.settings.no_such_row",
+        "no such setting",
+        &["typed", "max"],
+        &["typed", "max"],
+        "`{typed}` is not an option. Options available are [1 to {max}].",
+    ),
+    (
+        "reply.settings.card_options",
+        "no such sub-setting",
+        &["number", "min", "max"],
+        &["number", "min", "max"],
+        "Card {number} has options {min} to {max}",
+    ),
+    (
+        "reply.settings.not_saved",
+        "not saved",
+        &["reason"],
+        &["reason"],
+        "Not saved: {reason}",
+    ),
+];
+
+/// The settings refusals that are always security texts: the 2FA replies, the main roles
+/// and the Trusted Admins refusals. Same columns as [`SETTINGS_ERRORS`].
+#[allow(clippy::type_complexity)]
+pub const SECURITY_ERRORS: &[(&str, &str, &[&str], &[&str], &str)] = &[
+    (
+        "reply.settings.needs_2fa_dashboard",
+        "needs 2FA, change it on the dashboard",
+        &["dashboard"],
+        &["dashboard"],
+        "This setting needs 2FA, so change it on the {dashboard}",
+    ),
+    (
+        "reply.settings.needs_2fa",
+        "needs 2FA, confirm it first",
+        &["dashboard"],
+        &["dashboard"],
+        "This change needs 2FA for this server. Open this server on the {dashboard}, choose Confirm 2FA in the account menu, then try again within 10 minutes.",
+    ),
+    (
+        "reply.settings.main_roles_owners",
+        "main roles are for the owners",
+        &[],
+        &[],
+        "Anti-nuke monitors the main roles, so only the owner and Extra Owners can change them",
+    ),
+    (
+        "reply.settings.not_main_role",
+        "cannot be a main role",
+        &["target", "reason"],
+        &["target", "reason"],
+        "{target} cannot be a main role: {reason}",
+    ),
+    (
+        "reply.settings.ta_usage",
+        "Trusted Admins usage",
+        &[],
+        &[],
+        "[10] Trusted Admins: use `USER ?add 10` or `USER ?remove 10`",
+    ),
+    (
+        "reply.settings.ta_owners",
+        "Trusted Admins are for the owners",
+        &[],
+        &[],
+        "Only the owner and Extra Owners can change Trusted Admins",
+    ),
+    (
+        "reply.settings.ta_no_user",
+        "Trusted Admins: no user given",
+        &[],
+        &[],
+        "Give at least one user mention or ID",
+    ),
+];
+
+/// The Security copy of a [`SETTINGS_ERRORS`] entry.
+pub fn security_copy(key: &str) -> String {
+    format!("{key}_security")
+}
+
+/// Whether `key` is one of the settings error replies or its Security copy.
+fn settings_error(key: &str) -> bool {
+    let base = key.strip_suffix("_security").unwrap_or(key);
+    SETTINGS_ERRORS.iter().any(|e| e.0 == base) || SECURITY_ERRORS.iter().any(|e| e.0 == key)
+}
+
+/// The settings error replies, entries of facts with no `{text}`.
+fn settings_errors(out: &mut Vec<Def>) {
+    let copies = SETTINGS_ERRORS
+        .iter()
+        .flat_map(|e| {
+            [
+                (e.0.to_string(), e, SETTINGS),
+                (security_copy(e.0), e, SECURITY),
+            ]
+        })
+        .chain(
+            SECURITY_ERRORS
+                .iter()
+                .map(|e| (e.0.to_string(), e, SECURITY)),
+        );
+    for (key, (_, name, vars, required, text), group) in copies {
+        set(
+            out,
+            (&key, &format!("Reply: {name}"), group),
+            json!({"content": text, "embeds": []}),
+            (
+                vars,
+                required,
+                if required.is_empty() {
+                    ""
+                } else {
+                    "what went wrong"
+                },
+            ),
+        );
+    }
+}
+
 /// The D6 entries: the answers of `info`, `roleinfo`, `serverinfo`, `about`, `ping` and
 /// `invites`. A line whose placeholders are all empty goes, so one entry holds every variant of
 /// its answer (a user not in the server, a member, staff or not). Each default reads exactly as
@@ -4113,6 +4383,12 @@ fn error_replies(out: &mut Vec<Def>) {
             "settings need Dashboard Access",
             &[],
             "You need a permit with the Dashboard Access perm to see settings",
+        ),
+        (
+            "reply.settings.not_your_panel",
+            "panel button of someone else",
+            &[],
+            "Only the person who opened this panel can use it.",
         ),
         (
             "reply.settings.may_not_change",
@@ -6667,11 +6943,12 @@ mod tests {
             .collect();
         assert!(replies.len() >= 14);
         for d in &replies {
-            assert!(
-                src.contains(&format!("\"{}\"", d.key)),
-                "dead entry {}",
-                d.key
-            );
+            // A settings error's Security copy is sent by the code that sends its entry.
+            let sent = match d.key.strip_suffix("_security") {
+                Some(base) if SETTINGS_ERRORS.iter().any(|e| e.0 == base) => base,
+                _ => d.key.as_str(),
+            };
+            assert!(src.contains(&format!("\"{sent}\"")), "dead entry {}", d.key);
             // A ticket reply or a lock notice is one embed, the rest is text. Only the notices
             // that carry the bot's list in `{text}` require it.
             let notice = d.key.ends_with("_notice") || d.key == "reply.confirm.question";
@@ -6706,7 +6983,9 @@ mod tests {
                 d.security,
                 d.key.starts_with("reply.whitelist.")
                     || security_panel
-                    || d.key == "reply.settings.changed_security",
+                    || d.key == "reply.settings.changed_security"
+                    || sent != d.key
+                    || SECURITY_ERRORS.iter().any(|e| e.0 == d.key),
                 "{}",
                 d.key
             );

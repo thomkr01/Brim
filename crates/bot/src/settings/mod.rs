@@ -146,49 +146,104 @@ pub enum Edit {
     Remove(Vec<Value>),
 }
 
+/// A refused settings change: its error reply entry (`botmsg::SETTINGS_ERRORS`, or another
+/// `reply.*` entry) and the values to fill in.
+#[derive(Debug, PartialEq)]
+pub struct Refusal(pub &'static str, pub Vec<(&'static str, String)>);
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.text())
+    }
+}
+
+impl Refusal {
+    fn of(key: &'static str, vars: &[(&'static str, &str)]) -> Self {
+        Self(key, vars.iter().map(|(k, v)| (*k, v.to_string())).collect())
+    }
+
+    /// A refusal about `row`: its number as the panel shows it, its name and `more`.
+    fn row(key: &'static str, row: &Row, more: &[(&'static str, &str)]) -> Self {
+        let code = format!("[{}]", row.code.to_uppercase());
+        let mut r = Self::of(key, &[("row", &code), ("setting", row.name)]);
+        r.1.extend(more.iter().map(|(k, v)| (*k, v.to_string())));
+        r
+    }
+
+    fn vars(&self) -> Vec<(&str, &str)> {
+        self.1.iter().map(|(k, v)| (*k, v.as_str())).collect()
+    }
+
+    /// The default reply, as the code wrote it before the entry.
+    pub fn text(&self) -> String {
+        brim_logging::overlay::parts(&brim_logging::botmsg::render(self.0, None, &self.vars())).0
+    }
+
+    /// The server's reply: the Security copy when `security` (see [`changed_key`]).
+    pub(crate) async fn say(&self, app: &App, gid: Id<GuildMarker>, security: bool) -> Said {
+        let paired = brim_logging::botmsg::SETTINGS_ERRORS
+            .iter()
+            .any(|e| e.0 == self.0);
+        let key = match security && paired {
+            true => brim_logging::botmsg::security_copy(self.0),
+            false => self.0.to_string(),
+        };
+        crate::reply::say(app, gid, &key, &self.vars()).await
+    }
+}
+
+/// What [`save`] refuses itself: a section check failed.
+pub struct NotSaved(String);
+
+impl From<NotSaved> for String {
+    fn from(e: NotSaved) -> Self {
+        format!("Not saved: {}", e.0)
+    }
+}
+
+impl From<NotSaved> for Refusal {
+    fn from(e: NotSaved) -> Self {
+        Self::of("reply.settings.not_saved", &[("reason", &e.0)])
+    }
+}
+
 fn literal(s: &str) -> Value {
     serde_json::from_str(s).expect("settings table literal")
 }
 
 /// Turns an op on one row into an edit. `ids` are the resolved roles or channels for object rows.
-pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Result<Edit, String> {
-    let label = format!("[{}] {}", row.code.to_uppercase(), row.name);
+pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Result<Edit, Refusal> {
+    let no = |key, more: &[(&'static str, &str)]| Refusal::row(key, row, more);
+    let number = [("number", row.code)];
     let ids_json = || ids.iter().map(|i| json!(i.to_string())).collect::<Vec<_>>();
     match (row.kind, op) {
-        (Kind::Dashboard | Kind::Users, _) => {
-            Err(format!("{label} can only be changed on the dashboard"))
-        }
-        (Kind::Group, _) => Err(format!(
-            "{label} has sub-settings, use {}a, {}b...",
-            row.code, row.code
-        )),
+        (Kind::Dashboard | Kind::Users, _) => Err(no("reply.settings.dashboard_only", &[])),
+        (Kind::Group, _) => Err(no("reply.settings.sub_settings", &number)),
         (Kind::Bool, Op::Toggle(_, on)) => Ok(Edit::Put(json!(on))),
         (Kind::Switch(on, off), Op::Toggle(_, true)) => Ok(Edit::Put(match current {
             Some(v) if !v.is_null() && *v != literal(off) => v.clone(),
             _ => literal(on),
         })),
         (Kind::Switch(_, off), Op::Toggle(_, false)) => Ok(Edit::Put(literal(off))),
-        (Kind::Bool | Kind::Switch(..), _) => Err(format!(
-            "{label} is a switch: use `{} ?on` or `{} ?off`",
-            row.code, row.code
-        )),
-        (_, Op::Toggle(..)) => Err(format!(
-            "{label} is not a switch: use `VALUE ?set {}`",
-            row.code
-        )),
+        (Kind::Bool | Kind::Switch(..), _) => Err(no("reply.settings.is_switch", &number)),
+        (_, Op::Toggle(..)) => Err(no("reply.settings.not_switch", &number)),
         (Kind::Roles | Kind::Channels, Op::Set(..) | Op::Add(..)) => Ok(Edit::Add(ids_json())),
         (Kind::Roles | Kind::Channels, Op::Remove(..)) => Ok(Edit::Remove(ids_json())),
-        (_, Op::Add(..) | Op::Remove(..)) => Err(format!(
-            "{label} is not a list: use `VALUE ?set {}`",
-            row.code
-        )),
+        (_, Op::Add(..) | Op::Remove(..)) => Err(no("reply.settings.not_list", &number)),
         (kind, Op::Set(_, v)) => {
-            let bad = || format!("`{v}` is not a valid value for {label}");
+            let typed = [("typed", v.as_str())];
+            let bad = || no("reply.settings.bad_value", &typed);
+            let range = |lo: &str, hi: &str| {
+                Err(no(
+                    "reply.settings.out_of_range",
+                    &[("min", lo), ("max", hi)],
+                ))
+            };
             Ok(Edit::Put(match kind {
                 Kind::Int(min, max) => {
                     let n: i64 = v.parse().map_err(|_| bad())?;
                     if !(min..=max).contains(&n) {
-                        return Err(format!("{label} must be between {min} and {max}"));
+                        return range(&min.to_string(), &max.to_string());
                     }
                     json!(n)
                 }
@@ -204,21 +259,17 @@ pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Res
                     if let Some((lo, hi)) = brim_core::limits::float_for_path(section, path) {
                         if !(lo..=hi).contains(&x) {
                             let (lo, hi) = (round(lo / scale), round(hi / scale));
-                            return Err(format!("{label} must be between {lo} and {hi}"));
+                            return range(&lo.to_string(), &hi.to_string());
                         }
                     }
                     json!(x)
                 }
                 Kind::Secs | Kind::Ms => {
                     if duration::too_long(v) {
-                        return Err(format!("{label}: {}", duration::TOO_LONG));
+                        return Err(no("reply.settings.too_long", &[]));
                     }
-                    let secs = duration::parse(v).ok_or_else(|| {
-                        format!(
-                            "{}. Give a number with a unit, like `15d`, `12h` or `30m`.",
-                            bad()
-                        )
-                    })?;
+                    let secs = duration::parse(v)
+                        .ok_or_else(|| no("reply.settings.bad_duration", &typed))?;
                     let n = if matches!(kind, Kind::Ms) {
                         secs.checked_mul(1000).ok_or_else(bad)?
                     } else {
@@ -229,7 +280,7 @@ pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Res
                         if !(lo..=hi).contains(&n) {
                             let unit = if matches!(kind, Kind::Ms) { 1000 } else { 1 };
                             let (lo, hi) = (embed::duration(lo / unit), embed::duration(hi / unit));
-                            return Err(format!("{label} must be between {lo} and {hi}"));
+                            return range(&lo, &hi);
                         }
                     }
                     json!(n)
@@ -239,23 +290,20 @@ pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Res
                     let secs = match v.parse::<i64>() {
                         Ok(days) => days.checked_mul(86_400),
                         Err(_) if v.contains(['.', ',']) => {
-                            return Err(format!("{}. Give a whole number.", bad()))
+                            return Err(no("reply.settings.bad_whole", &typed))
                         }
                         Err(_) => duration::parse(v),
                     };
-                    let ms = secs.and_then(|s| s.checked_mul(1000)).ok_or_else(|| {
-                        format!(
-                            "{}. Give days, or a number with a unit, like `12h` or `30m`.",
-                            bad()
-                        )
-                    })?;
+                    let ms = secs
+                        .and_then(|s| s.checked_mul(1000))
+                        .ok_or_else(|| no("reply.settings.bad_age", &typed))?;
                     if !(lo..=hi).contains(&ms) {
-                        return Err(format!("{label} ranges from 5 seconds to 100 days"));
+                        return Err(no("reply.settings.age_range", &[]));
                     }
                     json!(ms)
                 }
                 Kind::Text if row.path == "misc.prefix" && !brim_core::sections::prefix_ok(v) => {
-                    return Err(format!("{label} must be 1-32 characters with no spaces"));
+                    return Err(no("reply.settings.prefix_rule", &[]));
                 }
                 Kind::Text if !v.is_empty() && v.len() <= 32 => json!(v),
                 Kind::Choice(opts) => {
@@ -263,18 +311,19 @@ pub fn edit_for(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Res
                     let found = opts.iter().find(|(k, _)| *k == v);
                     let Some((_, lit)) = found else {
                         let names: Vec<_> = opts.iter().map(|(k, _)| *k).collect();
-                        return Err(format!("{label} takes one of: {}", names.join(", ")));
+                        let options = names.join(", ");
+                        return Err(no("reply.settings.one_of", &[("options", &options)]));
                     };
                     literal(lit)
                 }
                 Kind::Role | Kind::Channel => match ids {
                     [one] => json!(one.to_string()),
-                    _ => return Err(format!("{label} takes exactly one")),
+                    _ => return Err(no("reply.settings.exactly_one", &[])),
                 },
                 _ => return Err(bad()),
             }))
         }
-        (_, Op::Show(_)) => Err(format!("Usage: {USAGE}")),
+        (_, Op::Show(_)) => Err(Refusal::of("reply.error.usage", &[("text", USAGE)])),
     }
 }
 
@@ -293,23 +342,19 @@ pub(crate) async fn edit_trusted_admins(
     op: &Op,
 ) -> Result<Said> {
     let (Op::Set(_, v) | Op::Add(_, v) | Op::Remove(_, v)) = op else {
-        return Ok(
-            String::from("[10] Trusted Admins: use `USER ?add 10` or `USER ?remove 10`").into(),
-        );
+        return Ok(crate::reply::say(app, gid, "reply.settings.ta_usage", &[]).await);
     };
     if !matches!(level, Level::Owner | Level::ExtraOwner) {
-        return Ok(
-            String::from("Only the owner and Extra Owners can change Trusted Admins").into(),
-        );
+        return Ok(crate::reply::say(app, gid, "reply.settings.ta_owners", &[]).await);
     }
     // Trusted Admins bypass every system, so adding one needs a fresh 2FA like every protected
     // change. Removing does not: it is how a hacked TA is cut off fast.
     if !matches!(op, Op::Remove(..)) && !fresh_2fa(app, level_user, gid.get()).await? {
-        return Ok(needs_2fa(gid.get()).into());
+        return Ok(needs_2fa(app, gid).await);
     }
     let ids = user_ids(v);
     if ids.is_empty() {
-        return Ok(String::from("Give at least one user mention or ID").into());
+        return Ok(crate::reply::say(app, gid, "reply.settings.ta_no_user", &[]).await);
     }
     if !matches!(op, Op::Remove(..)) {
         if let Some(no) = crate::users_only::refuse(app, &ids, "a Trusted Admin").await {
@@ -430,12 +475,25 @@ pub(crate) async fn fresh_2fa(app: &App, user: u64, gid: u64) -> Result<bool> {
     .await?)
 }
 
-pub(crate) fn needs_2fa(gid: u64) -> String {
-    format!(
-        "This change needs 2FA for this server. Open this server on the {}, choose Confirm 2FA in the account menu, then try again within 10 minutes.",
-        dashboard_link(gid)
-    )
+/// The reply when a change needs a fresh 2FA step-up first (a security text).
+pub(crate) async fn needs_2fa(app: &App, gid: Id<GuildMarker>) -> Said {
+    let dashboard = dashboard_link(gid.get());
+    crate::reply::say(app, gid, NEEDS_2FA, &[("dashboard", &dashboard)]).await
 }
+
+/// [`needs_2fa`] as one line, for a reply that is only text.
+pub(crate) async fn needs_2fa_line(app: &App, gid: Id<GuildMarker>) -> String {
+    let dashboard = dashboard_link(gid.get());
+    crate::reply::say_line(app, gid, NEEDS_2FA, &[("dashboard", &dashboard)]).await
+}
+
+/// [`needs_2fa`] as the code wrote it, for a reply that goes through a command frame a Trusted
+/// Admin may edit (the backups command): an edited security text never goes through one.
+pub(crate) fn needs_2fa_text(gid: Id<GuildMarker>) -> String {
+    Refusal::of(NEEDS_2FA, &[("dashboard", &dashboard_link(gid.get()))]).text()
+}
+
+const NEEDS_2FA: &str = "reply.settings.needs_2fa";
 
 pub(crate) fn dashboard_link(gid: u64) -> String {
     match std::env::var("DASHBOARD_URL")
@@ -593,13 +651,21 @@ pub(crate) fn page_of(mut e: Embed, per: usize, page: usize) -> (Embed, usize) {
     (e, pages)
 }
 
+/// The main roles refusal entry (a security text).
+const MAIN_ROLE: &str = "reply.settings.not_main_role";
+
+/// Whether `m` is a security panel (`botmsg::PANELS`): its replies are Security copies.
+fn security_panel(m: &Module) -> bool {
+    brim_logging::botmsg::PANELS
+        .iter()
+        .any(|p| p.1 == m.names[0])
+}
+
 /// The reply entry after `row` of `m` changed: the Security copy for a security panel's setting
 /// and for a setting only the Owner and Extra Owners may change (misc, the main roles), so a
 /// Trusted Admin cannot reword the answer to it.
 pub(crate) fn changed_key(m: &Module, row: &Row) -> &'static str {
-    let panel = brim_logging::botmsg::PANELS
-        .iter()
-        .any(|p| p.1 == m.names[0]);
+    let panel = security_panel(m);
     let section = row.path.split('.').next().unwrap_or_default();
     let owners_only = !may_edit(&Level::TrustedAdmin, section) || row.path == "lockdown.main_roles";
     CHANGED[usize::from(panel || owners_only)]
@@ -666,7 +732,7 @@ async fn resolve(
     roles: bool,
     value: &str,
     removing: bool,
-) -> Result<Result<Vec<u64>, String>> {
+) -> Result<Result<Vec<u64>, Refusal>> {
     let mut ids = vec![];
     let mut words = vec![];
     for tok in value.split_whitespace() {
@@ -708,12 +774,15 @@ async fn resolve(
             .map(|c| (c.id.get(), c.name.unwrap_or_default()))
             .collect()
     };
-    let what = if roles { "role" } else { "channel" };
+    let key = match roles {
+        true => "reply.settings.not_a_role",
+        false => "reply.settings.not_a_channel",
+    };
     if let Some(id) = ids
         .iter()
         .find(|id| !removing && !all.iter().any(|(a, _)| a == *id))
     {
-        return Ok(Err(format!("`{id}` is not a {what} of this server")));
+        return Ok(Err(Refusal::of(key, &[("typed", &id.to_string())])));
     }
     for n in names {
         let q = n.trim_start_matches(['@', '#']).to_lowercase();
@@ -724,8 +793,18 @@ async fn resolve(
             .collect();
         match pick(&q, &cands) {
             Pick::One(id) => ids.push(id),
-            Pick::None => return Ok(Err(format!("Nothing found for `{n}`"))),
-            Pick::Ambiguous => return Ok(Err(format!("`{n}` is ambiguous, use a mention or id"))),
+            Pick::None => {
+                return Ok(Err(Refusal::of(
+                    "reply.settings.nothing_found",
+                    &[("typed", n)],
+                )))
+            }
+            Pick::Ambiguous => {
+                return Ok(Err(Refusal::of(
+                    "reply.settings.ambiguous",
+                    &[("typed", n)],
+                )))
+            }
         }
     }
     Ok(Ok(ids))
@@ -739,6 +818,17 @@ pub async fn save(
     sections: &[&str],
     f: impl FnOnce(&mut Value) -> Result<(), String>,
 ) -> Result<Result<Value, String>> {
+    save_with(app, gid, actor, sections, f).await
+}
+
+/// [`save`] with the refusal type of the caller (a [`Refusal`] for the settings commands).
+async fn save_with<E: From<NotSaved>>(
+    app: &App,
+    gid: Id<GuildMarker>,
+    actor: u64,
+    sections: &[&str],
+    f: impl FnOnce(&mut Value) -> Result<(), E>,
+) -> Result<Result<Value, E>> {
     let (tx, version, mut doc) = locked(app, gid).await?;
     let before = doc.clone();
     if let Err(e) = f(&mut doc) {
@@ -746,14 +836,14 @@ pub async fn save(
     }
     for s in sections.iter().filter(|s| !doc[**s].is_null()) {
         if let Err(e) = crate::app::check_section(s, &doc[*s], &before[*s]) {
-            return Ok(Err(format!("Not saved: {e}")));
+            return Ok(Err(NotSaved(e.to_string()).into()));
         }
     }
     let touches = sections
         .iter()
         .any(|s| matches!(*s, "verification" | "lockdown"));
     if let Some(e) = brim_automod::join::web_mode_error(&doc).filter(|_| touches) {
-        return Ok(Err(format!("Not saved: {e}")));
+        return Ok(Err(NotSaved(e.to_string()).into()));
     }
     append(app, tx, gid, version, &mut doc, actor).await?;
     Ok(Ok(doc))
@@ -865,7 +955,7 @@ async fn send_framed(
 }
 
 /// The reply to a code the module has no row for, naming the cards or letters that exist.
-fn no_such_row(m: &Module, code: &str) -> String {
+fn no_such_row(m: &Module, code: &str) -> Refusal {
     let card = code.trim_end_matches(|c: char| c.is_ascii_alphabetic());
     let letters: Vec<&str> = m
         .rows
@@ -874,7 +964,8 @@ fn no_such_row(m: &Module, code: &str) -> String {
         .filter(|l| !l.is_empty() && l.chars().all(|c| c.is_ascii_alphabetic()))
         .collect();
     if let (Some(first), Some(last)) = (letters.first(), letters.last()) {
-        return format!("Card {card} has options {first} to {last}");
+        let vars = [("number", card), ("min", *first), ("max", *last)];
+        return Refusal::of("reply.settings.card_options", &vars);
     }
     let last = m
         .rows
@@ -882,7 +973,8 @@ fn no_such_row(m: &Module, code: &str) -> String {
         .filter_map(|r| r.code.parse::<u32>().ok())
         .max()
         .unwrap_or(1);
-    format!("`{code}` is not an option. Options available are [1 to {last}].")
+    let vars = [("typed", code), ("max", &last.to_string())];
+    Refusal::of("reply.settings.no_such_row", &vars)
 }
 
 /// Handles `t!<module> ...`; false when `rest` is not a settings command.
@@ -949,7 +1041,10 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
         (f, _) => f,
     };
     let Some(row) = found else {
-        send(app, msg, &no_such_row(m, code), None, vec![]).await?;
+        // A panel with any security or owner-only setting answers in the Security copy.
+        let security = m.rows.iter().any(|r| changed_key(m, r) == CHANGED[1]);
+        let said = no_such_row(m, code).say(app, gid, security).await;
+        send_said(app, msg, said, security).await?;
         return Ok(true);
     };
     if matches!(row.kind, Kind::Users) {
@@ -964,12 +1059,13 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
         send(app, msg, &no, None, vec![]).await?;
         return Ok(true);
     }
+    let key = changed_key(m, row);
+    let security = key == CHANGED[1];
     if brim_core::sections::SENSITIVE.contains(&section) {
-        let text = format!(
-            "This setting needs 2FA, so change it on the {}",
-            dashboard_link(gid.get())
-        );
-        send(app, msg, &text, None, vec![]).await?;
+        let dashboard = dashboard_link(gid.get());
+        let vars = [("dashboard", dashboard.as_str())];
+        let said = crate::reply::say(app, gid, "reply.settings.needs_2fa_dashboard", &vars).await;
+        send_said(app, msg, said, true).await?;
         return Ok(true);
     }
     let ids = match (row.kind, &op) {
@@ -986,8 +1082,8 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
         .await?
         {
             Ok(ids) => ids,
-            Err(e) => {
-                send(app, msg, &e, None, vec![]).await?;
+            Err(no) => {
+                send_said(app, msg, no.say(app, gid, security).await, security).await?;
                 return Ok(true);
             }
         },
@@ -996,17 +1092,17 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
     // Monitor Public Roles keeps the main roles to the owner and Extra Owners.
     if row.path == "lockdown.main_roles" {
         let an = &app.cfg(gid.get()).await?.antinuke;
-        let text = if !an.monitor_public_roles {
+        let no = if !an.monitor_public_roles {
             None
         } else if !matches!(level, Level::Owner | Level::ExtraOwner) {
-            Some("Anti-nuke monitors the main roles, so only the owner and Extra Owners can change them".into())
+            Some(crate::reply::say(app, gid, "reply.settings.main_roles_owners", &[]).await)
         } else if !fresh_2fa(app, msg.author.id.get(), gid.get()).await? {
-            Some(needs_2fa(gid.get()))
+            Some(needs_2fa(app, gid).await)
         } else {
             None
         };
-        if let Some(text) = text {
-            send(app, msg, &text, None, vec![]).await?;
+        if let Some(no) = no {
+            send_said(app, msg, no, true).await?;
             return Ok(true);
         }
     }
@@ -1017,18 +1113,18 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             .iter()
             .find_map(|&id| Some((id, info.unfit(gid, Id::new_checked(id)?)?)));
         if let Some((id, why)) = bad {
-            let text = format!("<@&{id}> cannot be a main role: {why}");
-            send(app, msg, &text, None, vec![]).await?;
+            let vars = [("target", format!("<@&{id}>")), ("reason", why.to_string())];
+            let no = Refusal(MAIN_ROLE, vars.to_vec()).say(app, gid, true).await;
+            send_said(app, msg, no, true).await?;
             return Ok(true);
         }
     }
     let sections = [section];
-    let saved = save(app, gid, msg.author.id.get(), &sections, |doc| {
+    let saved = save_with(app, gid, msg.author.id.get(), &sections, |doc| {
         let e = edit_for(row, &op, &ids, get_path(doc, row.path))?;
         apply(doc, row.path, e);
-        Ok(())
+        Ok::<(), Refusal>(())
     });
-    let key = changed_key(m, row);
     let said = match saved.await? {
         Ok(doc) => {
             let cfg = GuildCfg::parse(&doc);
@@ -1040,9 +1136,9 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             ];
             crate::reply::say(app, gid, key, &vars).await
         }
-        Err(e) => e.into(),
+        Err(no) => no.say(app, gid, security).await,
     };
-    send_said(app, msg, said, key == CHANGED[1]).await?;
+    send_said(app, msg, said, security).await?;
     Ok(true)
 }
 
@@ -1058,10 +1154,16 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
     let invoker = it.next().and_then(|s| s.parse::<u64>().ok());
     let client = app.http.interaction(app.me.cast());
     if invoker != i.author_id().map(|a| a.get()) {
+        let key = "reply.settings.not_your_panel";
+        let said = match i.guild_id {
+            Some(gid) => crate::reply::say(app, gid, key, &[]).await,
+            None => Refusal::of(key, &[]).text().into(),
+        };
         let r = InteractionResponse {
             kind: InteractionResponseType::ChannelMessageWithSource,
             data: Some(InteractionResponseData {
-                content: Some("Only the person who opened this panel can use it.".into()),
+                content: Some(said.text),
+                embeds: Some(said.embeds),
                 flags: Some(MessageFlags::EPHEMERAL),
                 ..Default::default()
             }),
@@ -1136,6 +1238,15 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`edit_for`] with the default text of a refusal, as the code wrote it before the entries.
+    fn ed(row: &Row, op: &Op, ids: &[u64], current: Option<&Value>) -> Result<Edit, String> {
+        edit_for(row, op, ids, current).map_err(|e| e.text())
+    }
+
+    fn no_such(m: &Module, code: &str) -> String {
+        no_such_row(m, code).text()
+    }
     use brim_logging::emoji::YES;
 
     #[test]
@@ -1233,7 +1344,7 @@ mod tests {
         assert_eq!(r("<#701>", false).await.unwrap(), Ok(vec![701]));
         assert_eq!(r("logs", false).await.unwrap(), Ok(vec![701]));
         assert_eq!(
-            r("<#702>", false).await.unwrap(),
+            r("<#702>", false).await.unwrap().map_err(|e| e.text()),
             Err("`702` is not a channel of this server".into())
         );
         assert_eq!(r("702", true).await.unwrap(), Ok(vec![702]));
@@ -1335,7 +1446,7 @@ mod tests {
                     }
                 };
                 let mut doc = json!({});
-                let e = edit_for(r, &op, &[5], None).unwrap_or_else(|e| panic!("{e}"));
+                let e = ed(r, &op, &[5], None).unwrap_or_else(|e| panic!("{e}"));
                 apply(&mut doc, r.path, e);
                 let section = r.path.split('.').next().unwrap();
                 crate::app::check_section(section, &doc[section], &Value::Null)
@@ -1349,7 +1460,7 @@ mod tests {
     #[test]
     fn ranged_durations_are_refused_outside_their_limits() {
         let span = row(&JOINRAID, "10c");
-        let set = |v: &str| edit_for(span, &Op::Set("10c".into(), v.into()), &[5], None);
+        let set = |v: &str| ed(span, &Op::Set("10c".into(), v.into()), &[5], None);
         assert!(set("5m").is_ok());
         assert_eq!(
             set("10m").err().as_deref(),
@@ -1364,12 +1475,12 @@ mod tests {
         apply(
             &mut doc,
             r.path,
-            edit_for(r, &Op::Set("3c".into(), "15d".into()), &[], None).unwrap(),
+            ed(r, &Op::Set("3c".into(), "15d".into()), &[], None).unwrap(),
         );
         assert_eq!(GuildCfg::parse(&doc).joingate.min_age_ms(), 15 * 86_400_000);
-        let err = edit_for(r, &Op::Set("3c".into(), "15x".into()), &[], None).unwrap_err();
+        let err = ed(r, &Op::Set("3c".into(), "15x".into()), &[], None).unwrap_err();
         assert!(err.contains("`12h`"), "{err}");
-        assert!(edit_for(r, &Op::Toggle("3c".into(), true), &[], None).is_err());
+        assert!(ed(r, &Op::Toggle("3c".into(), true), &[], None).is_err());
 
         let r = row(&STATICS, "5");
         apply(&mut doc, r.path, Edit::Add(vec![json!("7"), json!("8")]));
@@ -1379,8 +1490,7 @@ mod tests {
 
         // ?on keeps a custom value, ?off clears it.
         let r = row(&JOINRAID, "6a");
-        let on =
-            |cur: Option<&Value>| edit_for(r, &Op::Toggle("6a".into(), true), &[], cur).unwrap();
+        let on = |cur: Option<&Value>| ed(r, &Op::Toggle("6a".into(), true), &[], cur).unwrap();
         assert_eq!(on(None), Edit::Put(json!(86_400_000)));
         assert_eq!(on(Some(&json!(5))), Edit::Put(json!(5)));
         apply(&mut doc, r.path, on(None));
@@ -1390,7 +1500,7 @@ mod tests {
         apply(
             &mut doc,
             r.path,
-            edit_for(r, &Op::Set("4".into(), "8%".into()), &[], None).unwrap(),
+            ed(r, &Op::Set("4".into(), "8%".into()), &[], None).unwrap(),
         );
         assert_eq!((r.get)(&GuildCfg::parse(&doc)), "8% per second");
     }
@@ -1398,7 +1508,7 @@ mod tests {
     #[test]
     fn caps_and_min_age_keep_to_their_ranges() {
         let set = |m: &'static Module, code: &str, v: &str| {
-            edit_for(row(m, code), &Op::Set(code.into(), v.into()), &[], None)
+            ed(row(m, code), &Op::Set(code.into(), v.into()), &[], None)
         };
         assert_eq!(
             set(&CAPS, "1c", "501"),
@@ -1444,14 +1554,14 @@ mod tests {
     #[test]
     fn unknown_codes_name_the_options() {
         assert_eq!(
-            no_such_row(&CAPS, "51b"),
+            no_such(&CAPS, "51b"),
             "`51b` is not an option. Options available are [1 to 7]."
         );
         assert_eq!(
-            no_such_row(&CAPS, "8b"),
+            no_such(&CAPS, "8b"),
             "`8b` is not an option. Options available are [1 to 7]."
         );
-        assert_eq!(no_such_row(&CAPS, "5z"), "Card 5 has options a to d");
+        assert_eq!(no_such(&CAPS, "5z"), "Card 5 has options a to d");
         let last = JOINGATE
             .rows
             .iter()
@@ -1460,7 +1570,7 @@ mod tests {
             .unwrap();
         assert!(last > 1);
         assert_eq!(
-            no_such_row(&JOINGATE, "99"),
+            no_such(&JOINGATE, "99"),
             format!("`99` is not an option. Options available are [1 to {last}].")
         );
     }
@@ -1475,14 +1585,14 @@ mod tests {
         apply(
             &mut doc,
             r.path,
-            edit_for(r, &Op::Set("1b".into(), "6".into()), &[], None).unwrap(),
+            ed(r, &Op::Set("1b".into(), "6".into()), &[], None).unwrap(),
         );
-        assert!(edit_for(r, &Op::Set("1b".into(), "1".into()), &[], None).is_err());
+        assert!(ed(r, &Op::Set("1b".into(), "1".into()), &[], None).is_err());
         let r = row(&CAPS, "1a");
         apply(
             &mut doc,
             r.path,
-            edit_for(r, &Op::Toggle("1a".into(), false), &[], None).unwrap(),
+            ed(r, &Op::Toggle("1a".into(), false), &[], None).unwrap(),
         );
         let cfg = GuildCfg::parse(&doc);
         assert_eq!(

@@ -1200,7 +1200,7 @@ pub async fn backup_cmd(
             return Ok("Only the owner and Extra Owners can load or delete backups".into());
         }
         if !crate::settings::fresh_2fa(app, actor_id.get(), gid.get()).await? {
-            return Ok(crate::settings::needs_2fa(gid.get()));
+            return Ok(crate::settings::needs_2fa_text(gid));
         }
     }
     // A nuke under way should not lose its restore source to a hijacked owner account.
