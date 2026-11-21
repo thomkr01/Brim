@@ -239,9 +239,15 @@ async fn read_source(
         }
         _ => return Err(bad("pick RSS, YouTube, GitHub or GitLab")),
     };
-    let f = match feed::fetch(c, &url, None, None).await {
-        Ok(Got::Feed(f)) => f,
-        Ok(Got::Same) => return Err(bad("the site did not send the feed")),
+    // A website's own address works too: Brim reads the feed the page names.
+    let got = if kind == "rss" {
+        feed::find(c, &url).await.map(|(a, f)| (a, Got::Feed(f)))
+    } else {
+        feed::fetch(c, &url, None, None).await.map(|g| (target, g))
+    };
+    let (target, f) = match got {
+        Ok((a, Got::Feed(f))) => (a, f),
+        Ok((_, Got::Same)) => return Err(bad("the site did not send the feed")),
         Err(e) if kind == "youtube" && e.contains("404") => {
             return Err(bad("YouTube has no channel with that id"))
         }

@@ -177,6 +177,13 @@ pub fn Feeds(guild: String) -> impl IntoView {
     let doing = RwSignal::new(String::new());
     let sort = RwSignal::new("name");
     let dialog = RwSignal::new(None::<RwSignal<Value>>);
+    // The open dialog's feed. Made here, not in a click handler: a signal made there belongs to the
+    // list, and the list redraws (channel names arrive, a reload) while the dialog still reads it.
+    let draft = RwSignal::new(Value::Null);
+    let open_dialog = move |v: Value| {
+        draft.set(v);
+        dialog.set(Some(draft))
+    };
     // The setup window of a GitHub or GitLab feed (its secret only right after it was made).
     let setup = RwSignal::new(None::<Value>);
     // The feed whose own message is open in the editor, with its entry from Bot messages.
@@ -223,7 +230,8 @@ pub fn Feeds(guild: String) -> impl IntoView {
         doing.set(key);
         spawn_local(async move {
             let r = api("POST", &format!("{}/{path}", base()), Some(body)).await;
-            if busy.try_set(false).is_none() {
+            // `try_set` hands the value back (Some) only when the page is gone.
+            if busy.try_set(false).is_some() {
                 return;
             }
             match r {
@@ -233,7 +241,8 @@ pub fn Feeds(guild: String) -> impl IntoView {
             load();
         })
     };
-    let save_dialog = move |d: Value| {
+    // `link`: what was pasted, for the setup window's button to the repository's webhook settings.
+    let save_dialog = move |d: Value, link: String| {
         let new = d["id"].is_null();
         let path = if new {
             String::new()
@@ -244,13 +253,15 @@ pub fn Feeds(guild: String) -> impl IntoView {
         doing.set("dialog".into());
         spawn_local(async move {
             let r = api("POST", &format!("{}{path}", base()), Some(d)).await;
-            if busy.try_set(false).is_none() {
+            if busy.try_set(false).is_some() {
                 return;
             }
             match r {
                 Ok(v) => {
                     dialog.set(None);
                     if new && hooked(&v) {
+                        let mut v = v;
+                        v["settings"] = json!(settings_link(&s(&v["kind"]), &link));
                         setup.set(Some(v));
                     } else {
                         msg.done(if new {
@@ -296,7 +307,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 let id = id.clone();
                 spawn_local(async move {
                     let r = api("POST", &format!("{}/{id}/secret", base()), Some(json!({}))).await;
-                    if busy.try_set(false).is_none() {
+                    if busy.try_set(false).is_some() {
                         return;
                     }
                     match r {
@@ -319,7 +330,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 None,
             )
             .await;
-            if busy.try_set(false).is_none() {
+            if busy.try_set(false).is_some() {
                 return;
             }
             let Ok(list) = r else {
@@ -375,7 +386,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 Some(json!({"message": m, "event": event})),
             )
             .await;
-            if busy.try_set(false).is_none() {
+            if busy.try_set(false).is_some() {
                 return;
             }
             match r {
@@ -455,7 +466,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                         {hook.then(|| menu_btn("Show setup", Box::new(move || setup.set(Some(f5.clone())))))}
                         {hook.then(|| menu_btn("Make new secret", Box::new(move || new_secret(f6.clone()))))}
                         {menu_btn("Edit message", Box::new(move || edit_message(f1.clone())))}
-                        {menu_btn("Change", Box::new(move || dialog.set(Some(RwSignal::new(f2.clone())))))}
+                        {menu_btn("Change", Box::new(move || open_dialog(f2.clone())))}
                         {menu_btn("Delete", Box::new(move || remove(f3.clone())))}
                     </div></details>
                 })}
@@ -472,13 +483,13 @@ pub fn Feeds(guild: String) -> impl IntoView {
         let off = move || busy.get() || n >= max.get();
         let add_btn = move || {
             admin().then(|| view! {
-            <AddButton label="Add new feed" attr:disabled=off attr:title=move || (n >= max.get()).then_some("This server has the most feeds it can have: delete one first") on:click=move |_| dialog.set(Some(RwSignal::new(blank()))) />
+            <AddButton label="Add new feed" attr:disabled=off attr:title=move || (n >= max.get()).then_some("This server has the most feeds it can have: delete one first") on:click=move |_| open_dialog(blank()) />
         })
         };
         if all.is_empty() {
             return view! { <div class="card empty">
                 <h3>"No feeds yet"</h3>
-                <p class="muted">"Follow a YouTube channel, any site with an RSS or Atom feed, or a GitHub or GitLab repository. New posts appear in the channel you pick, as if the source posted them."</p>
+                <p class="muted">"Follow a website, a YouTube channel, or a GitHub or GitLab repository: paste its address. New posts appear in the channel you pick, as if the source posted them."</p>
                 {add_btn}
                 {(!admin()).then(|| view! { <p class="muted small">"Only the Owner, Extra Owners and Trusted Admins add feeds."</p> })}
             </div> }.into_any();
@@ -517,19 +528,20 @@ pub fn Feeds(guild: String) -> impl IntoView {
             });
             // One plain line under the link: what Brim took it for.
             let seen = move || d.with(|v| match (kind(), s(&v["target"]).trim().is_empty() && v["kind"] == "auto") {
-                (_, true) => "A YouTube channel, an RSS or Atom link, or a GitHub or GitLab repository.",
+                (_, true) => "A website, a YouTube channel, or a GitHub or GitLab repository: open it in your browser and copy the address bar.",
                 ("youtube", _) => "A YouTube channel. New videos are posted.",
                 ("github", _) => "A GitHub repository. Brim gives you an address to paste into its webhook settings.",
                 ("gitlab", _) => "A GitLab project. Brim gives you an address to paste into its webhook settings.",
-                _ => "A website feed (RSS or Atom). New posts are posted.",
+                _ => "A website. Brim finds its feed (RSS or Atom) and posts new posts. A self-hosted GitLab? Pick GitLab under More options.",
             });
             let save = move |_| {
                 let mut v = d.get_untracked();
+                let link = s(&v["target"]);
                 v["kind"] = json!(kind_of(&v));
                 if matches!(kind_of(&v), "github" | "gitlab") {
                     v["target"] = json!("");
                 }
-                save_dialog(v)
+                save_dialog(v, link)
             };
             let r = NodeRef::<leptos::html::Div>::new();
             focus_on_open(r);
@@ -539,7 +551,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                     {new.then(|| view! {
                         <div class="row"><label for="feed-target">"Link"</label>
                             <input id="feed-target" autocomplete="off" prop:value=move || d.with(|v| s(&v["target"])) on:input=text("target")
-                                placeholder="Paste a link or a YouTube @handle" /></div>
+                                placeholder="Paste a website, YouTube or repository link" /></div>
                         <p class="muted small hint">{seen}</p>
                     })}
                     <div class="row"><label for="feed-channel">"Channel"</label>
@@ -563,7 +575,8 @@ pub fn Feeds(guild: String) -> impl IntoView {
                         <div class="row"><label for="feed-name">"Name"</label>
                             <input id="feed-name" maxlength="80" prop:value=move || d.with(|v| s(&v["name"])) on:input=text("name") placeholder="the source's own name" /></div>
                         <div class="row"><label for="feed-pic">"Picture link"</label>
-                            <input id="feed-pic" prop:value=move || d.with(|v| s(&v["picture"])) on:input=text("picture") placeholder="https://... (empty: the source's picture)" /></div>
+                            <input id="feed-pic" prop:value=move || d.with(|v| s(&v["picture"])) on:input=text("picture") placeholder="https://..." /></div>
+                        <p class="muted small hint">"Right-click a picture on a web page, pick Copy image address, and paste it here. Empty: the source's picture."</p>
                         <div class="row"><label for="feed-bot">"Send as Brim"</label>
                             <input id="feed-bot" type="checkbox" class="sw" role="switch" prop:checked=move || d.with(|v| v["send_as_bot"] == true) on:change=move |e| { let c = event_target_checked(&e); d.update(|v| v["send_as_bot"] = json!(c)) } /></div>
                         <p class="muted small hint">"Off: posts carry the source's name and picture. On: Brim posts them as itself."</p>
@@ -659,6 +672,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             view! {
                 <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Feed setup" on:keydown=move |e| dialog_keys(&e, close)><div class="card feeds-dialog">
                     <h2>{if gitlab { "Connect GitLab" } else { "Connect GitHub" }}</h2>
+                    {f["settings"].as_str().map(|u| view! { <p><a class="btn" href=u.to_string() target="_blank" rel="noopener noreferrer">{if gitlab { "Open GitLab's webhook settings" } else { "Open GitHub's webhook settings" }}</a></p> })}
                     <ol>{steps.iter().map(|t| view! { <li>{*t}</li> }).collect_view()}</ol>
                     <div class="row"><label>"Address"</label><code class="grow">{url.clone()}</code>
                         <button class="ghost" on:click=move |_| { let t = u.clone(); spawn_local(async move { copied_url.set(Some(copy_text(&t).await)) }) }>{move || copy_label(copied_url.get())}</button></div>
@@ -684,6 +698,31 @@ pub fn Feeds(guild: String) -> impl IntoView {
         {dialog_view}
         {setup_view}
         <Toast msg />
+    }
+}
+
+/// The page where a GitHub repository or GitLab project adds a webhook, from the pasted link:
+/// `https://github.com/<owner>/<repo>/settings/hooks/new` or `https://<host>/<path>/-/hooks`.
+/// `None` when the link names no repository.
+fn settings_link(kind: &str, link: &str) -> Option<String> {
+    let t = link.trim().trim_end_matches('/');
+    let rest = t.strip_prefix("https://").or_else(|| t.strip_prefix("http://")).unwrap_or(t);
+    let (host, path) = rest.split_once('/')?;
+    let host = host.to_ascii_lowercase();
+    let ok = |p: &&str| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    // GitLab's own pages under a project start at "/-/"; GitHub's after owner/repo.
+    let mut parts: Vec<&str> = path.split(['?', '#']).next()?.split("/-/").next()?.split('/').filter(|p| !p.is_empty()).collect();
+    if let Some(last) = parts.last_mut() {
+        *last = last.strip_suffix(".git").unwrap_or(last);
+    }
+    match kind {
+        "github" if matches!(host.as_str(), "github.com" | "www.github.com") && parts.len() >= 2 && parts[..2].iter().all(ok) => {
+            Some(format!("https://github.com/{}/{}/settings/hooks/new", parts[0], parts[1]))
+        }
+        "gitlab" if parts.len() >= 2 && parts.iter().all(ok) && host.contains('.') && host.chars().all(|c| c.is_ascii_alphanumeric() || "-.".contains(c)) => {
+            Some(format!("https://{host}/{}/-/hooks", parts.join("/")))
+        }
+        _ => None,
     }
 }
 
@@ -746,6 +785,20 @@ mod tests {
             kind_of(&json!({"kind": "auto", "target": "@abc"})),
             "youtube"
         );
+    }
+
+    #[test]
+    fn webhook_settings_links() {
+        let l = settings_link;
+        assert_eq!(l("github", "https://github.com/rust-lang/rust/tree/main/src").as_deref(), Some("https://github.com/rust-lang/rust/settings/hooks/new"));
+        assert_eq!(l("github", "github.com/a/b").as_deref(), Some("https://github.com/a/b/settings/hooks/new"));
+        assert_eq!(l("github", "https://github.com/a"), None);
+        assert_eq!(l("github", "https://www.github.com/a/b.git").as_deref(), Some("https://github.com/a/b/settings/hooks/new"));
+        assert_eq!(l("github", "https://evil.com/a/b"), None);
+        assert_eq!(l("gitlab", "https://gitlab.com/grp/sub/proj/-/issues?x=1").as_deref(), Some("https://gitlab.com/grp/sub/proj/-/hooks"));
+        assert_eq!(l("gitlab", "https://git.example.org/a/b/").as_deref(), Some("https://git.example.org/a/b/-/hooks"));
+        assert_eq!(l("gitlab", "https://git.example.org/a/b\"x"), None);
+        assert_eq!(l("gitlab", ""), None);
     }
 
     #[test]

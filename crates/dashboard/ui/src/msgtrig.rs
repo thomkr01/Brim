@@ -70,6 +70,13 @@ pub fn triggers(
     let base = StoredValue::new(base);
     let rules = RwSignal::new(Vec::<Value>::new());
     let editing = RwSignal::new(None::<RwSignal<Value>>);
+    // The open editor's draft, made here: a signal made in a click handler belongs to the list,
+    // and a list redraw would drop it while the editor still reads it.
+    let draft = RwSignal::new(Value::Null);
+    let open_editing = move |v: Value| {
+        draft.set(v);
+        editing.set(Some(draft))
+    };
     let busy = RwSignal::new(false);
     let locked = Signal::derive(move || rank.get() < 3);
     let roles = use_context::<crate::msgparts::Parts>().map(|p| p.roles);
@@ -329,7 +336,7 @@ pub fn triggers(
                     {issue.map(|i| view! { <div class="err small">{i}</div> })}
                 </div>
                 <span class="sp"></span>
-                <button class="ghost" disabled=locked on:click=move |_| editing.set(Some(RwSignal::new(v2.clone())))>"Change"</button>
+                <button class="ghost" disabled=locked on:click=move |_| open_editing(v2.clone())>"Change"</button>
                 <button class="ghost" aria-label="delete trigger" disabled=locked on:click=move |_| remove(id)>{crate::icons::icon("trash")}</button>
             </li>
         }
@@ -346,7 +353,7 @@ pub fn triggers(
                         (!list.is_empty()).then(|| view! { <ul>{list.into_iter().map(card).collect_view()}</ul> })
                     }}
                     {move || {
-                        let new = move || editing.set(Some(RwSignal::new(blank())));
+                        let new = move || open_editing(blank());
                         let busy = Signal::derive(move || editing.with(Option::is_some));
                         if locked.get() {
                             view! { <p class="muted small">"Only the Owner, Extra Owners and Trusted Admins make or change triggers."</p> }.into_any()

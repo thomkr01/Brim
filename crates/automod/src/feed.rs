@@ -162,6 +162,74 @@ pub async fn fetch(
     Ok(Got::Feed(f))
 }
 
+/// Reads `url` (already passed [`check_url`]) when a feed is added: the feed there, or, for a web
+/// page, the feed its own `<link rel="alternate">` names (checked like any typed address, one hop
+/// only). Returns the feed's address with it.
+pub async fn find(c: &reqwest::Client, url: &str) -> Result<(String, Feed), String> {
+    let (body, _, _, at) = get(c, url, MAX_BYTES, None, None)
+        .await?
+        .ok_or("the site did not send the feed")?;
+    let e = match parse(&body, at.as_str()) {
+        Ok(f) => return Ok((url.to_string(), f)),
+        Err(e) => e,
+    };
+    let html = String::from_utf8_lossy(&body);
+    let Some(link) = feed_link(&html, &at) else {
+        return Err(if html.to_ascii_lowercase().contains("<html") {
+            "this page names no feed: look on the site for an RSS or Feed link, and paste that address".into()
+        } else {
+            e
+        });
+    };
+    let u = check_url(&link)?;
+    match fetch(c, u.as_str(), None, None).await? {
+        Got::Feed(f) => Ok((u.to_string(), f)),
+        Got::Same => Err("the site did not send the feed".into()),
+    }
+}
+
+/// The first RSS, Atom or JSON feed a page's `<link rel="alternate" type=... href=...>` names,
+/// read against `base`. Attributes in any order, quoted or not.
+fn feed_link(html: &str, base: &Url) -> Option<String> {
+    let low = html.to_ascii_lowercase();
+    low.match_indices("<link")
+        .filter_map(|(i, _)| {
+            let tag = &html[i..i + low[i..].find('>')?];
+            let attr = |name: &str| -> Option<String> {
+                let l = tag.to_ascii_lowercase();
+                let mut from = 0;
+                while let Some(p) = l[from..].find(name) {
+                    let at = from + p;
+                    from = at + name.len();
+                    let before = l[..at].chars().last();
+                    let rest = l[from..].trim_start();
+                    if !before.is_some_and(char::is_whitespace) || !rest.starts_with('=') {
+                        continue;
+                    }
+                    let v = tag[tag.len() - rest.len() + 1..].trim_start();
+                    // Quoted with " or ', or unquoted up to the next space (minified pages).
+                    let v = match v.chars().next() {
+                        Some(q @ ('"' | '\'')) => v[1..].split(q).next()?,
+                        _ => v.split(char::is_whitespace).next()?,
+                    };
+                    return Some(v.replace("&amp;", "&"));
+                }
+                None
+            };
+            let rel = attr("rel")?.to_ascii_lowercase();
+            let kind = attr("type")?.to_ascii_lowercase();
+            let feed = [
+                "application/rss+xml",
+                "application/atom+xml",
+                "application/feed+json",
+            ];
+            (rel.split_whitespace().any(|r| r == "alternate") && feed.contains(&kind.trim()))
+                .then(|| attr("href"))
+                .flatten()
+        })
+        .find_map(|h| base.join(h.trim()).ok().map(|u| u.to_string()))
+}
+
 /// The plain text of feed HTML: tags dropped, the five XML entities and `&nbsp;` read, spaces
 /// joined, cut to `max` characters.
 fn plain(html: &str, max: usize) -> String {
@@ -419,6 +487,39 @@ mod tests {
             assert!(check_url(bad).is_err(), "{bad}");
         }
         assert!(check_url(&format!("https://a.example/{}", "x".repeat(2000))).is_err());
+    }
+
+    #[test]
+    fn a_page_names_its_feed() {
+        let base = Url::parse("https://blog.example.com/posts/").unwrap();
+        let page = r#"<html><head><link rel="stylesheet" href="/a.css">
+<LINK href='/feed.xml?a=1&amp;b=2' TYPE='application/rss+xml' rel='alternate' title="x">
+<link rel="alternate" type="application/atom+xml" href="https://other.example/atom"></head></html>"#;
+        assert_eq!(
+            feed_link(page, &base).as_deref(),
+            Some("https://blog.example.com/feed.xml?a=1&b=2")
+        );
+        let min = "<link rel=alternate type=application/rss+xml href=/index.xml>";
+        assert_eq!(
+            feed_link(min, &base).as_deref(),
+            Some("https://blog.example.com/index.xml")
+        );
+        // Not a feed type, not alternate, or a word that only ends in "rel": nothing.
+        for no in [
+            r#"<link rel="alternate" type="text/html" href="/x">"#,
+            r#"<link rel="icon" type="application/rss+xml" href="/x">"#,
+            r#"<link datarel="alternate" type="application/rss+xml" href="/x">"#,
+            "<p>no links</p>",
+        ] {
+            assert_eq!(feed_link(no, &base), None, "{no}");
+        }
+        // A found link to an internal address is refused like a typed one.
+        let bad = feed_link(
+            r#"<link rel="alternate" type="application/rss+xml" href="https://127.0.0.1/f">"#,
+            &base,
+        )
+        .unwrap();
+        assert!(check_url(&bad).is_err());
     }
 
     /// A feed with a DTD that defines entities: nothing is expanded, nothing outside is read.
