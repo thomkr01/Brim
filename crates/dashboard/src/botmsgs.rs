@@ -98,8 +98,10 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                     json!({"name": v, "label": label, "example": example})
                 })
                 .collect();
+            let area = botmsg::area(d).unwrap_or(("Members and server", d.group));
             json!({
                 "key": d.key, "name": d.name, "group": d.group, "locked": d.locked,
+                "area": area.0, "sub": area.1,
                 "security": d.security, "plain_facts": d.strict(), "details": d.details() && d.vars.contains(&"text"),
                 "vars": vars, "important": d.important, "default": d.template,
                 "required": d.required, "what": d.what, "in_text": botmsg::in_text(d),

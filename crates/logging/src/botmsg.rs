@@ -5814,6 +5814,68 @@ pub fn find(key: &str) -> Option<&'static Def> {
     defs().iter().find(|d| d.key == key)
 }
 
+/// The main areas of the Bot messages page, in page order.
+pub const AREAS: &[&str] = &[
+    "Commands",
+    "Logging",
+    "Moderation",
+    "Tickets",
+    "Members and server",
+    "Security",
+];
+
+/// The main area and sub-group of an entry on the Bot messages page (owner decision, 2026-11-21).
+/// `None` for a group not placed yet; a test keeps every group placed.
+pub fn area(d: &Def) -> Option<(&'static str, &'static str)> {
+    let g = d.group;
+    Some(match g {
+        "General commands"
+        | "Moderation commands"
+        | "Settings commands"
+        | "Settings panels"
+        | "Tags"
+        | "Errors and usage"
+        | "Confirm prompt"
+        | "Buttons and menus" => ("Commands", g),
+        "Message logs" => ("Logging", "Messages"),
+        "Member logs" | "User logs" | "Voice logs" => ("Logging", "Members and voice"),
+        "Role logs" | "Channel logs" | "Server logs" | "Invite logs" | "Webhook logs"
+        | "Emoji logs" | "Sticker logs" | "Event logs" | "Thread logs" | "Poll logs" => {
+            ("Logging", "Server")
+        }
+        "Moderation logs" | "Appeal logs" | "Report logs" => {
+            ("Logging", "Moderation, appeals and reports")
+        }
+        "Automod logs" | "Discord AutoMod rule logs" => ("Logging", "Automod"),
+        "Verification logs" | "Join Gate logs" => ("Logging", "Verification and Join Gate"),
+        "Ticket logs" => ("Logging", "Tickets"),
+        "Punishment DMs" | "Member DMs" | "Cases and notes" | "Reports" | "Lockdown"
+        | "Catch channel" => ("Moderation", g),
+        "Tickets" if d.name.starts_with("Reply:") => ("Tickets", "Ticket replies"),
+        "Tickets" => ("Tickets", "Ticket messages"),
+        "Ticket commands" => ("Tickets", g),
+        "Verification" | "Welcome" | "Feeds" => ("Members and server", g),
+        OUTSIDE | "Owner DMs" => ("Members and server", "Bot owner"),
+        "Security" => {
+            let n = d.name.to_lowercase();
+            let sub = if n.starts_with("reply:") || n.starts_with("answer:") {
+                "Command replies"
+            } else if n.contains("anti-nuke")
+                || n.starts_with("antinuke")
+                || n.starts_with("ancaps")
+            {
+                "Anti-nuke"
+            } else if n.contains("panic") || n.contains("join raid") || n.starts_with("joinraid") {
+                "Panic and join raid"
+            } else {
+                "Other alerts"
+            };
+            ("Security", sub)
+        }
+        _ => return None,
+    })
+}
+
 /// (variable, name in the editor, example for the preview and the test DM).
 const VAR_INFO: &[(&str, &str, &str)] = &[
     ("server", "Server name", "My Server"),
@@ -6548,6 +6610,16 @@ fn collect(v: &Value, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_entry_has_a_main_area() {
+        for d in defs() {
+            let (a, _) = area(d).unwrap_or_else(|| panic!("group {:?} has no main area", d.group));
+            assert!(AREAS.contains(&a));
+            // A security text never lands outside the Security area, where it is marked as such.
+            assert_eq!(d.security, a == "Security", "{}", d.key);
+        }
+    }
 
     #[test]
     fn default_fills_and_drops_empty_lines() {

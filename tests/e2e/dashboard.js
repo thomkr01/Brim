@@ -507,8 +507,16 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('.bar >> text=Cancel', { timeout: 5000 }).catch(() => failed.push('tickets: no Changes detected bar after Add panel'));
   // Bot messages: the grouped list, a message opens in the editor, Revert asks first.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1bot_messages')}`);
-  await page.locator('h3', { hasText: 'Punishment DMs' }).waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Punishment DMs group'));
+  // Six main areas, all closed at first; an area opens to its sub-groups, a sub-group to its messages.
+  await page.locator('h3', { hasText: 'Moderation' }).waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Moderation area'));
+  if ((await page.locator('h3 button.link').count()) !== 6) failed.push('bot messages: not 6 main areas');
+  if (await page.locator('.mrow').count()) failed.push('bot messages: an area is open at first');
+  await page.click('h3 button:has-text("Security")');
+  await page.click('h4 button:has-text("Anti-nuke")');
   if (!(await page.locator('.chip', { hasText: 'Security' }).count())) failed.push('bot messages: no security text chip');
+  await page.click('h3 button:has-text("Security")');
+  await page.click('h3 button:has-text("Moderation")');
+  await page.click('h4 button:has-text("Punishment DMs")');
   await page.click('.mrow .nm b:text-is("Ban")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Ban row'));
   await page.locator('.ed[aria-label="Title"]').first().waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: Ban did not open in the editor'));
   if (await page.locator('button', { hasText: 'Add button row' }).count()) failed.push('bot messages: the editor offers buttons');
@@ -520,12 +528,11 @@ fs.mkdirSync(out, { recursive: true });
   await find.fill('ban');
   if (!(await page.locator('.mrow .nm b:text-is("Ban")').count())) failed.push('bot messages: search does not find Ban');
   await find.fill('');
-  await page.click('h3 button:has-text("Punishment DMs")');
+  await page.click('h4 button:has-text("Punishment DMs")');
   if (await page.locator('.mrow .nm b:text-is("Ban")').count()) failed.push('bot messages: a folded group still shows its messages');
   await find.fill('ban');
   if (!(await page.locator('.mrow .nm b:text-is("Ban")').count())) failed.push('bot messages: a search does not open a folded group');
   await find.fill('');
-  await page.click('h3 button:has-text("Punishment DMs")');
   // An entry with {text} says it must keep it; removing it turns the notice red and offers Insert Bot text.
   await find.fill('Message Edited');
   await page.click('.mrow .nm b:text-is("Message Edited")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Message Edited row'));

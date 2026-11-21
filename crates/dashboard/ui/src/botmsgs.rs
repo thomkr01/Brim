@@ -95,9 +95,43 @@ fn insert_required(row: &Value, body: &mut Value) {
     }
 }
 
-/// Whether the search box holds text, which opens every group with hits.
-fn needle_open(q: &RwSignal<String>) -> bool {
-    q.with(|q| q.trim().is_empty())
+/// Whether the search box holds text, which opens every area and sub-group with hits.
+fn searching(q: &RwSignal<String>) -> bool {
+    q.with(|q| !q.trim().is_empty())
+}
+
+/// The page order of the main areas (the server's `botmsg::AREAS`).
+const AREAS: &[&str] = &[
+    "Commands",
+    "Logging",
+    "Moderation",
+    "Tickets",
+    "Members and server",
+    "Security",
+];
+
+/// Rows grouped by main area, then sub-group, each in page order.
+type Areas = Vec<(String, Vec<(String, Vec<Value>)>)>;
+
+fn by_area(all: &[Value]) -> Areas {
+    let mut out: Areas = AREAS.iter().map(|a| (a.to_string(), vec![])).collect();
+    for r in all {
+        let (a, sub) = (
+            r["area"].as_str().unwrap_or(""),
+            r["sub"].as_str().unwrap_or(""),
+        );
+        let i = out.iter().position(|x| x.0 == a).unwrap_or_else(|| {
+            out.push((a.to_string(), vec![]));
+            out.len() - 1
+        });
+        let subs = &mut out[i].1;
+        match subs.iter_mut().find(|x| x.0 == sub) {
+            Some(x) => x.1.push(r.clone()),
+            None => subs.push((sub.to_string(), vec![r.clone()])),
+        }
+    }
+    out.retain(|a| !a.1.is_empty());
+    out
 }
 
 fn now() -> i64 {
@@ -128,9 +162,19 @@ pub fn BotMessages(
     let dirty = Memo::new(move |_| cur.with(|c| c["body"].clone()) != orig.get());
     let tab = RwSignal::new("message");
     let busy = RwSignal::new(false);
-    // Search text and the folded groups; kept for this visit of the page only.
+    // Search text and the opened areas and sub-groups (all closed at first); kept for this visit only.
     let query = RwSignal::new(String::new());
-    let folded = RwSignal::new(Vec::<String>::new());
+    let opened = RwSignal::new(Vec::<String>::new());
+    let is_open = move |id: &str| searching(&query) || opened.with(|f| f.iter().any(|x| x == id));
+    let flip = move |id: &str| {
+        opened.update(|f| {
+            if let Some(i) = f.iter().position(|x| x == id) {
+                f.remove(i);
+            } else {
+                f.push(id.to_string())
+            }
+        })
+    };
     // Which action runs ("save", "test" or a post's path), so only its button shows the working sign.
     let doing = RwSignal::new(String::new());
     let ed = Editor::new(cur, g, true);
@@ -422,26 +466,11 @@ pub fn BotMessages(
         };
         let edited = all.iter().filter(|r| r["message"].is_object()).count();
         // Revert all leaves the security texts (the server does too).
-        let revertable = all.iter().filter(|r| r["message"].is_object() && r["security"] != true).count();
-        let mut groups: Vec<&str> = vec![];
-        for r in &all {
-            let gname = r["group"].as_str().unwrap_or("");
-            if !groups.contains(&gname) {
-                groups.push(gname);
-            }
-        }
-        let groups: Vec<(String, Vec<Value>)> = groups
-            .into_iter()
-            .map(|gname| {
-                (
-                    gname.to_string(),
-                    all.iter()
-                        .filter(|r| r["group"] == gname)
-                        .cloned()
-                        .collect(),
-                )
-            })
-            .collect();
+        let revertable = all
+            .iter()
+            .filter(|r| r["message"].is_object() && r["security"] != true)
+            .count();
+        let areas = by_area(&all);
         view! {
             <div class="intro"><p>"The messages Brim sends by itself. Edit one to change what members get; Revert puts Brim's default back."</p>
                 <span class="count">{format!("{edited} edited")}</span></div>
@@ -476,21 +505,12 @@ pub fn BotMessages(
             <div class="listtop"><input type="search" placeholder="Search messages" aria-label="search messages" prop:value=move || query.get() on:input=move |e| query.set(event_target_value(&e)) /></div>
             {move || {
                 let needle = query.get().trim().to_lowercase();
-                let hit = |r: &Value| needle.is_empty() || [r["name"].as_str().unwrap_or(""), r["group"].as_str().unwrap_or(""), &r["message"].to_string(), &r["default"].to_string()].iter().any(|t| t.to_lowercase().contains(&needle));
-                let shown: Vec<(String, Vec<Value>)> = groups.iter().map(|(g, v)| (g.clone(), v.iter().filter(|r| hit(r)).cloned().collect::<Vec<_>>())).filter(|(_, v)| !v.is_empty()).collect();
+                let hit = |r: &Value| needle.is_empty() || [r["name"].as_str().unwrap_or(""), r["group"].as_str().unwrap_or(""), r["area"].as_str().unwrap_or(""), r["sub"].as_str().unwrap_or(""), &r["message"].to_string(), &r["default"].to_string()].iter().any(|t| t.to_lowercase().contains(&needle));
+                let shown: Areas = areas.iter().map(|(a, subs)| (a.clone(), subs.iter().map(|(g, v)| (g.clone(), v.iter().filter(|r| hit(r)).cloned().collect::<Vec<_>>())).filter(|(_, v)| !v.is_empty()).collect::<Vec<_>>())).filter(|(_, v)| !v.is_empty()).collect();
                 if shown.is_empty() {
                     return view! { <p class="card empty muted">"No messages found."</p> }.into_any();
                 }
-                shown.into_iter().map(|(gname, items)| {
-                    let (g1, g2) = (gname.clone(), gname.clone());
-                    let items = StoredValue::new(items);
-                    // A search opens the groups that hold hits.
-                    let open_now = Signal::derive(move || !needle_open(&query) || !folded.with(|f| f.contains(&g1)));
-                    view! {
-                        <h3><button class="link" aria-expanded=move || open_now.get().to_string() on:click=move |_| folded.update(|f| if let Some(i) = f.iter().position(|x| *x == g2) { f.remove(i); } else { f.push(g2.clone()) })>{format!("{} {gname} ({})", if open_now.get() { "▾" } else { "▸" }, items.with_value(Vec::len))}</button></h3>
-                        <Show when=move || open_now.get()>
-                        <div class="mlist">
-                    {items.get_value().into_iter().map(|r| {
+                let row = move |r: Value| {
                         let color = format!("#{:06x}", r["message"]["embeds"][0]["color"].as_u64().or(r["default"]["embeds"][0]["color"].as_u64()).unwrap_or(0x4e5058));
                         let name = r["name"].as_str().unwrap_or("").to_string();
                         let key = r["key"].as_str().unwrap_or("").to_string();
@@ -510,8 +530,38 @@ pub fn BotMessages(
                                 </span>
                             </div>
                         }
-                    }).collect_view()}
-                        </div>
+                };
+                let head = move |id: String, label: String, n: usize, security: bool| {
+                    let id = StoredValue::new(id);
+                    view! { <button class="link" aria-expanded=move || id.with_value(|i| is_open(i)).to_string() on:click=move |_| id.with_value(|i| flip(i))>
+                        {move || if id.with_value(|i| is_open(i)) { "▾" } else { "▸" }}" "{label}" "{format!("({n})")}
+                        {security.then(|| crate::icons::icon("lock"))}
+                    </button> }
+                };
+                shown.into_iter().map(|(area, subs)| {
+                    let n: usize = subs.iter().map(|s| s.1.len()).sum();
+                    let security = area == "Security";
+                    let a1 = area.clone();
+                    let one = subs.len() == 1;
+                    let subs = StoredValue::new(subs);
+                    view! {
+                        <h3>{head(area.clone(), area.clone(), n, security)}</h3>
+                        {security.then(|| view! { <p class="muted small">"Only the Owner and Extra Owners can change these texts, with a 2FA code."</p> })}
+                        <Show when=move || is_open(&a1)>
+                        {let area = area.clone(); subs.get_value().into_iter().map(move |(sub, items)| {
+                            let id = format!("{area}/{sub}");
+                            let id1 = id.clone();
+                            let items = StoredValue::new(items);
+                            let list = move || view! { <div class="mlist">{items.get_value().into_iter().map(row).collect_view()}</div> };
+                            if one {
+                                list().into_any()
+                            } else {
+                                view! {
+                                    <h4>{head(id, sub, items.with_value(Vec::len), false)}</h4>
+                                    <Show when=move || is_open(&id1)>{list()}</Show>
+                                }.into_any()
+                            }
+                        }).collect_view()}
                         </Show>
                     }
                 }).collect_view().into_any()
