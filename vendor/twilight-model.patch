@@ -1,0 +1,26 @@
+--- a/src/guild/permissions.rs
++++ b/src/guild/permissions.rs
+@@ -106,8 +106,9 @@
+         f.write_str("integer or string permissions")
+     }
+ 
++    // TommyBot patch: keep bits this version does not know, so a read-modify-write never drops them.
+     fn visit_u64<E: DeError>(self, v: u64) -> Result<Self::Value, E> {
+-        Ok(Permissions::from_bits_truncate(v))
++        Ok(Permissions::from_bits_retain(v))
+     }
+ 
+     fn visit_str<E: DeError>(self, v: &str) -> Result<Self::Value, E> {
+@@ -229,7 +230,10 @@
+     #[test]
+     fn serde() {
+         serde_test::assert_tokens(&Permissions::CREATE_INVITE, &[Token::Str("1")]);
+-        // Deserialization truncates unknown bits.
+-        serde_test::assert_de_tokens(&Permissions::empty(), &[Token::Str("9223372036854775808")]);
++        // Deserialization keeps unknown bits (TommyBot patch).
++        serde_test::assert_de_tokens(
++            &Permissions::from_bits_retain(1 << 63),
++            &[Token::Str("9223372036854775808")],
++        );
+     }
+ }

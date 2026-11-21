@@ -1,0 +1,133 @@
+//! Sorts Discord REST failures: a 404 means the target is already gone and closed DMs are normal;
+//! anything else (missing permission, role too low, Discord down) is a real failure worth a log line.
+use anyhow::Result;
+use twilight_http::{api_error::ApiError, error::ErrorType, Client, Error};
+use twilight_model::{
+    guild::{Ban, Member},
+    id::{
+        marker::{GuildMarker, UserMarker},
+        Id,
+    },
+};
+
+/// Discord's "Cannot send messages to this user": the member closed their DMs.
+const DMS_CLOSED: u64 = 50007;
+
+fn status_code(e: &Error) -> Option<(u16, Option<u64>)> {
+    match e.kind() {
+        ErrorType::Response { status, error, .. } => Some((
+            status.get(),
+            match error {
+                ApiError::General(g) => Some(g.code),
+                _ => None,
+            },
+        )),
+        _ => None,
+    }
+}
+
+/// The HTTP status Discord answered with.
+pub fn status(e: &Error) -> Option<u16> {
+    status_code(e).map(|s| s.0)
+}
+
+/// Discord's JSON error code of a request error.
+pub fn api_code(e: &Error) -> Option<u64> {
+    status_code(e).and_then(|(_, c)| c)
+}
+
+/// Discord's JSON error code (50035 invalid form, 30013 too many channels, ...).
+pub fn code(e: &anyhow::Error) -> Option<u64> {
+    e.downcast_ref::<Error>()
+        .and_then(status_code)
+        .and_then(|(_, c)| c)
+}
+
+/// 404, or 403 with code 50001 "Missing Access": certainly not in that server. Unlike
+/// [`no_access`], a 403 without that code (a Cloudflare block) is not taken as an answer.
+pub fn not_in_guild(e: &Error) -> bool {
+    status_code(e).is_some_and(|(s, c)| s == 404 || (s == 403 && c == Some(50001)))
+}
+
+/// 404, or 403 "Missing Access": the bot is not in that server (any more).
+pub fn no_access(e: &Error) -> bool {
+    status_code(e).is_some_and(|(s, _)| s == 403 || s == 404)
+}
+
+/// The message, member, channel, role, ban or webhook no longer exists.
+pub fn gone(e: &Error) -> bool {
+    status_code(e).is_some_and(|(s, _)| s == 404)
+}
+
+/// [`gone`] for an error that went through `?`.
+pub fn gone_any(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Error>().is_some_and(gone)
+}
+
+/// 50001 Missing Access or 50013 Missing Permissions: retrying will not help until staff fix it.
+pub fn forbidden_any(e: &anyhow::Error) -> bool {
+    matches!(code(e), Some(50001 | 50013))
+}
+
+/// Discord answered with a 4xx: it refused the request, and the same request would be refused
+/// again. A 5xx or no answer at all is an outage, not a refusal.
+pub fn refused(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<Error>()
+        .and_then(status_code)
+        .is_some_and(|(s, _)| (400..500).contains(&s))
+}
+
+/// Discord's reason for a failed action, for the reply.
+pub fn why(e: &anyhow::Error) -> String {
+    match e.downcast_ref::<Error>().map(|e| e.kind()) {
+        Some(ErrorType::Response {
+            error: ApiError::General(g),
+            ..
+        }) => match g.code {
+            50013 => {
+                "missing permissions (their top role is above mine, or they have Administrator)"
+                    .into()
+            }
+            _ => g.message.clone(),
+        },
+        _ => "see logs".into(),
+    }
+}
+
+fn expected(e: &Error) -> bool {
+    gone(e) || status_code(e).is_some_and(|(_, c)| c == Some(DMS_CLOSED))
+}
+
+/// For calls whose failure must not stop the caller. Unexpected failures are logged so a
+/// missing permission never fails silently.
+pub fn best_effort<T>(r: Result<T, Error>, what: &str) -> Option<T> {
+    r.inspect_err(|e| {
+        if !expected(e) {
+            tracing::warn!(?e, what, "discord call failed");
+        }
+    })
+    .ok()
+}
+
+/// A guild member, `None` only when Discord says they are not in the server. Any other failure
+/// is an error, so a hiccup never makes staff look like members without permits.
+pub async fn member(
+    http: &Client,
+    gid: Id<GuildMarker>,
+    uid: Id<UserMarker>,
+) -> Result<Option<Member>> {
+    match http.guild_member(gid, uid).await {
+        Ok(r) => Ok(Some(r.model().await?)),
+        Err(e) if gone(&e) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// A guild ban, `None` only when Discord says the user is not banned; like [`member`].
+pub async fn ban(http: &Client, gid: Id<GuildMarker>, uid: Id<UserMarker>) -> Result<Option<Ban>> {
+    match http.ban(gid, uid).await {
+        Ok(r) => Ok(Some(r.model().await?)),
+        Err(e) if gone(&e) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}

@@ -1,0 +1,1497 @@
+//! Join gate, join-raid detection and verification mode selection.
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+const DISCORD_EPOCH_MS: i64 = 1_420_070_400_000;
+const DAY_MS: i64 = 86_400_000;
+/// Allowed minimum account age (`jg 3c` and the dashboard): 5 seconds to 100 days, in ms.
+pub const MIN_AGE_MS: (i64, i64) = (5_000, 100 * DAY_MS);
+/// Verification time limit: 0 would kick every joiner before they can press Verify.
+pub const VERIFY_TIME_LIMIT_MS: (i64, i64) = (10_000, 7 * DAY_MS);
+const HOUR_MS: i64 = 3_600_000;
+
+/// Discord's undocumented "likely spammer" bit in `public_flags`; twilight's `UserFlags` drops it.
+pub const SPAMMER_FLAG: u64 = 1 << 20;
+
+pub fn account_created_ms(user_id: u64) -> i64 {
+    (user_id >> 22) as i64 + DISCORD_EPOCH_MS
+}
+
+/// Ordered by severity; the gate applies the harshest action any filter asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(from = "ActionRepr")]
+pub enum Action {
+    Log,
+    /// Sets the nick to "Moderated Nickname"; only the username filter offers it.
+    Rename,
+    Warn,
+    /// Milliseconds, 0 for the default timeout. For the age filter this is replaced by the remaining time.
+    Timeout(i64),
+    Kick,
+    Ban,
+}
+
+/// Also accepts a bare `"Timeout"` (what the dashboard select sends) as the default timeout.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ActionRepr {
+    Name(ActionName),
+    Timeout {
+        #[serde(rename = "Timeout")]
+        ms: i64,
+    },
+}
+
+#[derive(Deserialize)]
+enum ActionName {
+    Log,
+    Rename,
+    Warn,
+    Timeout,
+    Kick,
+    Ban,
+}
+
+/// The default timeout is written as a bare `"Timeout"`, the value the dashboard select shows;
+/// `{"Timeout": 0}` matched no option there.
+impl Serialize for Action {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let name = match *self {
+            Self::Timeout(ms) if ms != 0 => {
+                let mut m = s.serialize_map(Some(1))?;
+                m.serialize_entry("Timeout", &ms)?;
+                return m.end();
+            }
+            Self::Log => "Log",
+            Self::Rename => "Rename",
+            Self::Warn => "Warn",
+            Self::Timeout(_) => "Timeout",
+            Self::Kick => "Kick",
+            Self::Ban => "Ban",
+        };
+        s.serialize_str(name)
+    }
+}
+
+impl From<ActionRepr> for Action {
+    fn from(r: ActionRepr) -> Self {
+        match r {
+            ActionRepr::Timeout { ms } => Self::Timeout(ms),
+            ActionRepr::Name(n) => match n {
+                ActionName::Log => Self::Log,
+                ActionName::Rename => Self::Rename,
+                ActionName::Warn => Self::Warn,
+                ActionName::Timeout => Self::Timeout(0),
+                ActionName::Kick => Self::Kick,
+                ActionName::Ban => Self::Ban,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Filter {
+    NoAvatar,
+    AccountAge,
+    UnauthorizedBot,
+    UnverifiedBot,
+    InviteInName,
+    Suspicious,
+    UsernameFilter,
+    SuspectedSpammer,
+}
+
+impl Filter {
+    /// Trigger action for the card when none is saved.
+    pub fn default_action(self) -> Action {
+        match self {
+            Filter::InviteInName => Action::Timeout(0),
+            Filter::UsernameFilter => Action::Ban,
+            _ => Action::Kick,
+        }
+    }
+
+    /// The card name staff see in the Join Gate log and records.
+    pub fn name(self) -> &'static str {
+        match self {
+            Filter::NoAvatar => "No Avatar",
+            Filter::AccountAge => "Account Age",
+            Filter::UnauthorizedBot => "Bot Addition",
+            Filter::UnverifiedBot => "Unverified Bot",
+            Filter::InviteInName => "Advertising Names",
+            Filter::Suspicious => "Suspicious Account",
+            Filter::UsernameFilter => "Username Filter",
+            Filter::SuspectedSpammer => "Suspected Spammer",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GateCfg {
+    pub enabled: bool,
+    pub dm_punished: bool,
+    #[serde(deserialize_with = "no_rename")]
+    pub no_avatar: GateFilter,
+    #[serde(deserialize_with = "no_rename")]
+    pub account_age: GateFilter,
+    pub min_age_days: u32,
+    /// Minimum age in ms (`jg 3c`, seconds to days); wins over `min_age_days`.
+    pub min_age_override_ms: Option<i64>,
+    /// Tell a punished member the minimum age in the DM (`jg 3d`).
+    pub expose_min_age: bool,
+    #[serde(deserialize_with = "no_rename")]
+    pub unauthorized_bot: GateFilter,
+    #[serde(deserialize_with = "no_rename")]
+    pub unverified_bot: GateFilter,
+    #[serde(deserialize_with = "no_rename")]
+    pub invite_in_name: GateFilter,
+    #[serde(deserialize_with = "no_rename")]
+    pub suspicious: GateFilter,
+    pub username_filter: GateFilter,
+    /// Discord's undocumented "likely spammer" user flag (bit 20).
+    #[serde(deserialize_with = "no_rename")]
+    pub spammer: GateFilter,
+    /// Wildcard words, checked against the sanitized name; `*` is a wildcard, no `*` means "contains".
+    pub username_terms: Vec<String>,
+    /// Strict words: the whole name, case-insensitive.
+    pub username_strict: Vec<String>,
+    /// Also run the username filter when a member changes their name or nickname.
+    pub username_post_join: bool,
+    /// Act only when every enabled filter matches, with the harshest action.
+    pub require_all: bool,
+    /// Bots added by the owner or an Extra Owner skip the account filters (the bot filters still apply).
+    pub exclude_trusted_bots: bool,
+}
+
+/// One Join Gate card: its status switch and trigger action (None: the card default).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "GateFilterRepr")]
+pub struct GateFilter {
+    pub enabled: bool,
+    pub action: Option<Action>,
+}
+
+impl GateFilter {
+    #[cfg(test)]
+    pub fn on(action: Action) -> Self {
+        Self {
+            enabled: true,
+            action: Some(action),
+        }
+    }
+
+    /// The action to take, None while the filter is off.
+    pub fn get(self, default: Action) -> Option<Action> {
+        self.enabled.then(|| self.action.unwrap_or(default))
+    }
+}
+
+fn time_limit<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    let (lo, hi) = VERIFY_TIME_LIMIT_MS;
+    i64::deserialize(d).map(|v| v.clamp(lo, hi))
+}
+
+/// Renaming only fixes a name, so only the username filter may take Rename.
+pub(crate) fn no_rename<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Into<Option<Action>> + Copy,
+{
+    let v = T::deserialize(d)?;
+    if v.into() == Some(Action::Rename) {
+        return Err(serde::de::Error::custom(
+            "Rename is only for the username filter",
+        ));
+    }
+    Ok(v)
+}
+
+impl From<GateFilter> for Option<Action> {
+    fn from(f: GateFilter) -> Self {
+        f.action
+    }
+}
+
+/// Configs saved before the status switch stored the bare action, null meaning off.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum GateFilterRepr {
+    Old(Option<Action>),
+    New {
+        #[serde(default)]
+        enabled: bool,
+        #[serde(default)]
+        action: Option<Action>,
+    },
+}
+
+impl From<GateFilterRepr> for GateFilter {
+    fn from(r: GateFilterRepr) -> Self {
+        match r {
+            GateFilterRepr::Old(action) => Self {
+                enabled: action.is_some(),
+                action,
+            },
+            GateFilterRepr::New { enabled, action } => Self { enabled, action },
+        }
+    }
+}
+
+impl Default for GateCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dm_punished: false,
+            no_avatar: GateFilter::default(),
+            account_age: GateFilter::default(),
+            min_age_days: 5,
+            min_age_override_ms: None,
+            expose_min_age: true,
+            unauthorized_bot: GateFilter::default(),
+            unverified_bot: GateFilter::default(),
+            invite_in_name: GateFilter::default(),
+            suspicious: GateFilter::default(),
+            username_filter: GateFilter::default(),
+            spammer: GateFilter::default(),
+            username_terms: vec![],
+            username_strict: vec![],
+            username_post_join: false,
+            require_all: false,
+            exclude_trusted_bots: false,
+        }
+    }
+}
+
+impl GateCfg {
+    /// The configured minimum account age; also the "young account" limit of Suspicious while the age filter is off.
+    /// Values saved before the limits existed are pulled inside [`MIN_AGE_MS`].
+    pub fn min_age_ms(&self) -> i64 {
+        self.min_age_override_ms
+            .unwrap_or(i64::from(self.min_age_days) * DAY_MS)
+            .clamp(MIN_AGE_MS.0, MIN_AGE_MS.1)
+    }
+
+    /// `names` holds one name per line (username, display name, nickname).
+    pub fn name_matches(&self, names: &str) -> bool {
+        names.lines().any(|name| {
+            self.username_terms.iter().any(|t| term_matches(t, name))
+                || self
+                    .username_strict
+                    .iter()
+                    .any(|t| t.eq_ignore_ascii_case(name))
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Joiner<'a> {
+    pub id: u64,
+    /// Username and display name, one per line, already cured of lookalikes by the caller.
+    pub name: &'a str,
+    pub has_avatar: bool,
+    pub is_bot: bool,
+    pub bot_verified: bool,
+    /// For bots: whoever added it is Owner/EO/TA or above the bot.
+    pub added_by_authorized: bool,
+    /// For bots: the audit log names the owner or an Extra Owner as the one who added it.
+    pub added_by_owner: bool,
+    /// The invite code the member joined with, when known.
+    pub invite: Option<&'a str>,
+    /// Discord flags the account as a likely spammer (read from the raw gateway frame).
+    pub spammer: bool,
+}
+
+/// `*`-wildcard match, case-insensitive. A term without `*` matches as a substring.
+pub fn term_matches(term: &str, name: &str) -> bool {
+    let (term, name) = (term.to_lowercase(), name.to_lowercase());
+    if !term.contains('*') {
+        return name.contains(&term);
+    }
+    let parts: Vec<&str> = term.split('*').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if !name.starts_with(first) || !name.ends_with(last) || name.len() < first.len() + last.len() {
+        return false;
+    }
+    let mut rest = &name[first.len()..name.len() - last.len()];
+    for p in &parts[1..parts.len() - 1] {
+        match rest.find(p) {
+            Some(i) => rest = &rest[i + p.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+fn has_invite(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [
+        "discord.gg/",
+        "discord.com/invite/",
+        "discordapp.com/invite/",
+    ]
+    .iter()
+    .any(|p| n.contains(p))
+}
+
+/// Suspicious = default avatar, young account, username-filter match or Discord's spammer flag.
+pub fn is_suspicious(j: &Joiner, cfg: &GateCfg, min_age_ms: i64, now: i64) -> bool {
+    !j.has_avatar
+        || now - account_created_ms(j.id) < min_age_ms
+        || cfg.name_matches(j.name)
+        || j.spammer
+}
+
+/// Filters that matched, with the action each wants.
+pub fn gate(j: &Joiner, cfg: &GateCfg, now: i64) -> Vec<(Filter, Action)> {
+    if !cfg.enabled {
+        return vec![];
+    }
+    let age = now - account_created_ms(j.id);
+    // The account filters (all but the two bot filters) leave out bots the owner vouched for.
+    let account = !(cfg.exclude_trusted_bots && j.is_bot && j.added_by_owner);
+    let mut enabled = 0;
+    let mut hits = vec![];
+    let mut check = |on: GateFilter, f: Filter, hit: bool| {
+        if let Some(a) = on.get(f.default_action()) {
+            enabled += 1;
+            if hit {
+                hits.push((f, a));
+            }
+        }
+    };
+    check(cfg.no_avatar, Filter::NoAvatar, account && !j.has_avatar);
+    let min = cfg.min_age_ms();
+    check(
+        cfg.account_age,
+        Filter::AccountAge,
+        account && age < min.max(5_000),
+    );
+    check(
+        cfg.unauthorized_bot,
+        Filter::UnauthorizedBot,
+        j.is_bot && !j.added_by_authorized,
+    );
+    check(
+        cfg.unverified_bot,
+        Filter::UnverifiedBot,
+        j.is_bot && !j.bot_verified,
+    );
+    check(
+        cfg.invite_in_name,
+        Filter::InviteInName,
+        account && has_invite(j.name),
+    );
+    check(
+        cfg.suspicious,
+        Filter::Suspicious,
+        account && is_suspicious(j, cfg, min, now),
+    );
+    check(
+        cfg.username_filter,
+        Filter::UsernameFilter,
+        account && cfg.name_matches(j.name),
+    );
+    check(cfg.spammer, Filter::SuspectedSpammer, account && j.spammer);
+    // Age timeouts only last for the remaining period.
+    for h in &mut hits {
+        if let (Filter::AccountAge, Action::Timeout(_)) = *h {
+            h.1 = Action::Timeout(min - age);
+        }
+    }
+    if cfg.require_all && hits.len() < enabled {
+        hits.clear();
+    }
+    hits
+}
+
+pub fn harshest(hits: &[(Filter, Action)]) -> Option<Action> {
+    hits.iter().map(|h| h.1).max()
+}
+
+// ---- Join raid ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StringOp {
+    Exact,
+    Exclude,
+    Include,
+    EndsWith,
+}
+
+/// Parse `=exact`, `!exclude`, `'include`, `$endswith`; a bare string is an include.
+pub fn parse_pattern(p: &str) -> (StringOp, String) {
+    let op = match p.chars().next() {
+        Some('=') => StringOp::Exact,
+        Some('!') => StringOp::Exclude,
+        Some('\'') => StringOp::Include,
+        Some('$') => StringOp::EndsWith,
+        _ => return (StringOp::Include, p.to_lowercase()),
+    };
+    (op, p[1..].to_lowercase())
+}
+
+/// Missing fields take `RaidCfg::default`, so a first save that sets only a few of them works.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RaidCfg {
+    #[serde(default)]
+    pub enabled: bool,
+    pub count: usize,
+    pub span_ms: i64,
+    /// Count only suspicious accounts toward the static trigger.
+    pub suspicious_only: bool,
+    /// How long the raid state stays active once triggered.
+    pub active_ms: i64,
+    pub string_patterns: Vec<String>,
+    pub flag_younger_than_ms: Option<i64>,
+    pub flag_no_avatar: bool,
+    /// Flag accounts Discord marks as likely spammers.
+    pub flag_spammer: bool,
+    /// Minimum accounts in one creation-time bucket to call it a bot farm; None disables.
+    #[serde(default = "default_id_min")]
+    pub id_flag_min: Option<usize>,
+    #[serde(default)]
+    pub id_granularity: IdGranularity,
+    /// Accounts created this close to a bucket count toward its matches ("Margin: 1h").
+    /// Old configs stored a bucket count under `id_margin`; it reads as a few ms, i.e. no margin.
+    #[serde(default, alias = "id_margin")]
+    pub id_margin_ms: i64,
+    /// What happens to flagged raiders.
+    #[serde(default = "default_raid_action", deserialize_with = "no_rename")]
+    pub action: Action,
+    /// Also lock the server (join lock) when a raid is detected.
+    #[serde(default)]
+    pub lock: Option<crate::lockdown::LockKind>,
+    #[serde(default)]
+    pub warned_roles: Vec<String>,
+    /// The Voice Raid card: many members joining voice at once.
+    #[serde(default)]
+    pub voice: crate::voice::VoiceRaidCfg,
+}
+
+/// Bucket size for the ID flag. Adaptive starts at a day and narrows to an hour when one day
+/// holds over half the window.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IdGranularity {
+    #[default]
+    Adaptive,
+    Hour,
+    Day,
+    Month,
+}
+
+fn default_id_min() -> Option<usize> {
+    Some(4)
+}
+
+fn default_raid_action() -> Action {
+    Action::Ban
+}
+
+impl Default for RaidCfg {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            count: 10,
+            span_ms: 3 * 60 * 60_000,
+            suspicious_only: false,
+            active_ms: 30 * 60_000,
+            string_patterns: vec![],
+            flag_younger_than_ms: None,
+            flag_no_avatar: false,
+            flag_spammer: false,
+            id_flag_min: default_id_min(),
+            id_granularity: IdGranularity::Adaptive,
+            id_margin_ms: 60 * 60_000,
+            action: Action::Ban,
+            lock: None,
+            warned_roles: vec![],
+            voice: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct JoinRec {
+    id: u64,
+    at: i64,
+    name: String,
+    has_avatar: bool,
+    suspicious: bool,
+    spammer: bool,
+    invite: Option<String>,
+    /// The Raider List already acted on this joiner: counted, never punished by the raid.
+    listed: bool,
+    /// The join's own roles and bot flag; None once the member changed since (read again).
+    roles: Option<(Vec<u64>, bool)>,
+}
+
+#[derive(Debug, Default)]
+pub struct RaidDetector {
+    joins: Vec<JoinRec>,
+    active_until: i64,
+    /// When the current (or last) raid started; it names the raid in the raid log.
+    pub started: i64,
+    /// Public report code of the current raid, `<10 random>_<last 10 digits of the guild id>`.
+    pub code: String,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct RaidOutcome {
+    /// This join started the raid.
+    pub triggered: bool,
+    /// Accounts to punish now: on trigger every flagged joiner in the window, afterwards just this joiner.
+    pub flagged: Vec<u64>,
+}
+
+impl RaidDetector {
+    /// A raid that was still running at restart; the joins that started it are gone but the
+    /// algorithms keep flagging until `until_ms`.
+    pub fn restored(started_ms: i64, until_ms: i64, code: String) -> Self {
+        Self {
+            started: started_ms,
+            code,
+            active_until: until_ms,
+            ..Self::default()
+        }
+    }
+
+    pub fn active(&self, now: i64) -> bool {
+        now < self.active_until
+    }
+
+    pub fn on_join(
+        &mut self,
+        j: &Joiner,
+        suspicious: bool,
+        cfg: &RaidCfg,
+        now: i64,
+    ) -> RaidOutcome {
+        self.joins.retain(|r| now - r.at <= cfg.span_ms);
+        // Bounds the analysis below (it runs on every join while a raid is active).
+        if self.joins.len() >= MAX_JOINS {
+            self.joins.drain(..self.joins.len() + 1 - MAX_JOINS);
+        }
+        self.joins.push(JoinRec {
+            id: j.id,
+            at: now,
+            name: j.name.lines().next().unwrap_or_default().to_lowercase(),
+            has_avatar: j.has_avatar,
+            suspicious,
+            spammer: j.spammer,
+            invite: j.invite.map(Into::into),
+            listed: false,
+            roles: None,
+        });
+        let counted = self
+            .joins
+            .iter()
+            .filter(|r| r.suspicious || !cfg.suspicious_only)
+            .count();
+        let was_active = self.active(now);
+        if !was_active && counted >= cfg.count {
+            self.active_until = now + cfg.active_ms;
+            self.started = now;
+            return RaidOutcome {
+                triggered: true,
+                flagged: self.flagged(cfg, now),
+            };
+        }
+        if was_active {
+            let me = self.flagged(cfg, now).contains(&j.id);
+            return RaidOutcome {
+                triggered: false,
+                flagged: if me { vec![j.id] } else { vec![] },
+            };
+        }
+        RaidOutcome::default()
+    }
+
+    /// The (cured, lowercased) name of a joiner still in the window.
+    pub fn name_of(&self, id: u64) -> Option<&str> {
+        self.joins
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.name.as_str())
+    }
+
+    /// Notes what was learned about a joiner after detection: the Raider List acted on them
+    /// (`listed`), or the invite they used (looked up after detection).
+    pub fn note(&mut self, id: u64, listed: bool, invite: Option<&str>) {
+        for r in self.joins.iter_mut().filter(|r| r.id == id) {
+            r.listed |= listed;
+            if let Some(i) = invite {
+                r.invite = Some(i.into());
+            }
+        }
+    }
+
+    /// Keeps the join's roles and bot flag, so the raid's trigger reads an earlier joiner's level
+    /// with no member fetch. None forgets them (a member update since the join).
+    pub fn set_roles(&mut self, id: u64, roles: Option<(Vec<u64>, bool)>) {
+        for r in self.joins.iter_mut().filter(|r| r.id == id) {
+            r.roles = roles.clone();
+        }
+    }
+
+    /// The roles and bot flag kept from the join, if still known.
+    pub fn roles_of(&self, id: u64) -> Option<(Vec<u64>, bool)> {
+        self.joins
+            .iter()
+            .find(|r| r.id == id)
+            .and_then(|r| r.roles.clone())
+    }
+
+    /// True when the Raider List already acted on this joiner.
+    pub fn listed(&self, id: u64) -> bool {
+        self.joins.iter().any(|r| r.id == id && r.listed)
+    }
+
+    /// The invite a joiner still in the window used.
+    pub fn invite_of(&self, id: u64) -> Option<&str> {
+        self.joins
+            .iter()
+            .find(|r| r.id == id)
+            .and_then(|r| r.invite.as_deref())
+    }
+
+    /// Accounts in the window that any enabled algorithm flags.
+    fn flagged(&self, cfg: &RaidCfg, now: i64) -> Vec<u64> {
+        let farm = cfg
+            .id_flag_min
+            .map(|min| self.farm_ids(min, cfg.id_granularity, cfg.id_margin_ms));
+        self.joins
+            .iter()
+            .filter(|r| {
+                string_flag(&r.name, &cfg.string_patterns)
+                    || cfg
+                        .flag_younger_than_ms
+                        .is_some_and(|y| now - account_created_ms(r.id) < y)
+                    || (cfg.flag_no_avatar && !r.has_avatar)
+                    || (cfg.flag_spammer && r.spammer)
+                    || farm.as_ref().is_some_and(|f| f.contains(&r.id))
+            })
+            .map(|r| r.id)
+            .collect()
+    }
+
+    /// ID flag: bucket joiners by account creation time; a bucket plus the buckets within `margin_ms`
+    /// on each side holding at least `min` accounts is a bot farm.
+    /// Linear in the window: it runs under the raid lock every server shares, on every join of an
+    /// active raid.
+    fn farm_ids(
+        &self,
+        min: usize,
+        by: IdGranularity,
+        margin_ms: i64,
+    ) -> std::collections::HashSet<u64> {
+        let count_by = |size: i64| {
+            let mut counts: HashMap<i64, usize> = HashMap::new();
+            for r in &self.joins {
+                *counts.entry(account_created_ms(r.id) / size).or_default() += 1;
+            }
+            counts
+        };
+        let mut size = match by {
+            IdGranularity::Hour => HOUR_MS,
+            IdGranularity::Day | IdGranularity::Adaptive => DAY_MS,
+            IdGranularity::Month => 30 * DAY_MS,
+        };
+        let mut counts = count_by(size);
+        if by == IdGranularity::Adaptive && counts.values().any(|n| n * 2 > self.joins.len()) {
+            size = HOUR_MS;
+            counts = count_by(size);
+        }
+        let margin = (margin_ms.max(0) + size - 1) / size;
+        // Judge each bucket once, not once per joiner: sorted buckets and prefix sums give the
+        // count within the margin in O(log K), whatever the margin.
+        let mut keys: Vec<(i64, usize)> = counts.into_iter().collect();
+        keys.sort_unstable();
+        let mut sums = vec![0usize; keys.len() + 1];
+        for (i, (_, n)) in keys.iter().enumerate() {
+            sums[i + 1] = sums[i] + n;
+        }
+        let near = |b: i64| {
+            let lo = keys.partition_point(|(k, _)| *k < b.saturating_sub(margin));
+            let hi = keys.partition_point(|(k, _)| *k <= b.saturating_add(margin));
+            sums[hi] - sums[lo]
+        };
+        let hot: std::collections::HashSet<i64> = keys
+            .iter()
+            .map(|&(b, _)| b)
+            .filter(|&b| near(b) >= min)
+            .collect();
+        self.joins
+            .iter()
+            .filter(|r| hot.contains(&(account_created_ms(r.id) / size)))
+            .map(|r| r.id)
+            .collect()
+    }
+}
+
+/// Most joins the detector keeps in its window.
+const MAX_JOINS: usize = 5000;
+
+/// Include/Exact/EndsWith patterns flag; any matching Exclude pattern vetoes.
+fn string_flag(name: &str, patterns: &[String]) -> bool {
+    let mut flagged = false;
+    for p in patterns {
+        let (op, s) = parse_pattern(p);
+        let hit = match op {
+            StringOp::Exact => name == s,
+            StringOp::Include | StringOp::Exclude => name.contains(&s),
+            StringOp::EndsWith => name.ends_with(&s),
+        };
+        if op == StringOp::Exclude {
+            if hit {
+                return false;
+            }
+        } else {
+            flagged |= hit;
+        }
+    }
+    flagged
+}
+
+// ---- Verification ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VerifyMode {
+    Button,
+    Captcha,
+    SimpleCaptcha,
+    Dm,
+    Web,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VerifyTarget {
+    Everyone,
+    SuspiciousOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FailAction {
+    Nothing,
+    Kick,
+    Ban,
+    Quarantine,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VerifyCfg {
+    pub mode: VerifyMode,
+    pub target: VerifyTarget,
+    /// Pulled inside `VERIFY_TIME_LIMIT_MS` on read: a value saved before the range still works.
+    #[serde(deserialize_with = "time_limit")]
+    pub time_limit_ms: i64,
+    pub on_fail: FailAction,
+    /// Legacy: quarantine every joiner until they verify.
+    pub quarantine_on_join: bool,
+    /// On a pass the member's roles are replaced by the verification roles instead of added to.
+    pub replace_roles: bool,
+    /// Helpful notes next to the captcha.
+    pub show_notes: bool,
+    /// Send a new captcha image every this many ms while a member is solving one (`v 12`); None is off.
+    pub regen_ms: Option<i64>,
+    pub captcha: CaptchaCfg,
+    /// Kick, ban and quarantine at the time limit write a reason into the audit log (`v 14`).
+    pub audit_reason: bool,
+    /// Web mode refuses Tor, VPN and proxy addresses (`v 15`). The dashboard does the check.
+    pub block_vpn: bool,
+    /// With `block_vpn`, hosting/datacenter networks are refused too (`v 16`).
+    pub block_hosting: bool,
+}
+
+/// Web verification only works with action Nothing and at least one verified/main role (roles fall back to
+/// the lockdown main roles). A missing action is the default, Kick. Takes the whole guild config; Some is
+/// the refusal text.
+pub fn web_mode_error(cfg: &serde_json::Value) -> Option<&'static str> {
+    let v = &cfg["verification"];
+    if v["enabled"] != true || v["mode"] != "Web" {
+        return None;
+    }
+    if v["on_fail"].as_str() != Some("Nothing") {
+        return Some("Web verification requires the Action to be set to Nothing.");
+    }
+    let has = |x: &serde_json::Value| x.as_array().is_some_and(|a| !a.is_empty());
+    (!has(&v["roles"]) && !has(&cfg["lockdown"]["main_roles"]))
+        .then_some("Web verification requires at least one verified or main role.")
+}
+
+/// The image captcha's look.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaptchaCfg {
+    pub width: u32,
+    pub height: u32,
+    /// Pixels; 40 is the image library's own size, others scale the text.
+    pub font_size: u32,
+    /// `#rrggbb`.
+    pub font_color: String,
+    pub length: u32,
+    /// A line in the font colour traced through the characters, left to right.
+    pub trace: bool,
+    /// A decoy character behind each answer character.
+    pub mixed: bool,
+    /// Small decoy characters spread around to trick scripts.
+    pub spread: bool,
+    /// `#rrggbb` of the noise and dots.
+    pub decoy_color: String,
+    /// Which characters the answer uses.
+    pub charset: Charset,
+}
+
+/// Captcha answer characters, stored as the names the dashboard shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Charset {
+    #[default]
+    #[serde(rename = "AZ")]
+    Upper,
+    #[serde(rename = "az")]
+    Lower,
+    #[serde(rename = "az09")]
+    LowerDigits,
+    #[serde(rename = "azAZ09")]
+    Mixed,
+    #[serde(rename = "az09!$#.:;")]
+    LowerDigitsSymbols,
+}
+
+impl Charset {
+    pub const NAMES: [&str; 5] = ["AZ", "az", "az09", "azAZ09", "az09!$#.:;"];
+
+    pub fn allows(self, c: char) -> bool {
+        match self {
+            Self::Upper => c.is_ascii_uppercase(),
+            Self::Lower => c.is_ascii_lowercase(),
+            Self::LowerDigits => c.is_ascii_lowercase() || c.is_ascii_digit(),
+            Self::Mixed => c.is_ascii_alphanumeric(),
+            Self::LowerDigitsSymbols => {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || "!$#.:;".contains(c)
+            }
+        }
+    }
+}
+
+impl Default for CaptchaCfg {
+    fn default() -> Self {
+        Self {
+            width: 300,
+            height: 100,
+            font_size: 40,
+            font_color: "#32cf7e".into(),
+            length: 6,
+            trace: true,
+            mixed: true,
+            spread: true,
+            decoy_color: "#646566".into(),
+            charset: Charset::Upper,
+        }
+    }
+}
+
+impl Default for VerifyCfg {
+    fn default() -> Self {
+        Self {
+            mode: VerifyMode::Captcha,
+            target: VerifyTarget::Everyone,
+            time_limit_ms: 120_000,
+            on_fail: FailAction::Kick,
+            quarantine_on_join: false,
+            replace_roles: false,
+            show_notes: true,
+            regen_ms: None,
+            captcha: CaptchaCfg::default(),
+            audit_reason: true,
+            block_vpn: false,
+            block_hosting: true,
+        }
+    }
+}
+
+/// Button mode is upgraded to captcha while a raid is active.
+pub fn effective_mode(cfg: &VerifyCfg, raid_active: bool) -> VerifyMode {
+    if raid_active && cfg.mode == VerifyMode::Button {
+        VerifyMode::Captcha
+    } else {
+        cfg.mode
+    }
+}
+
+/// Members who already hold a main role count as verified.
+pub fn must_verify(cfg: &VerifyCfg, suspicious: bool, has_main_role: bool) -> bool {
+    !has_main_role && (cfg.target == VerifyTarget::Everyone || suspicious)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: i64 = 1_800_000_000_000;
+
+    /// Snowflake for an account created `age_ms` before NOW (+ `salt` as worker bits).
+    fn id_aged(age_ms: i64, salt: u64) -> u64 {
+        (((NOW - age_ms - DISCORD_EPOCH_MS) as u64) << 22) | salt
+    }
+
+    fn joiner(id: u64, name: &str, has_avatar: bool) -> Joiner<'_> {
+        Joiner {
+            id,
+            name,
+            has_avatar,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn account_age_from_snowflake() {
+        assert_eq!(account_created_ms(id_aged(5 * DAY_MS, 7)), NOW - 5 * DAY_MS);
+    }
+
+    #[test]
+    fn wildcard_terms() {
+        assert!(term_matches("free*nitro", "FREE gift NITRO"));
+        assert!(term_matches("spam", "xxSPAMxx"));
+        assert!(!term_matches("a*b*c", "acb"));
+        assert!(!term_matches("ab*ba", "aba"));
+    }
+
+    #[test]
+    fn gate_picks_harshest_and_age_timeout_is_remaining() {
+        let cfg = GateCfg {
+            enabled: true,
+            no_avatar: GateFilter::on(Action::Log),
+            account_age: GateFilter::on(Action::Timeout(0)),
+            min_age_days: 1,
+            username_filter: GateFilter::on(Action::Ban),
+            username_terms: vec!["nitro*".into()],
+            ..Default::default()
+        };
+        let j = joiner(id_aged(DAY_MS / 2, 0), "clean", true);
+        let hits = gate(&j, &cfg, NOW);
+        assert_eq!(
+            hits,
+            vec![(Filter::AccountAge, Action::Timeout(DAY_MS / 2))]
+        );
+        let j = joiner(id_aged(DAY_MS / 2, 0), "nitro giveaway", false);
+        assert_eq!(harshest(&gate(&j, &cfg, NOW)), Some(Action::Ban));
+    }
+
+    #[test]
+    fn a_stored_time_limit_outside_its_range_is_pulled_in() {
+        let limit = |v: i64| {
+            serde_json::from_value::<VerifyCfg>(serde_json::json!({ "time_limit_ms": v }))
+                .unwrap()
+                .time_limit_ms
+        };
+        assert_eq!(limit(0), VERIFY_TIME_LIMIT_MS.0);
+        assert_eq!(limit(-5), VERIFY_TIME_LIMIT_MS.0);
+        assert_eq!(limit(i64::MAX), VERIFY_TIME_LIMIT_MS.1);
+        assert_eq!(limit(120_000), 120_000);
+    }
+
+    #[test]
+    fn rename_is_mild_and_only_for_the_username_filter() {
+        let hits = [
+            (Filter::UsernameFilter, Action::Rename),
+            (Filter::NoAvatar, Action::Kick),
+        ];
+        assert_eq!(harshest(&hits), Some(Action::Kick));
+        assert!(Action::Log < Action::Rename && Action::Rename < Action::Warn);
+        let json = serde_json::to_string(&Action::Rename).unwrap();
+        assert_eq!(json, r#""Rename""#);
+        assert_eq!(
+            serde_json::from_str::<Action>(&json).unwrap(),
+            Action::Rename
+        );
+        let ok: GateCfg = serde_json::from_value(
+            serde_json::json!({"username_filter": {"enabled": true, "action": "Rename"}}),
+        )
+        .unwrap();
+        assert_eq!(ok.username_filter.action, Some(Action::Rename));
+        for f in [
+            "no_avatar",
+            "account_age",
+            "unauthorized_bot",
+            "unverified_bot",
+            "invite_in_name",
+            "suspicious",
+            "spammer",
+        ] {
+            let v = serde_json::json!({ f: {"enabled": true, "action": "Rename"} });
+            assert!(serde_json::from_value::<GateCfg>(v).is_err(), "{f}");
+            let v = serde_json::json!({ f: {"enabled": true, "action": "Kick"} });
+            assert!(serde_json::from_value::<GateCfg>(v).is_ok(), "{f}");
+        }
+        assert!(
+            serde_json::from_value::<RaidCfg>(serde_json::json!({"action": "Rename"})).is_err()
+        );
+        assert_eq!(
+            serde_json::from_value::<RaidCfg>(serde_json::json!({}))
+                .unwrap()
+                .action,
+            Action::Ban
+        );
+    }
+
+    #[test]
+    fn actions_from_the_dashboard_select_and_strict_names() {
+        let a: Vec<Action> =
+            serde_json::from_str(r#"["Warn", "Timeout", {"Timeout": 5}, "Ban"]"#).unwrap();
+        assert_eq!(
+            a,
+            [
+                Action::Warn,
+                Action::Timeout(0),
+                Action::Timeout(5),
+                Action::Ban
+            ]
+        );
+        // Written back the way it was read.
+        assert_eq!(
+            serde_json::to_string(&a).unwrap(),
+            r#"["Warn","Timeout",{"Timeout":5},"Ban"]"#
+        );
+        let cfg = GateCfg {
+            enabled: true,
+            username_filter: GateFilter::on(Action::Kick),
+            username_strict: vec!["Admin".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            gate(&joiner(id_aged(9 * DAY_MS, 0), "admin", true), &cfg, NOW).len(),
+            1
+        );
+        assert!(gate(&joiner(id_aged(9 * DAY_MS, 0), "admins", true), &cfg, NOW).is_empty());
+        // The display name on the second line counts too.
+        let both = joiner(id_aged(9 * DAY_MS, 0), "abc123\nadmin", true);
+        assert_eq!(gate(&both, &cfg, NOW).len(), 1);
+    }
+
+    #[test]
+    fn disabled_gate_matches_nothing() {
+        let cfg = GateCfg {
+            enabled: false,
+            no_avatar: GateFilter::on(Action::Ban),
+            ..Default::default()
+        };
+        assert!(gate(&joiner(id_aged(1000, 0), "a", false), &cfg, NOW).is_empty());
+        assert!(
+            !serde_json::from_str::<GateCfg>("{\"username_terms\":[],\"require_all\":false}")
+                .unwrap()
+                .enabled
+        );
+    }
+
+    #[test]
+    fn gate_cards_have_a_switch_and_default_actions() {
+        let cfg: GateCfg = serde_json::from_value(serde_json::json!({
+            "no_avatar": "Ban",
+            "account_age": null,
+            "username_filter": {"enabled": true},
+            "invite_in_name": {"enabled": false, "action": "Kick"},
+        }))
+        .unwrap();
+        assert_eq!(cfg.no_avatar.get(Action::Kick), Some(Action::Ban));
+        assert_eq!(cfg.account_age.get(Action::Kick), None);
+        assert_eq!(
+            cfg.username_filter
+                .get(Filter::UsernameFilter.default_action()),
+            Some(Action::Ban)
+        );
+        assert_eq!(cfg.invite_in_name.get(Action::Timeout(0)), None);
+    }
+
+    #[test]
+    fn require_all_needs_every_filter() {
+        let mut cfg = GateCfg {
+            enabled: true,
+            no_avatar: GateFilter::on(Action::Kick),
+            account_age: GateFilter::on(Action::Kick),
+            min_age_days: 1,
+            require_all: true,
+            ..Default::default()
+        };
+        assert!(gate(&joiner(id_aged(10 * DAY_MS, 0), "a", false), &cfg, NOW).is_empty());
+        assert_eq!(
+            gate(&joiner(id_aged(1000, 0), "a", false), &cfg, NOW).len(),
+            2
+        );
+        cfg.require_all = false;
+        assert_eq!(
+            gate(&joiner(id_aged(10 * DAY_MS, 0), "a", false), &cfg, NOW).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn spammer_flag_card() {
+        let mut cfg = GateCfg {
+            enabled: true,
+            ..Default::default()
+        };
+        let flagged = Joiner {
+            spammer: true,
+            ..joiner(id_aged(10 * DAY_MS, 0), "a", true)
+        };
+        let names =
+            |j: &Joiner, c: &GateCfg| gate(j, c, NOW).iter().map(|h| h.0).collect::<Vec<_>>();
+        // Card off: no hit.
+        assert!(names(&flagged, &cfg).is_empty());
+        cfg.spammer = GateFilter {
+            enabled: true,
+            action: None,
+        };
+        assert_eq!(
+            gate(&flagged, &cfg, NOW),
+            [(Filter::SuspectedSpammer, Action::Kick)]
+        );
+        assert!(names(&joiner(id_aged(10 * DAY_MS, 0), "a", true), &cfg).is_empty());
+        // Counts as suspicious.
+        cfg.suspicious = GateFilter::on(Action::Ban);
+        assert_eq!(
+            names(&flagged, &cfg),
+            [Filter::Suspicious, Filter::SuspectedSpammer]
+        );
+        // Trusted-bot exception.
+        cfg.exclude_trusted_bots = true;
+        let bot = Joiner {
+            is_bot: true,
+            added_by_owner: true,
+            ..flagged.clone()
+        };
+        assert!(names(&bot, &cfg).is_empty());
+        // require_all with spammer as one of two enabled cards.
+        let cfg = GateCfg {
+            enabled: true,
+            require_all: true,
+            no_avatar: GateFilter::on(Action::Kick),
+            spammer: GateFilter::on(Action::Ban),
+            ..Default::default()
+        };
+        assert!(gate(&flagged, &cfg, NOW).is_empty());
+        let both = Joiner {
+            has_avatar: false,
+            ..flagged.clone()
+        };
+        assert_eq!(harshest(&gate(&both, &cfg, NOW)), Some(Action::Ban));
+    }
+
+    #[test]
+    fn old_configs_load_with_the_spammer_switches_off() {
+        let g: GateCfg = serde_json::from_str(r#"{"enabled":true,"no_avatar":"Kick"}"#).unwrap();
+        assert_eq!(g.spammer, GateFilter::default());
+        let r: RaidCfg = serde_json::from_str(r#"{"enabled":true,"count":3}"#).unwrap();
+        assert!(!r.flag_spammer);
+    }
+
+    #[test]
+    fn bots_and_invite_names() {
+        let cfg = GateCfg {
+            enabled: true,
+            unauthorized_bot: GateFilter::on(Action::Kick),
+            invite_in_name: GateFilter::on(Action::Ban),
+            ..Default::default()
+        };
+        let bot = Joiner {
+            id: id_aged(DAY_MS, 0),
+            name: "bot",
+            is_bot: true,
+            has_avatar: true,
+            ..Default::default()
+        };
+        assert_eq!(harshest(&gate(&bot, &cfg, NOW)), Some(Action::Kick));
+        let j = joiner(id_aged(DAY_MS, 0), "join discord.gg/abc", true);
+        assert_eq!(harshest(&gate(&j, &cfg, NOW)), Some(Action::Ban));
+    }
+
+    #[test]
+    fn owner_bots_skip_account_filters_only_when_asked() {
+        let mut cfg = GateCfg {
+            enabled: true,
+            no_avatar: GateFilter::on(Action::Kick),
+            suspicious: GateFilter::on(Action::Kick),
+            ..Default::default()
+        };
+        let bot = Joiner {
+            id: id_aged(10 * DAY_MS, 0),
+            name: "helper",
+            is_bot: true,
+            added_by_authorized: true,
+            added_by_owner: true,
+            ..Default::default()
+        };
+        let names =
+            |j: &Joiner, c: &GateCfg| gate(j, c, NOW).iter().map(|h| h.0).collect::<Vec<_>>();
+        // Off (the default): every bot meets the account filters.
+        assert_eq!(names(&bot, &cfg), [Filter::NoAvatar, Filter::Suspicious]);
+        cfg.exclude_trusted_bots = true;
+        assert!(names(&bot, &cfg).is_empty());
+        // The bot filters still apply.
+        cfg.unverified_bot = GateFilter::on(Action::Kick);
+        assert_eq!(names(&bot, &cfg), [Filter::UnverifiedBot]);
+        // Not vouched for (a Trusted Admin, an admin or no audit entry): caught.
+        let other = Joiner {
+            added_by_owner: false,
+            ..bot.clone()
+        };
+        assert_eq!(
+            names(&other, &cfg),
+            [Filter::NoAvatar, Filter::UnverifiedBot, Filter::Suspicious]
+        );
+        // Humans never skip.
+        let human = Joiner {
+            is_bot: false,
+            ..bot
+        };
+        assert_eq!(names(&human, &cfg), [Filter::NoAvatar, Filter::Suspicious]);
+    }
+
+    #[test]
+    fn pattern_operators() {
+        let pats: Vec<String> = ["=bob", "$_bot", "'raid", "!safe"]
+            .map(String::from)
+            .to_vec();
+        assert!(string_flag("bob", &pats));
+        assert!(!string_flag("bobby", &pats));
+        assert!(string_flag("user_bot", &pats));
+        assert!(string_flag("xraidx", &pats));
+        assert!(!string_flag("safe raid", &pats));
+    }
+
+    #[test]
+    fn id_flag_defaults_to_four_even_for_old_configs() {
+        assert_eq!(RaidCfg::default().id_flag_min, Some(4));
+        let old: RaidCfg = serde_json::from_str(r#"{"count":3,"span_ms":1,"suspicious_only":false,"active_ms":1,"string_patterns":[],"flag_younger_than_ms":null,"flag_no_avatar":false}"#).unwrap();
+        assert_eq!(old.id_flag_min, Some(4));
+    }
+
+    fn raid_cfg() -> RaidCfg {
+        RaidCfg {
+            count: 3,
+            span_ms: 60_000,
+            active_ms: 600_000,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn static_trigger_flags_whole_window() {
+        // Ids 1-4 are all made at the Discord epoch: the ID rule is off so only the avatar flag counts.
+        let cfg = RaidCfg {
+            flag_no_avatar: true,
+            id_flag_min: None,
+            ..raid_cfg()
+        };
+        let mut d = RaidDetector::default();
+        assert_eq!(
+            d.on_join(&joiner(1, "a", false), false, &cfg, NOW),
+            RaidOutcome::default()
+        );
+        d.on_join(&joiner(2, "b", true), false, &cfg, NOW + 1000);
+        let out = d.on_join(&joiner(3, "c", false), false, &cfg, NOW + 2000);
+        assert!(out.triggered);
+        assert_eq!(out.flagged, vec![1, 3]);
+        assert!(d.active(NOW + 3000));
+        // while active only the new joiner is judged
+        let out = d.on_join(&joiner(4, "d", false), false, &cfg, NOW + 4000);
+        assert_eq!((out.triggered, out.flagged), (false, vec![4]));
+        assert!(!d.active(NOW + 700_000));
+    }
+
+    #[test]
+    fn notes_mark_listed_joiners_and_late_invites() {
+        let cfg = RaidCfg {
+            flag_no_avatar: true,
+            ..raid_cfg()
+        };
+        let mut d = RaidDetector::default();
+        d.on_join(&joiner(1, "a", false), false, &cfg, NOW);
+        d.note(1, true, None);
+        d.note(1, false, Some("abc"));
+        assert!(d.listed(1) && !d.listed(2));
+        assert_eq!(d.invite_of(1), Some("abc"));
+        // A listed joiner still counts towards the trigger.
+        d.on_join(&joiner(2, "b", false), false, &cfg, NOW + 1);
+        let out = d.on_join(&joiner(3, "c", false), false, &cfg, NOW + 2);
+        assert!(out.triggered);
+        assert_eq!(out.flagged, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn restored_raid_keeps_flagging_new_joiners() {
+        let cfg = RaidCfg {
+            flag_no_avatar: true,
+            ..raid_cfg()
+        };
+        let mut d = RaidDetector::restored(NOW - 1000, NOW + 5000, String::new());
+        let out = d.on_join(&joiner(9, "z", false), false, &cfg, NOW);
+        assert_eq!((out.triggered, out.flagged), (false, vec![9]));
+        assert!(!d.active(NOW + 5000));
+    }
+
+    #[test]
+    fn flag_spammer_flags_only_flagged_joiners() {
+        let mut cfg = RaidCfg {
+            flag_spammer: true,
+            id_flag_min: None,
+            ..raid_cfg()
+        };
+        let spam = |id| Joiner {
+            spammer: true,
+            ..joiner(id, "a", true)
+        };
+        let mut d = RaidDetector::default();
+        d.on_join(&spam(1), false, &cfg, NOW);
+        d.on_join(&joiner(2, "b", true), false, &cfg, NOW + 1);
+        let out = d.on_join(&spam(3), false, &cfg, NOW + 2);
+        assert!(out.triggered);
+        assert_eq!(out.flagged, vec![1, 3]);
+        cfg.flag_spammer = false;
+        let mut d = RaidDetector::default();
+        d.on_join(&spam(1), false, &cfg, NOW);
+        d.on_join(&spam(2), false, &cfg, NOW + 1);
+        let out = d.on_join(&spam(3), false, &cfg, NOW + 2);
+        assert!(out.triggered && out.flagged.is_empty());
+    }
+
+    #[test]
+    fn suspicious_only_counting() {
+        let cfg = RaidCfg {
+            suspicious_only: true,
+            ..raid_cfg()
+        };
+        let mut d = RaidDetector::default();
+        for i in 0..5 {
+            assert!(
+                !d.on_join(&joiner(i, "a", true), false, &cfg, NOW + i as i64)
+                    .triggered
+            );
+        }
+        d.on_join(&joiner(10, "a", true), true, &cfg, NOW + 10);
+        d.on_join(&joiner(11, "a", true), true, &cfg, NOW + 11);
+        assert!(
+            d.on_join(&joiner(12, "a", true), true, &cfg, NOW + 12)
+                .triggered
+        );
+    }
+
+    #[test]
+    fn id_flag_catches_bot_farm_and_leaves_an_unrelated_joiner() {
+        // Four joins trigger, so the unrelated account (first) is in the window when it does.
+        let cfg = RaidCfg {
+            id_flag_min: Some(3),
+            count: 4,
+            ..raid_cfg()
+        };
+        let mut d = RaidDetector::default();
+        // three accounts made within an hour on one old day, one unrelated account
+        let farm = [
+            id_aged(50 * DAY_MS, 1),
+            id_aged(50 * DAY_MS - 60_000, 2),
+            id_aged(50 * DAY_MS - 120_000, 3),
+        ];
+        let other = id_aged(200 * DAY_MS, 4);
+        for (i, id) in [&other].into_iter().chain(farm.iter()).enumerate() {
+            let out = d.on_join(&joiner(*id, "x", true), false, &cfg, NOW + i as i64);
+            if out.triggered {
+                let mut f = out.flagged.clone();
+                f.sort();
+                let mut want = farm.to_vec();
+                want.sort();
+                assert_eq!(f, want);
+                return;
+            }
+        }
+        panic!("raid never triggered");
+    }
+
+    #[test]
+    fn id_flag_granularity_and_margin() {
+        let ids = [id_aged(50 * DAY_MS, 1), id_aged(49 * DAY_MS, 2)];
+        let mut d = RaidDetector::default();
+        for (i, id) in ids.iter().enumerate() {
+            d.on_join(&joiner(*id, "x", true), false, &raid_cfg(), NOW + i as i64);
+        }
+        assert!(d.farm_ids(2, IdGranularity::Day, 0).is_empty());
+        assert_eq!(d.farm_ids(2, IdGranularity::Day, DAY_MS).len(), 2);
+        assert!(d.farm_ids(2, IdGranularity::Hour, 0).is_empty());
+        assert_eq!(d.name_of(ids[0]), Some("x"));
+    }
+
+    #[test]
+    fn id_flag_margin_counts_only_near_buckets() {
+        // Two neighbours on days 50 and 49, and spread accounts: only the buckets within the
+        // margin count, whatever its size.
+        let days = [50, 49, 100, 200, 300, 400];
+        let mut d = RaidDetector::default();
+        for (i, day) in days.iter().enumerate() {
+            let id = id_aged(day * DAY_MS, i as u64 + 1);
+            d.on_join(&joiner(id, "x", true), false, &raid_cfg(), NOW + i as i64);
+        }
+        let farm = d.farm_ids(2, IdGranularity::Day, DAY_MS);
+        let want: std::collections::HashSet<u64> =
+            [id_aged(50 * DAY_MS, 1), id_aged(49 * DAY_MS, 2)].into();
+        assert_eq!(farm, want);
+        // A margin of years takes every account in, and stays linear.
+        assert_eq!(d.farm_ids(2, IdGranularity::Hour, 3650 * DAY_MS).len(), 6);
+        assert!(d.farm_ids(7, IdGranularity::Hour, 3650 * DAY_MS).is_empty());
+    }
+
+    #[test]
+    fn raid_action_defaults_to_ban() {
+        let mut v = serde_json::to_value(RaidCfg::default()).unwrap();
+        v.as_object_mut().unwrap().remove("action");
+        assert_eq!(
+            serde_json::from_value::<RaidCfg>(v.clone()).unwrap().action,
+            Action::Ban
+        );
+        v["action"] = serde_json::json!("Kick");
+        assert_eq!(
+            serde_json::from_value::<RaidCfg>(v).unwrap().action,
+            Action::Kick
+        );
+    }
+
+    #[test]
+    fn verification_helpers() {
+        let mut cfg = VerifyCfg {
+            mode: VerifyMode::Button,
+            ..Default::default()
+        };
+        assert_eq!(effective_mode(&cfg, true), VerifyMode::Captcha);
+        assert_eq!(effective_mode(&cfg, false), VerifyMode::Button);
+        cfg.mode = VerifyMode::Web;
+        assert_eq!(effective_mode(&cfg, true), VerifyMode::Web);
+        assert!(!must_verify(&cfg, true, true));
+        cfg.target = VerifyTarget::SuspiciousOnly;
+        assert!(!must_verify(&cfg, false, false));
+        assert!(must_verify(&cfg, true, false));
+    }
+}
+
+#[cfg(test)]
+mod web_tests {
+    use super::web_mode_error;
+    use serde_json::json;
+
+    #[test]
+    fn web_mode_needs_action_nothing_and_a_role() {
+        let c = |fail, roles, main| {
+            json!({"verification": {"enabled": true, "mode": "Web", "on_fail": fail, "roles": roles},
+                   "lockdown": {"main_roles": main}})
+        };
+        assert!(web_mode_error(&c("Nothing", json!(["1"]), json!([]))).is_none());
+        assert!(web_mode_error(&c("Nothing", json!([]), json!(["2"]))).is_none());
+        assert!(web_mode_error(&c("Kick", json!(["1"]), json!([]))).is_some());
+        assert!(web_mode_error(&c("Nothing", json!([]), json!([]))).is_some());
+        assert!(web_mode_error(&json!({"verification": {"mode": "Captcha"}})).is_none());
+        // No action saved means the default, Kick.
+        let web = json!({"verification": {"enabled": true, "mode": "Web", "roles": ["1"]}});
+        assert!(web_mode_error(&web).is_some());
+    }
+}

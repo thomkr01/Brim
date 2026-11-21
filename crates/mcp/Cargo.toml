@@ -1,0 +1,24 @@
+[package]
+name = "brim-mcp"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+brim-core.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+axum = "0.8"
+regex = "1"
+serde.workspace = true
+base64 = "0.23"
+hmac = "0.13"
+sha2 = "0.11"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

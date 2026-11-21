@@ -1,0 +1,144 @@
+name: Images
+# The dashboard's Update page reads the published commit from this title: a workflow_run run's own
+# head_sha is main's tip when it was queued, not the commit CI checked.
+run-name: Images for ${{ github.event.workflow_run.head_sha }}
+
+# Runs after CI finished on main, and publishes only when every check passed on a push: a commit
+# that fails clippy or tests never becomes :latest.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+# CI runs can finish out of order, so the commit CI checked last is not always the newest.
+# - gate: a commit that is no longer main's tip is not built at all.
+# - push: each image builds only its :<sha> tag; a newer commit's build cancels an older one still
+#   running (one group per image, since one group for the matrix would make its legs cancel each other).
+# - latest: moves all four :latest tags together at the end, one run at a time and never cancelled
+#   halfway, so bot, dashboard, mcp and updater never point at different commits.
+# A run that does not publish cancels itself (a skipped job would count as success): the dashboard
+# takes the newest successful run as the newest published version.
+jobs:
+  # No job-level `if`: a run whose jobs are all skipped can count as successful, and a fork's pull
+  # request from a branch named main also starts this workflow; the dashboard would list its commit.
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Still main's tip
+        env: &tip_env
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.run_id }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          FROM: ${{ github.event.workflow_run.head_repository.full_name }}
+        run: &tip_check |
+          if [ "$CONCLUSION" != success ] || [ "$EVENT" != push ] || [ "$FROM" != "$GH_REPO" ]; then
+            echo "CI run: $CONCLUSION, $EVENT from $FROM. Only a passed push to this repository's main is published."
+            gh run cancel "$RUN"
+            sleep 300
+            exit 1
+          fi
+          tip=$(git ls-remote "https://github.com/$GH_REPO" refs/heads/main | cut -f1)
+          [ -n "$tip" ] || { echo "Could not read main's tip."; exit 1; }
+          [ "$tip" = "$SHA" ] && exit 0
+          echo "main is at $tip now, so $SHA is not published; the newer commit's run publishes."
+          gh run cancel "$RUN"
+          sleep 300
+          exit 1
+
+  push:
+    needs: gate
+    # The VPS is arm64; native arm64 runners are free for public repos.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      packages: write
+      id-token: write
+      attestations: write
+    concurrency:
+      group: images-${{ matrix.target }}
+      cancel-in-progress: true
+    strategy:
+      matrix:
+        target: [bot, dashboard, mcp, updater]
+    steps:
+      # The commit CI checked, not the default branch's newest commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Short sha
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "SHORT=${SHA::7}" >> "$GITHUB_ENV"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        id: build
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          push: true
+          build-args: GIT_SHA=${{ github.event.workflow_run.head_sha }}
+          tags: ghcr.io/thomkr01/brim-${{ matrix.target }}:${{ env.SHORT }}
+          # One plain manifest per build. The default (an index plus an untagged attestation manifest)
+          # made 3 package versions per build, and the cleanup below deleted the image manifests of
+          # tags it kept, so those tags could not be pulled. The signed provenance is the next step.
+          provenance: false
+          # The gha cache of a workflow_run job is main's scope: pull requests and other branches cannot
+          # write it, only workflows running reviewed code on main.
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,scope=${{ matrix.target }},mode=max
+      # Signed (Sigstore) build provenance, kept by GitHub, not in the package:
+      # `gh attestation verify oci://ghcr.io/thomkr01/brim-bot:<sha> -R thomkr01/Brim`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/thomkr01/brim-${{ matrix.target }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+      # Keeps the newest 10 versions (one per build) so old images do not pile up. Cleanup only: a
+      # failed delete (a version GHCR already removed with its index) must not stop the build.
+      - continue-on-error: true
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5
+        with:
+          package-name: brim-${{ matrix.target }}
+          package-type: container
+          min-versions-to-keep: 10
+
+  latest:
+    needs: push
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      actions: write
+    concurrency:
+      group: images-latest
+      cancel-in-progress: false
+    steps:
+      # A newer commit can have merged while this one built.
+      - name: Still main's tip
+        env: *tip_env
+        run: *tip_check
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # --prefer-index=false copies the sha tag's manifest as it is, so :latest has the same digest.
+      - name: Move all four latest tags
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          for t in bot dashboard mcp updater; do
+            docker buildx imagetools create --prefer-index=false -t "ghcr.io/thomkr01/brim-$t:latest" "ghcr.io/thomkr01/brim-$t:${SHA::7}"
+          done

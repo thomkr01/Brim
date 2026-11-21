@@ -1,0 +1,529 @@
+use crate::common::*;
+use crate::form::{Field, Section};
+use leptos::{prelude::*, task::spawn_local};
+use serde_json::{json, Value};
+use wasm_bindgen::JsCast;
+
+fn s(v: &Value) -> String {
+    v.as_str().unwrap_or("").to_string()
+}
+
+fn later(ms: i32, f: impl Fn() + 'static) {
+    let cb = wasm_bindgen::closure::Closure::<dyn Fn()>::new(f);
+    if let Some(w) = web_sys::window() {
+        let _ = w
+            .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), ms);
+    }
+    cb.forget();
+}
+
+type Covers = fn(&Value) -> bool;
+const LOCKS: [(&str, &str, &str, Covers); 4] = [
+    (
+        "Server Channels",
+        "Members can no longer send messages in any channel.",
+        "server",
+        |l| l["channels"] == true,
+    ),
+    (
+        "Server Roles",
+        "Every role below the bot loses its dangerous permissions.",
+        "role",
+        |l| l["roles"] == true,
+    ),
+    (
+        "Kick New Members",
+        "New members are kicked on join and invites are paused.",
+        "kick",
+        |l| l["join"] == "Kick",
+    ),
+    (
+        "Ban New Members",
+        "New members are banned on join.",
+        "ban",
+        |l| l["join"] == "Ban",
+    ),
+];
+
+#[component]
+pub fn LockdownManage(guild: String) -> impl IntoView {
+    let status = RwSignal::new(json!({}));
+    let msg = Msg::default();
+    let (secs, single) = (RwSignal::new(0i64), RwSignal::new(false));
+    let channel = RwSignal::new(String::new());
+    let chans = RwSignal::new(Vec::<Value>::new());
+    let g = StoredValue::new(guild);
+    let load = move || {
+        if g.is_disposed() {
+            return;
+        }
+        spawn_local(async move {
+            match api(
+                "GET",
+                &format!("/api/guilds/{}/lockdown", g.get_value()),
+                None,
+            )
+            .await
+            {
+                Ok(v) => status.set(v),
+                Err(e) => msg.err(e),
+            }
+        })
+    };
+    load();
+    spawn_local(async move {
+        if let Ok(v) = api(
+            "GET",
+            &format!("/api/guilds/{}/lockdown/channels", g.get_value()),
+            None,
+        )
+        .await
+        {
+            chans.set(v.as_array().cloned().unwrap_or_default());
+        }
+    });
+    let (hide, note, update) = (
+        RwSignal::new(false),
+        RwSignal::new(false),
+        RwSignal::new(String::new()),
+    );
+    let act = move |path: &'static str, body: Value| {
+        spawn_local(async move {
+            match api(
+                "POST",
+                &format!("/api/guilds/{}/lockdown/{path}", g.get_value()),
+                Some(body),
+            )
+            .await
+            {
+                Ok(_) => {
+                    msg.ok("Sent. It takes effect within a few seconds.");
+                    // A sent update's text goes; a refused one stays to fix and send again.
+                    if path == "update" {
+                        update.try_set(String::new());
+                        note.try_set(false);
+                    }
+                    later(6000, load);
+                }
+                Err(e) => msg.err(e),
+            }
+        })
+    };
+    let lock = move |kind: &'static str, channel: Option<String>| {
+        act(
+            "lock",
+            json!({"kind": kind, "channel": channel, "duration_s": (secs.get_untracked() > 0).then(|| secs.get_untracked())}),
+        )
+    };
+    // Every active lock; kinds are independent, but only one of them may be a join lock.
+    let locks = move || {
+        status.get()["locks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    };
+    let join_locked = move || locks().iter().any(|l| !l["join"].is_null());
+    view! {
+        <div class="stack narrow">
+        <div class="card row">
+            <label>"Lock length"</label>
+            <select aria-label="lock length" on:change=move |e| secs.set(event_target_value(&e).parse().unwrap_or(0))>
+                <option value="0">"Until I unlock"</option><option value="900">"15 minutes"</option><option value="3600">"1 hour"</option>
+                <option value="21600">"6 hours"</option><option value="86400">"24 hours"</option>
+            </select>
+            <button class="ghost" on:click=move |_| load()>"Refresh"</button>
+        </div>
+        {LOCKS.iter().map(|(title, what, kind, covers)| {
+            let is_on = move || locks().iter().any(covers);
+            let join = matches!(*kind, "kick" | "ban");
+            let hidden = move || locks().iter().any(|l| l["hidden"] == true);
+            let paused = move || *kind == "kick" && locks().iter().any(|l| l["invites_paused"] == true);
+            view! { <div class="card row lockrow">
+                <h3 title=*what>{*title}</h3><span class="sp"></span>
+                <Show when=move || *kind == "server" && hidden()><span class="chip">"CHANNELS HIDDEN"</span></Show>
+                <Show when=paused><span class="chip">"PAUSE INVITES + DMS"</span></Show>
+                <Show when=move || join && !is_on()><span class="chip">"ONLY 1 JOIN LOCK ALLOWED"</span></Show>
+                <Show when=move || *kind == "server" && !is_on()><button class="ghost" title="Individual Channels" on:click=move |_| single.update(|x| *x = !*x)>"Individual channels"</button></Show>
+                <Show when=is_on fallback=move || view! { <span class="chip ok">"Already Unlocked"</span><button class="danger" disabled=move || join && join_locked() on:click=move |_| if *kind == "server" { hide.set(true) } else { lock(kind, None) }>"Lock"</button> }>
+                    <span class="chip">{move || status.get()["unlock_at"].as_str().map_or("Locked".to_string(), |t| format!("Locked until {}", t.replace('T', " ").split('.').next().unwrap_or("")))}</span>
+                    <button class="go" on:click=move |_| act("unlock", json!({"kind": kind}))>"Unlock"</button>
+                </Show>
+            </div> }
+        }).collect_view()}
+        <Show when=move || hide.get()>
+            <div class="card row">
+                <label>"Hide the channels from members while they are locked?"</label>
+                <button class="danger" on:click=move |_| { hide.set(false); lock("blind", None) }>"Hide all channels"</button>
+                <button on:click=move |_| { hide.set(false); lock("server", None) }>"Keep them visible"</button>
+                <button class="ghost" on:click=move |_| hide.set(false)>"Cancel"</button>
+            </div>
+        </Show>
+        <Show when=move || !locks().is_empty()>
+            <div class="card row">
+                <button class="ghost" on:click=move |_| note.update(|x| *x = !*x)>"Send an update"</button>
+                <Show when=move || note.get()>
+                    <input placeholder="What members should know" aria-label="update for members" prop:value=update on:input=move |e| update.set(event_target_value(&e)) />
+                    <button on:click=move |_| { act("update", json!({"text": update.get_untracked()})) }>"Send"</button>
+                </Show>
+            </div>
+        </Show>
+        <Show when=move || single.get()>
+            <div class="card row">
+                <label>"Lock a single channel"</label>
+                <select aria-label="channel to lock" on:change=move |e| channel.set(event_target_value(&e))>
+                    <option value="">"Choose a channel"</option>
+                    {move || chans.get().into_iter().map(|c| {
+                        let flags = [("locked", "locked"), ("private", "private")].iter().filter(|(k, _)| c[*k] == true).map(|(_, t)| *t).collect::<Vec<_>>().join(", ");
+                        let label = if flags.is_empty() { format!("#{}", s(&c["name"])) } else { format!("#{} ({flags})", s(&c["name"])) };
+                        view! { <option value=s(&c["id"]) disabled=c["locked"] == true>{label}</option> }
+                    }).collect_view()}
+                </select>
+                <button class="danger" disabled=move || channel.get().is_empty() on:click=move |_| lock("channel", Some(channel.get_untracked()))>"Lock"</button>
+            </div>
+        </Show>
+        <Toast msg />
+        </div>
+    }
+}
+
+#[component]
+pub fn LockdownSettings(guild: String) -> impl IntoView {
+    let problems = RwSignal::new(None::<Vec<Value>>);
+    let (msg, need) = (Msg::default(), step_up());
+    let g = StoredValue::new(guild.clone());
+    let check = move || {
+        spawn_local(async move {
+            match api(
+                "GET",
+                &format!("/api/guilds/{}/lockdown/check", g.get_value()),
+                None,
+            )
+            .await
+            {
+                Ok(v) => problems.set(v.as_array().cloned()),
+                Err(e) => msg.err(e),
+            }
+        })
+    };
+    check();
+    // @everyone allows beside the main roles are fixed only when ticked.
+    let picked = RwSignal::new(Vec::<String>::new());
+    let fix = move || {
+        // The automatic fixes on screen: the server refuses when it finds others by now.
+        let shown: Vec<String> = problems.with_untracked(|p| p.iter().flatten().filter(|p| !p["fix"].is_null() && p["opt_in"] != true).map(|p| s(&p["id"])).collect());
+        let body = json!({"picked": picked.get_untracked(), "shown": shown});
+        run_act(
+            async move {
+                api(
+                    "POST",
+                    &format!("/api/guilds/{}/lockdown/fix", g.get_value()),
+                    Some(body),
+                )
+                .await
+            },
+            msg,
+            need,
+            move |_| check(),
+        )
+    };
+    view! {
+        <div class="card">
+            <div class="row"><h2>"Compatibility check"</h2>
+                <Show when=move || problems.get().is_some_and(|p| !p.is_empty())><span class="chip">{move || format!("{} ISSUES", problems.get().map_or(0, |p| p.len()))}</span></Show>
+                <button on:click=move |_| fix() disabled=move || !problems.get().is_some_and(|p| p.iter().any(|p| !p["fix"].is_null()))>"Fix issues"</button></div>
+            <p class="muted">"Checks that only the main roles can view and send, so a lockdown works in a few calls. Apply Fix corrects the role and channel permissions. An @everyone allow in a channel can be on purpose, so it is only changed when you tick it."</p>
+            <Show when=move || problems.get().is_some_and(|p| p.is_empty())><p class="ok">"No lockdown compatibility issues found."</p></Show>
+            {move || problems.get().unwrap_or_default().into_iter().map(|p| {
+                let text = s(&p["text"]).replace("<@&", "role ").replace("<#", "channel ").replace('>', "");
+                let id = s(&p["id"]);
+                let tick = (p["opt_in"] == true && !p["fix"].is_null()).then(|| {
+                    let (id2, label) = (id.clone(), format!("also fix {text}"));
+                    view! { <input type="checkbox" aria-label=label prop:checked=move || picked.with(|v| v.contains(&id2)) on:change=move |e| { let on = event_target_checked(&e); picked.update(|v| { v.retain(|x| *x != id); if on { v.push(id.clone()) } }) } /> }
+                });
+                view! { <div class="row">{tick}<span class="warn">{text}</span></div> }
+            }).collect_view()}
+            <button class="ghost" on:click=move |_| check()>"Check again"</button>
+            <Toast msg />
+        </div>
+        <Section guild=guild.clone() name="lockdown".to_string() />
+    }
+}
+
+const RULE_KINDS: [(&str, &str, &str); 4] = [
+    (
+        "Block Mention Spam",
+        "mention",
+        "Blocks messages that mention too many members or roles.",
+    ),
+    (
+        "Block Commonly Flagged Words",
+        "preset",
+        "Discord's profanity, sexual content and slurs lists.",
+    ),
+    (
+        "Block Suspected Spam Content",
+        "spam",
+        "Blocks messages Discord thinks are spam.",
+    ),
+    (
+        "Block Custom Words",
+        "keyword",
+        "Blocks the words you list.",
+    ),
+];
+
+const BOT_ACTIONS: [(&str, &str); 6] = [
+    (
+        "report",
+        "Report the message flagged by Discord for moderators to take action.",
+    ),
+    ("warn", "Warn the member."),
+    ("timeout", "Time the member out."),
+    ("kick", "Kick the member."),
+    ("ban", "Ban the member."),
+    ("lock", "Lock the server; pick the lock mode below."),
+];
+
+fn blank_rule(name: &str, trigger: &str) -> Value {
+    json!({"name": name, "enabled": true, "trigger": trigger, "block_message": true, "keywords": [], "allow": [], "presets": [1, 2, 3], "mention_limit": 20, "scope": "", "scope_triggers": 1, "scope_duration_s": 5,
+        "custom_message": "", "alert_channel": "", "timeout_s": 0, "exempt_roles": [], "exempt_channels": [], "bot_actions": [], "lock": ""})
+}
+
+#[component]
+fn RuleEditor(
+    guild: String,
+    rule: RwSignal<Option<Value>>,
+    dc: RwSignal<Value>,
+    done: impl Fn() + Clone + 'static,
+) -> impl IntoView {
+    let val = RwSignal::new(rule.get_untracked().unwrap_or_default());
+    let msg = Msg::default();
+    let id = val.get_untracked()["id"].as_str().map(String::from);
+    let creating = id.is_none();
+    let trigger = move || s(&val.get()["trigger"]);
+    let fld = move |path: &str, kind: &str, title: &str| view! { <Field f=json!({"path": path, "kind": kind, "title": title}) val dc /> };
+    let save = {
+        let done = done.clone();
+        move |_| {
+            let (g, body, id, done) =
+                (guild.clone(), val.get_untracked(), id.clone(), done.clone());
+            spawn_local(async move {
+                let r = match id {
+                    Some(id) => {
+                        api(
+                            "PUT",
+                            &format!("/api/guilds/{g}/discord-rules/{id}"),
+                            Some(body),
+                        )
+                        .await
+                    }
+                    None => {
+                        api(
+                            "POST",
+                            &format!("/api/guilds/{g}/discord-rules"),
+                            Some(body),
+                        )
+                        .await
+                    }
+                };
+                match r {
+                    Ok(_) => done(),
+                    Err(e) => msg.err(e),
+                }
+            });
+        }
+    };
+    view! {
+        <div class="card">
+            <span class="chip" title="Message Rule">"Message Rule"</span>
+            {fld("name", "text", "Rule name")}
+            <div class="row"><label>"Trigger"</label>
+                <select on:change=move |e| val.update(|v| v["trigger"] = json!(event_target_value(&e)))>
+                    {[("keyword", "Keywords"), ("spam", "Spam"), ("mention", "Mention spam"), ("preset", "Keyword preset")].into_iter().map(|(k, t)| view! { <option value=k prop:selected=move || trigger() == k>{t}</option> }).collect_view()}
+                </select></div>
+            <Show when=move || trigger() == "keyword"><h3>"1 Words"</h3>{fld("keywords", "list", "Add Word")}
+                <details><summary>"Need help?"</summary>
+                    <p><code>"world"</code>" matches the whole word, "<code>"*world*"</code>" anywhere inside a word, "<code>"*world"</code>" at the end of a word and "<code>"world*"</code>" at the start."</p>
+                </details></Show>
+            <Show when=move || trigger() == "mention">{fld("mention_limit", "int", "mentions per message")}
+                <div class="row"><label>"Mention scope"</label>
+                    <select on:change=move |e| val.update(|v| v["scope"] = json!(event_target_value(&e)))>
+                        {[("", "Limit per message only"), ("discord", "Discord Mention Scope (detects mention raids)"), ("user", "Brim Mention Scope: per user"), ("server", "Brim Mention Scope: whole server")].into_iter().map(|(k, t)| view! { <option value=k prop:selected=move || s(&val.get()["scope"]) == k>{t}</option> }).collect_view()}
+                    </select></div>
+                <Show when=move || matches!(s(&val.get()["scope"]).as_str(), "user" | "server")>
+                    {fld("scope_triggers", "int", "Triggers")}{fld("scope_duration_s", "int", "Trigger Duration (seconds)")}
+                </Show></Show>
+            <Show when=move || trigger() == "preset"><div class="row"><label>"Presets"</label>
+                {[(1, "Profanity"), (2, "Sexual content"), (3, "Slurs")].into_iter().map(|(n, t)| view! { <label><input type="checkbox" prop:checked=move || val.get()["presets"].as_array().is_some_and(|a| a.contains(&json!(n)))
+                    on:change=move |e| val.update(|v| { let mut p: Vec<i64> = v["presets"].as_array().map(|a| a.iter().filter_map(Value::as_i64).filter(|x| *x != n).collect()).unwrap_or_default(); if event_target_checked(&e) { p.push(n); } v["presets"] = json!(p); }) /> {t}</label> }).collect_view()}</div></Show>
+            <h3>"2 Discord Response"</h3>
+            {fld("block_message", "bool", "Block Message")}
+            {fld("custom_message", "text", "Add Custom Message")}
+            {fld("alert_channel", "channel", "Send Alert")}
+            <Show when=move || matches!(trigger().as_str(), "keyword" | "mention")>{fld("timeout_s", "int", "Timeout User (seconds, 0 = none)")}</Show>
+            <Show when=move || val.get()["block_message"] == true><div class="row"><label>"Brim Response"</label><span class="muted">"You need at least 1 Brim action if you want Brim to consider this rule."</span>
+                {BOT_ACTIONS.into_iter().map(|(a, tip)| view! { <label><input type="checkbox" prop:checked=move || val.get()["bot_actions"].as_array().is_some_and(|l| l.contains(&json!(a)))
+                    on:change=move |e| val.update(|v| { let mut l: Vec<String> = v["bot_actions"].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).filter(|x| x != a).collect()).unwrap_or_default(); if event_target_checked(&e) { l.push(a.into()); } v["bot_actions"] = json!(l); }) /> {a}" - "<span class="muted">{tip}</span></label> }).collect_view()}
+                <Show when=move || val.get()["bot_actions"].as_array().is_some_and(|l| l.contains(&json!("lock")))>
+                    <label>"Lock mode"</label>
+                    <select on:change=move |e| val.update(|v| v["lock"] = json!(event_target_value(&e)))>
+                        {[("", "Server lockdown settings"), ("channel", "Channel"), ("server", "All Public Channels"), ("kick", "Kick New Members"), ("ban", "Ban New Members"), ("invites", "Pause Invites + DMs")].into_iter().map(|(k, t)| view! { <option value=k prop:selected=move || s(&val.get()["lock"]) == k>{t}</option> }).collect_view()}
+                    </select></Show></div></Show>
+            <h3>"3 Allowed Keywords"</h3>
+            <Show when=move || matches!(trigger().as_str(), "keyword" | "preset")>{fld("allow", "list", "Add Keyword")}</Show>
+            {fld("exempt_roles", "roles", "Whitelisted Roles")}
+            // Discord takes categories in the same exempt list as channels.
+            {fld("exempt_channels", "categories", "Whitelisted Categories")}
+            {fld("exempt_channels", "channels", "Whitelisted Channels")}
+            <div class="row"><button on:click=save>{if creating { "Create" } else { "Save" }}</button><button class="ghost" on:click=move |_| rule.set(None)>"Cancel"</button><Toast msg /></div>
+        </div>
+    }
+}
+
+#[component]
+pub fn DiscordRules(guild: String) -> impl IntoView {
+    let rules = RwSignal::new(Vec::<Value>::new());
+    let (msg, dc, editing) = (
+        Msg::default(),
+        RwSignal::new(json!({})),
+        RwSignal::new(None::<Value>),
+    );
+    let (picking, loaded) = (RwSignal::new(false), RwSignal::new(false));
+    let g = StoredValue::new(guild);
+    let load = move || {
+        if g.is_disposed() {
+            return;
+        }
+        spawn_local(async move {
+            match api(
+                "GET",
+                &format!("/api/guilds/{}/discord-rules", g.get_value()),
+                None,
+            )
+            .await
+            {
+                Ok(v) => {
+                    rules.set(v.as_array().cloned().unwrap_or_default());
+                    msg.clear();
+                }
+                Err(e) => msg.err(e),
+            }
+            loaded.set(true);
+        })
+    };
+    load();
+    spawn_local(async move {
+        if let Ok(d) = api(
+            "GET",
+            &format!("/api/guilds/{}/discord", g.get_value()),
+            None,
+        )
+        .await
+        {
+            dc.set(d);
+        }
+    });
+    // One request after another, then one reload whatever the answers: a refused switch can still
+    // have changed the rule in Discord, and parallel reloads could land out of order.
+    let calls = move |list: Vec<(&'static str, String, Option<Value>)>| {
+        spawn_local(async move {
+            let mut errs = vec![];
+            for (method, path, body) in list {
+                let path = format!("/api/guilds/{}/discord-rules{path}", g.get_value());
+                if let Err(e) = api(method, &path, body).await {
+                    errs.push(e);
+                }
+                if g.is_disposed() {
+                    return;
+                }
+            }
+            let path = format!("/api/guilds/{}/discord-rules", g.get_value());
+            let list = api("GET", &path, None).await;
+            if g.is_disposed() {
+                return;
+            }
+            match list {
+                Ok(v) => rules.set(v.as_array().cloned().unwrap_or_default()),
+                Err(e) => errs.push(e),
+            }
+            if errs.is_empty() {
+                msg.clear()
+            } else {
+                msg.err(errs.join(" "))
+            }
+        })
+    };
+    let call = move |method: &'static str, path: String, body: Option<Value>| {
+        calls(vec![(method, path, body)])
+    };
+    view! {
+        <div class="card"><h2>"Discord built-in AutoMod"</h2><span class="muted">"Brim AutoMod Integration"</span></div>
+        <div class="card row">
+            <button on:click=move |_| load()>"Refresh"</button>
+            <button class="ghost" title="Turn off every rule that is on" disabled=move || rules.get().iter().all(|r| r["enabled"] != true)
+                on:click=move |_| calls(rules.get_untracked().iter().filter(|r| r["enabled"] == true).map(|r| ("POST", format!("/{}/enabled", s(&r["id"])), Some(json!({"enabled": false})))).collect())>"Deactivate"</button>
+            <button class="go" title="Turn on every rule that is off" disabled=move || rules.get().iter().all(|r| r["enabled"] == true)
+                on:click=move |_| calls(rules.get_untracked().iter().filter(|r| r["enabled"] != true).map(|r| ("POST", format!("/{}/enabled", s(&r["id"])), Some(json!({"enabled": true})))).collect())>"Activate"</button>
+            <span class="sp"></span>
+            <button class="ghost" title="Copy the local word blacklist into a Discord rule that Brim keeps in sync. The local lists stay for thread and reaction names"
+                on:click=move |_| ask(Ask::new("Copy your word blacklist into a Discord AutoMod rule?").text("Brim keeps the rule in sync with your lists, which stay for thread and reaction names.").yes("Migrate words"), move |_| {
+                    spawn_local(async move {
+                        match api("POST", &format!("/api/guilds/{}/discord-rules-migrate-words", g.get_value()), None).await {
+                            Ok(_) => { load(); msg.ok("Words migrated."); }
+                            Err(e) => msg.err(e),
+                        }
+                    });
+                })>"Migrate words to Discord's AutoMod"</button>
+            <AddButton label="Add new rule" on:click=move |_| picking.set(true) />
+            <Toast msg />
+        </div>
+        <Show when=move || loaded.get() && rules.get().is_empty()>
+            <p class="card empty muted">"No Discord AutoMod rules found."</p>
+        </Show>
+        <Show when=move || picking.get()>
+            <div class="card"><h2>"Create a rule"</h2>
+                {RULE_KINDS.map(|(name, trigger, tip)| view! { <div class="row">
+                    <button class="go" on:click=move |_| { picking.set(false); editing.set(Some(blank_rule(name, trigger))); }>{name}</button>
+                    <span class="muted">{tip}</span></div> })}
+                <button class="ghost" on:click=move |_| picking.set(false)>"Cancel"</button></div>
+        </Show>
+        <For each=move || rules.get() key=|r| r.to_string() let:r>
+            {
+                let (id, on) = (s(&r["id"]), r["enabled"].as_bool().unwrap_or(false));
+                let (id3, id4, r2, r3) = (id.clone(), id.clone(), r.clone(), r.clone());
+                let words = r["keywords"].as_array().map(Vec::len).filter(|_| r["trigger"] == "keyword");
+                let mut discord = vec![];
+                if r["block_message"] == true { discord.push("Block Message".to_string()); }
+                if !s(&r["alert_channel"]).is_empty() { discord.push("Send Alert".into()); }
+                if r["timeout_s"].as_u64().unwrap_or(0) > 0 { discord.push("Timeout".into()); }
+                let bot: Vec<String> = r["bot_actions"].as_array().map(|l| l.iter().map(s).collect()).unwrap_or_default();
+                view! { <div class="card row">
+                    <div><h3>{s(&r["name"])}" "
+                        // A save approves the rule, so a paused one is renamed only through "Review and approve".
+                        {(r["approved"] != false).then(|| view! { <button class="ghost" title="Rename" on:click=move |_| {
+                            let (r3, id4) = (r3.clone(), id4.clone());
+                            ask(Ask::new("Rename the rule").input(s(&r3["name"])).yes("Rename"), move |name| {
+                                if !name.trim().is_empty() { let mut v = r3; v["name"] = json!(name); call("PUT", format!("/{id4}"), Some(v)); }
+                            })
+                        }>{crate::icons::icon("edit")}</button> })}
+                        {words.map(|n| format!(" ({n} words)"))}</h3>
+                        <span class="muted">{format!("trigger: {}", s(&r["trigger"]))}</span>
+                        {discord.into_iter().map(|b| view! { <span class="chip">{b}</span> }).collect_view()}
+                        {bot.into_iter().map(|b| view! { <span class="chip ok">{b}</span> }).collect_view()}</div><span class="sp"></span>
+                    <span class="chip" class:ok=on>{if on { "Active" } else { "Off" }}</span>
+                    {(r["approved"] == false).then(|| { let r4 = r.clone(); view! {
+                        <span class="chip warn">"Paused"<crate::common::Tip text="Someone without a permit changed this rule in Discord. Brim ignores its hits until an Owner, Extra Owner, Trusted Admin or a permit with dashboard edit approves it.".to_string() /></span>
+                        <button class="go" on:click=move |_| editing.set(Some(r4.clone()))>"Review and approve"</button> } })}
+                    <button class=if on { "ghost" } else { "go" } on:click=move |_| call("POST", format!("/{id}/enabled"), Some(json!({"enabled": !on})))>{if on { "Deactivate" } else { "Activate" }}</button>
+                    <button class="ghost" on:click=move |_| editing.set(Some(r2.clone()))>"Edit"</button>
+                    <button class="danger" on:click=move |_| { let id3 = id3.clone(); ask(Ask::new("Delete this Discord AutoMod rule?").yes("Delete").danger(), move |_| call("DELETE", format!("/{id3}"), None)) }>"Delete"</button>
+                </div> }
+            }
+        </For>
+        <div class="card empty"><AddButton label="Add new rule" on:click=move |_| picking.set(true) /></div>
+        {move || editing.get().map(|_| {
+            let done = move || { editing.set(None); load(); };
+            view! { <RuleEditor guild=g.get_value() rule=editing dc=dc done /> }
+        })}
+    }
+}

@@ -1,0 +1,39 @@
+# Weekly update PRs, grouped so each ecosystem opens at most one PR a week.
+# Security fixes come as their own PRs right away.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+  # The dashboard UI is its own workspace with its own Cargo.lock.
+  - package-ecosystem: cargo
+    directory: /crates/dashboard/ui
+    schedule:
+      interval: weekly
+    groups:
+      cargo-ui:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  # The postgres, cloudflared and rclone images in docker-compose.yml (the backup scripts use them too).
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    # A new Postgres major does not start on the old data volume (it needs pg_upgrade).
+    ignore:
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]

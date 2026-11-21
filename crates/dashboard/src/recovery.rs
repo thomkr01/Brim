@@ -1,0 +1,400 @@
+//! Backups and panic mode from the dashboard. Reads go to Postgres or Discord directly; anything
+//! that changes the server is queued as a job for the bot, which owns the restore code.
+use crate::{
+    access::Level,
+    api::{log_change, require, Res},
+    auth::Sess,
+    store, ApiError, AppState,
+};
+use axum::{
+    extract::{Path, State},
+    routing::{get, post},
+    Json, Router,
+};
+use brim_antinuke::{describe, plan, ChannelImg, Image, OverwriteImg, RoleImg};
+use brim_core::{jobs, sections::BackupsCfg};
+use brim_logging::perm_names;
+use reqwest::Method;
+use serde_json::{json, Value};
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/guilds/{guild}/backups", get(list).post(create))
+        .route("/api/guilds/{guild}/backups/{id}", get(detail))
+        .route("/api/guilds/{guild}/backups/{id}/preview", get(preview))
+        .route("/api/guilds/{guild}/backups/{id}/load", post(load))
+        .route("/api/guilds/{guild}/backups/{id}/delete", post(delete))
+        .route("/api/guilds/{guild}/panic", get(panic_status))
+        .route("/api/guilds/{guild}/panic/start", post(panic_start))
+        .route("/api/guilds/{guild}/panic/end", post(panic_end))
+}
+
+async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    require(&st, &s, guild, Level::Viewer, false).await?;
+    let rows: Vec<(i64, i64, i32, i32, String, Option<i64>)> = sqlx::query_as(
+        "SELECT id, EXTRACT(EPOCH FROM created_at)::BIGINT, jsonb_array_length(image->'roles')::INT, \
+         jsonb_array_length(image->'channels')::INT, code, created_by FROM backups \
+         WHERE guild_id = $1 ORDER BY created_at DESC, id DESC",
+    )
+    .bind(guild)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(Value::Array(
+        rows.into_iter()
+            .map(|(id, at, roles, channels, code, by)| json!({"id": id, "at": at, "roles": roles, "channels": channels, "code": code, "by": by}))
+            .collect(),
+    )))
+}
+
+async fn queue(st: &AppState, guild: i64, kind: &str, payload: Value) -> Result<(), ApiError> {
+    jobs::enqueue(&st.db, guild, kind, payload, chrono::Utc::now().timestamp()).await?;
+    Ok(())
+}
+
+async fn announce(st: &AppState, s: &Sess, guild: i64, what: &str) -> Result<(), ApiError> {
+    let (_, config) = store::current(&st.db, guild).await?;
+    log_change(
+        st,
+        guild,
+        s.user_id,
+        &config,
+        None,
+        format!("{} (<@{}>) {what}", s.username, s.user_id),
+    )
+    .await;
+    Ok(())
+}
+
+/// The newest backup is anti-nuke's restore source, so taking one has the delete bar minus 2FA (owner decision 11-16).
+async fn create(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    require(&st, &s, guild, Level::Owner, false).await?;
+    if busy(&st, guild).await? {
+        return Err(ApiError::BadRequest(
+            "The server is locked or in panic mode, so a backup now would save that state. End it first."
+                .into(),
+        ));
+    }
+    let (_, config) = store::current(&st.db, guild).await?;
+    let on = config
+        .get("backups")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<BackupsCfg>(v).ok())
+        .unwrap_or_default()
+        .enabled;
+    if !on {
+        return Err(ApiError::BadRequest(
+            "Backups are turned off. Turn on Backups status under Settings first.".into(),
+        ));
+    }
+    queue(&st, guild, "backup_create", json!({"by": s.user_id})).await?;
+    announce(&st, &s, guild, "took a backup").await?;
+    Ok(Json(json!({"queued": true})))
+}
+
+async fn owned_image(st: &AppState, guild: i64, id: i64) -> Result<Image, ApiError> {
+    let row: Option<(sqlx::types::Json<Image>,)> =
+        sqlx::query_as("SELECT image FROM backups WHERE guild_id = $1 AND id = $2")
+            .bind(guild)
+            .bind(id)
+            .fetch_optional(&st.db)
+            .await?;
+    row.map(|(i,)| i.0).ok_or(ApiError::NotFound)
+}
+
+/// What a backup holds, for the detail view: server settings, roles, the channel tree, webhooks.
+async fn detail(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i64, i64)>) -> Res {
+    require(&st, &s, guild, Level::Viewer, false).await?;
+    let img = owned_image(&st, guild, id).await?;
+    let name = |id: Option<u64>| {
+        img.channels
+            .iter()
+            .find(|c| Some(c.id) == id)
+            .map(|c| c.name.clone())
+    };
+    // Discord's order: voice and stage channels after the text ones, then by position. The UI
+    // groups them under their category by `parent_id` (names can repeat).
+    let mut channels = img.channels.clone();
+    channels.sort_by_key(|c| (matches!(c.kind, 2 | 13), c.position, c.id));
+    let mut roles = img.roles.clone();
+    roles.sort_by_key(|r| (std::cmp::Reverse(r.position), r.id));
+    Ok(Json(json!({
+        "name": img.name,
+        "settings": img.settings,
+        "roles": roles.iter().map(|r| json!({"name": r.name, "color": r.color, "permissions": r.permissions.to_string(), "perm_names": perm_names(r.permissions)})).collect::<Vec<_>>(),
+        "channels": channels.iter().map(|c| json!({"id": c.id.to_string(), "name": c.name, "kind": c.kind, "parent_id": c.parent.map(|p| p.to_string()), "overwrites": c.overwrites.iter().map(|o| json!({
+            "target": if o.is_role { img.roles.iter().find(|r| r.id == o.target).map_or_else(|| format!("role {}", o.target), |r| format!("@{}", r.name.trim_start_matches('@'))) } else { format!("member {}", o.target) },
+            "allow": perm_names(o.allow),
+            "deny": perm_names(o.deny),
+        })).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+        "webhooks": img.webhooks.iter().flatten().map(|w| json!({"name": w.name, "channel": name(Some(w.channel))})).collect::<Vec<_>>(),
+    })))
+}
+
+fn num<T: std::str::FromStr + Default>(v: &Value) -> T {
+    v.as_str().and_then(|s| s.parse().ok()).unwrap_or_default()
+}
+
+/// Roles and channels as Discord's REST API returns them, in the shape backups use.
+pub(crate) fn live_image(guild: i64, roles: &Value, channels: &Value) -> Image {
+    let items = |v: &Value| v.as_array().cloned().unwrap_or_default();
+    let mut img = Image {
+        guild: guild as u64,
+        name: String::new(),
+        settings: None,
+        webhooks: None,
+        roles: items(roles)
+            .iter()
+            .map(|r| RoleImg {
+                id: num(&r["id"]),
+                name: r["name"].as_str().unwrap_or("").into(),
+                color: r["color"].as_u64().unwrap_or(0) as u32,
+                permissions: num(&r["permissions"]),
+                position: r["position"].as_i64().unwrap_or(0),
+                hoist: r["hoist"].as_bool().unwrap_or(false),
+                mentionable: r["mentionable"].as_bool().unwrap_or(false),
+                managed: r["managed"].as_bool().unwrap_or(false),
+            })
+            .collect(),
+        channels: items(channels)
+            .iter()
+            .map(|c| ChannelImg {
+                id: num(&c["id"]),
+                name: c["name"].as_str().unwrap_or("").into(),
+                kind: c["type"].as_u64().unwrap_or(0) as u8,
+                parent: c["parent_id"].as_str().and_then(|p| p.parse().ok()),
+                position: c["position"].as_i64().unwrap_or(0),
+                topic: c["topic"].as_str().map(String::from),
+                nsfw: c["nsfw"].as_bool().unwrap_or(false),
+                overwrites: items(&c["permission_overwrites"])
+                    .iter()
+                    .map(|o| OverwriteImg {
+                        target: num(&o["id"]),
+                        is_role: o["type"].as_u64() == Some(0),
+                        allow: num(&o["allow"]),
+                        deny: num(&o["deny"]),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    let rank = brim_core::roles::ranks(img.roles.iter().map(|r| (r.id, r.position)), guild as u64);
+    for r in &mut img.roles {
+        r.position = rank[&r.id];
+    }
+    img
+}
+
+async fn preview(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i64, i64)>) -> Res {
+    require(&st, &s, guild, Level::Editor, false).await?;
+    let image = owned_image(&st, guild, id).await?;
+    let (_, config) = store::current(&st.db, guild).await?;
+    let (roles, channels) = (
+        st.discord
+            .call(Method::GET, &format!("/guilds/{guild}/roles"), None)
+            .await?,
+        st.discord
+            .call(Method::GET, &format!("/guilds/{guild}/channels"), None)
+            .await?,
+    );
+    let live = live_image(guild, &roles, &channels);
+    let keep = brim_core::sections::restore_keep(&st.db, guild, &config).await?;
+    let lines = describe(&plan(&image, &live, &keep, false), &live);
+    Ok(Json(json!({"lines": lines})))
+}
+
+async fn load(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i64, i64)>) -> Res {
+    // Owner level as `t!backups load`; the bot refuses it again during a lock or panic.
+    require(&st, &s, guild, Level::Owner, true).await?;
+    owned_image(&st, guild, id).await?;
+    if busy(&st, guild).await? {
+        return Err(ApiError::BadRequest(
+            "The server is locked or in panic mode. End it before loading a backup.".into(),
+        ));
+    }
+    queue(
+        &st,
+        guild,
+        "backup_load",
+        json!({"id": id, "by": s.user_id}),
+    )
+    .await?;
+    announce(&st, &s, guild, &format!("loaded backup #{id}")).await?;
+    Ok(Json(json!({"queued": true})))
+}
+
+/// How a log names the backup a dashboard fix or push took first ([`no_backup_now`] skips it).
+pub(crate) fn backup_named(b: Option<i64>) -> String {
+    b.map_or(
+        "no backup (the server is locked, in panic mode or under attack)".into(),
+        |b| format!("backup #{b}"),
+    )
+}
+
+/// Locked, in panic mode, or a nuke revert running (its guard job): that state must not become
+/// the newest backup, which anti-nuke restores from. As the bot's `backup::save` refuses.
+pub(crate) async fn no_backup_now(st: &AppState, guild: i64) -> Result<bool, ApiError> {
+    let nuke: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM scheduled_jobs WHERE guild_id = $1 AND kind IN ('nuke_revert', 'panic_start'))",
+    )
+    .bind(guild)
+    .fetch_one(&st.db)
+    .await?;
+    Ok(nuke || busy(st, guild).await?)
+}
+
+/// A lock or panic mode is on: loading or deleting a backup waits until it ends.
+async fn busy(st: &AppState, guild: i64) -> Result<bool, ApiError> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM lock_snapshots WHERE guild_id = $1 AND state <> 'unlocking') \
+         OR EXISTS(SELECT 1 FROM scheduled_jobs WHERE guild_id = $1 AND kind = 'panic_end')",
+    )
+    .bind(guild)
+    .fetch_one(&st.db)
+    .await?)
+}
+
+/// Ten deletes clear anti-nuke's restore source, so the bar of `t!backups clear` (S-h3 2).
+async fn delete(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i64, i64)>) -> Res {
+    require(&st, &s, guild, Level::Owner, true).await?;
+    if busy(&st, guild).await? {
+        return Err(ApiError::BadRequest(
+            "The server is locked or in panic mode. End it before deleting a backup.".into(),
+        ));
+    }
+    let done = sqlx::query("DELETE FROM backups WHERE guild_id = $1 AND id = $2")
+        .bind(guild)
+        .bind(id)
+        .execute(&st.db)
+        .await?;
+    if done.rows_affected() == 0 {
+        return Err(ApiError::NotFound);
+    }
+    announce(&st, &s, guild, &format!("deleted backup #{id}")).await?;
+    Ok(Json(json!({"deleted": true})))
+}
+
+async fn panic_status(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    require(&st, &s, guild, Level::Viewer, false).await?;
+    let ends: Option<i64> = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM run_at)::BIGINT FROM scheduled_jobs WHERE guild_id = $1 AND kind = 'panic_end'",
+    )
+    .bind(guild)
+    .fetch_optional(&st.db)
+    .await?;
+    Ok(Json(json!({"active": ends.is_some(), "ends_at": ends})))
+}
+
+async fn panic_start(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    require(&st, &s, guild, Level::Admin, true).await?;
+    // Who started it: the bot loads a backup during it only for an Owner level (as `load`).
+    queue(&st, guild, "panic_start", json!({"by": s.user_id})).await?;
+    announce(&st, &s, guild, "started panic mode").await?;
+    Ok(Json(json!({"queued": true})))
+}
+
+/// Moves the pending `panic_end` job to now, so the bot ends panic mode with the unlock settings it stored.
+async fn panic_end(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    require(&st, &s, guild, Level::Admin, true).await?;
+    // Who ended it goes into the panic log: a Trusted Admin may end it, not change it. The
+    // timed end is kept (a second click keeps the first one's `ends_at`) for the bot, which puts it back if the asker
+    // lost the level by then.
+    let moved = sqlx::query(
+        "UPDATE scheduled_jobs SET run_at = now(), payload = payload || jsonb_build_object('ended_by', $2::text, 'ends_at', coalesce(payload->'ends_at', to_jsonb(extract(epoch from run_at)::bigint)))
+         WHERE guild_id = $1 AND kind = 'panic_end'",
+    )
+    .bind(guild)
+    .bind(s.user_id.to_string())
+    .execute(&st.db)
+    .await?;
+    if moved.rows_affected() == 0 {
+        return Err(ApiError::BadRequest("panic mode is not running".into()));
+    }
+    announce(&st, &s, guild, "ended panic mode").await?;
+    Ok(Json(json!({"queued": true})))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// S-h3 2: a dashboard delete has the bar of a clear: Owner, 2FA, and no lock or panic.
+    #[tokio::test]
+    async fn deleting_a_backup_needs_the_owner_and_no_panic() {
+        let Some((st, s, g)) = crate::api::g3_handler_tests::setup(9_896_000_000).await else {
+            return;
+        };
+        let run = |sql: &'static str| sqlx::query(sql).bind(g).execute(&st.db);
+        for sql in [
+            "delete from backups where guild_id = $1",
+            "delete from trusted_admins where guild_id = $1",
+            "delete from scheduled_jobs where guild_id = $1",
+        ] {
+            run(sql).await.unwrap();
+        }
+        let id: i64 = sqlx::query_scalar(r#"insert into backups (guild_id, image, code) values ($1, '{"guild": 0, "name": "x", "roles": [], "channels": []}', 'h3del') returning id"#)
+            .bind(g).fetch_one(&st.db).await.unwrap();
+        run("insert into trusted_admins (guild_id, user_id) values ($1, 8)")
+            .await
+            .unwrap();
+        st.discord.memo.lock().unwrap().insert(
+            format!("/guilds/{g}/members/8"),
+            (std::time::Instant::now(), Some(json!({"roles": []}))),
+        );
+        let del = |s: Sess| delete(State(st.clone()), s, Path((g, id)));
+        let ta = Sess {
+            user_id: 8,
+            ..s.clone()
+        };
+        assert!(matches!(del(ta).await, Err(ApiError::Forbidden(_))));
+        run("insert into scheduled_jobs (guild_id, kind, payload, run_at) values ($1, 'panic_end', '{}', now() + interval '1 hour')").await.unwrap();
+        assert!(matches!(del(s.clone()).await, Err(ApiError::BadRequest(_))));
+        run("delete from scheduled_jobs where guild_id = $1")
+            .await
+            .unwrap();
+        assert!(del(s.clone()).await.is_ok());
+        for sql in [
+            "delete from backups where guild_id = $1",
+            "delete from trusted_admins where guild_id = $1",
+        ] {
+            run(sql).await.unwrap();
+        }
+    }
+
+    #[test]
+    fn live_image_reads_discord_json() {
+        let roles = json!([{"id": "5", "name": "Mod", "color": 255, "permissions": "8", "position": 2,
+            "hoist": true, "mentionable": false, "managed": false}]);
+        let channels = json!([{"id": "9", "name": "chat", "type": 0, "parent_id": "4", "position": 1,
+            "topic": null, "nsfw": true,
+            "permission_overwrites": [{"id": "5", "type": 0, "allow": "2048", "deny": "0"},
+                                       {"id": "6", "type": 1, "allow": "0", "deny": "1024"}]}]);
+        let img = live_image(1, &roles, &channels);
+        assert_eq!(
+            (
+                img.roles[0].id,
+                img.roles[0].permissions,
+                img.roles[0].color
+            ),
+            (5, 8, 255)
+        );
+        let c = &img.channels[0];
+        assert_eq!((c.id, c.parent, c.kind, c.nsfw), (9, Some(4), 0, true));
+        assert_eq!(
+            c.overwrites,
+            vec![
+                OverwriteImg {
+                    target: 5,
+                    is_role: true,
+                    allow: 2048,
+                    deny: 0
+                },
+                OverwriteImg {
+                    target: 6,
+                    is_role: false,
+                    allow: 0,
+                    deny: 1024
+                },
+            ]
+        );
+    }
+}

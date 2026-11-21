@@ -1,0 +1,11 @@
+# brim-dashboard
+
+axum API (`src/`) plus a Leptos CSR UI (`ui/`, built with `trunk build --release`, served from `DASHBOARD_DIST`, default `crates/dashboard/ui/dist`).
+
+Env: `DATABASE_URL`, `DASHBOARD_URL` (public base URL), `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_TOKEN` (bot). Optional: `BIND`, `DASHBOARD_DIST`, `SUPPORT_URL`, `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (web verification captcha), `LOG_DIR` (also write log files there). `.env.example` explains each.
+Add `<DASHBOARD_URL>/auth/callback` as an OAuth2 redirect in the Discord developer portal.
+
+Saves append a `guild_config` version and `NOTIFY config_changed, '<guild_id>'`; the bot should `LISTEN` and reload that guild.
+Access comes from `extra_owners`, `trusted_admins` and permits holding `dashboard_view` / `dashboard_edit` (Discord Manage Server is ignored).
+
+Before changing the UI, read [ui/PITFALLS.md](ui/PITFALLS.md): two Leptos mistakes that compile fine but break the page.

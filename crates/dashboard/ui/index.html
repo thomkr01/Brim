@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#14181e" /> <!-- = --page in design/tokens.css -->
+  <title>Brim Dashboard</title>
+  <!-- Link preview when the site is shared. The server puts DASHBOARD_URL in place of __SITE__. -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Brim" />
+  <meta property="og:description" content="Sleep. Brim doesn’t." />
+  <meta property="og:url" content="__SITE__/" />
+  <meta property="og:image" content="__SITE__/link-preview.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Brim" />
+  <meta name="twitter:description" content="Sleep. Brim doesn’t." />
+  <meta name="twitter:image" content="__SITE__/link-preview.png" />
+  <!-- Without this link trunk builds a default app with wasm-opt off (a 38 MB wasm); with it, release builds run wasm-opt. -->
+  <link data-trunk rel="rust" data-wasm-opt="z" />
+  <link data-trunk rel="css" href="design/tokens.css" />
+  <link data-trunk rel="css" href="design/bundle.css" />
+  <link data-trunk rel="css" href="style.css" />
+  <link data-trunk rel="copy-file" href="../../../assets/logo/logo.svg" />
+  <link data-trunk rel="copy-file" href="../../../assets/emoji/emoji.json" />
+  <link data-trunk rel="copy-file" href="../../../assets/mascot/brim.svg" />
+  <link data-trunk rel="copy-dir" href="../../../assets/mascot/poses" />
+  <link data-trunk rel="copy-file" href="../../../assets/banner/link-preview.png" />
+  <link data-trunk rel="copy-dir" href="../../../assets/fonts" />
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+</head>
+<body>
+  <script>
+    // A blank page hides failures: show load errors on the page itself.
+    function showError(msg) {
+      var d = document.createElement('pre');
+      d.style.cssText = 'padding:16px;color:#c92a2a;white-space:pre-wrap';
+      d.textContent = 'Dashboard failed to start: ' + msg;
+      document.body.appendChild(d);
+    }
+    window.addEventListener('error', function (e) { showError(e.message || String(e.error)); });
+    window.addEventListener('unhandledrejection', function (e) { showError(String(e.reason)); });
+    // A field the page marks with class "need" is invalid: say so to assistive tech (aria-invalid), and
+    // announce it once, politely, when the person leaves the field.
+    (function () {
+      var FIELD = 'input,textarea,select,[contenteditable="true"]';
+      function sync(root) {
+        root.querySelectorAll ? root.querySelectorAll(FIELD).forEach(added) : 0;
+        if (root.matches && root.matches(FIELD)) added(root);
+      }
+      function added(el) { mark(el); quiet(el); }
+      // No field in this dashboard is a login: sign-in is Discord OAuth, and the authenticator code is the only
+      // credential. Password managers still guess "login form" from names, search boxes and codes, so every
+      // text field opts out of them. The authenticator code keeps autocomplete="one-time-code" so a manager
+      // that holds the TOTP seed can still fill it. A field that sets its own autocomplete keeps it.
+      function quiet(el) {
+        if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') return;
+        var otp = el.getAttribute('autocomplete') === 'one-time-code';
+        if (!el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+        if (otp) return;
+        el.setAttribute('data-1p-ignore', '');
+        el.setAttribute('data-lpignore', 'true');
+        el.setAttribute('data-bwignore', 'true');
+        el.setAttribute('data-form-type', 'other');
+      }
+      function mark(el) {
+        if (el.classList.contains('need')) el.setAttribute('aria-invalid', 'true');
+        else if (el.getAttribute('aria-invalid') === 'true') el.removeAttribute('aria-invalid');
+      }
+      var live = document.createElement('p');
+      live.className = 'sr'; live.setAttribute('role', 'status');
+      document.body.appendChild(live);
+      var timer;
+      document.addEventListener('focusout', function (e) {
+        var el = e.target;
+        if (!el.matches || !el.matches(FIELD) || !el.classList.contains('need')) return;
+        var name = el.getAttribute('aria-label') || el.getAttribute('data-ph') || 'This field';
+        clearTimeout(timer);
+        timer = setTimeout(function () { live.textContent = name + ': needs a valid value'; setTimeout(function () { live.textContent = ''; }, 3000); }, 500);
+      });
+      new MutationObserver(function (list) {
+        list.forEach(function (m) {
+          if (m.type === 'attributes') { if (m.target.matches(FIELD)) mark(m.target); }
+          else m.addedNodes.forEach(function (n) { if (n.nodeType === 1) sync(n); });
+        });
+      }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    })();
+  </script>
+</body>
+</html>

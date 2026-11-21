@@ -1,0 +1,85 @@
+# Design system files
+
+The dashboard's colours, spacing, corners and font stacks come from the Brim design system
+(the owner's design system artifact). These files are copies of it:
+
+- `tokens.json`: the artifact's `project/tokens.json`, unchanged.
+- `bundle.css`: the artifact's `project/components/bundle.css`, unchanged. Its classes all start with `tb-`, so they do not touch the dashboard's own classes.
+- `tokens.css`: generated from `tokens.json`. Run `node tools/design-tokens.mjs` after you copy a new `tokens.json`. CI fails when it is stale.
+
+`index.html` loads `tokens.css`, then `bundle.css`, then `style.css`. `style.css` maps its short names (`--b1`, `--b2`, `--fg`, `--primary` ...) onto the tokens at the top of the file. To change a colour, change it in the design system, copy the file here and regenerate. A new colour goes into the design system first, not straight into `style.css`.
+
+## Rules follow the pages
+
+A change to how a dashboard page looks or is laid out updates these rules in the same PR (this file, the shared tokens, `tools/ui-sizes.mjs` where a rule can be checked), and the design system artifact is brought in line (owner decision, 2026-11-20). A PR description says which rule it touched, or that none applied.
+
+## Pages
+
+- A page shows its settings as cards. There is no row of buttons that only scrolls to a card of the same page; a control that switches content is a tab (Channel Setup, Tickets) and shows only its own content.
+- Server cards (Servers page): the server banner if Discord sends one; otherwise the server icon zoomed in and blurred so it fills the card as soft colour (the one allowed blur besides Loading dots), with the sharp round icon centred on top; no icon: plain grey surface with the initial in a circle. The card button ("Add to server") is always one line, fixed size, right of the name; only the name shortens.
+- A hidden element is hidden (`[hidden]` always wins over a class's `display`).
+
+## Screen scale (owner decision, 2026-11-20)
+
+The dashboard grows with the screen. One rule at the top of `style.css` sets `zoom` on the root from a number `--z` that steps with the window width: 1.05 on a phone, 1.1 from 900 px, then 1.2 (1800), 1.25 (1920), 1.45 (2240), 1.65 (2560), 2.05 (3200) and 2.45 (3840 px). Text, cards, controls, sidebar and the 1200 / 900 px page columns all scale together, so every size in this file is the size at scale 1; on a 1920 px screen they are 1.25 times larger. The step sizes keep the page column about as wide as the window (window width / --z is about 1550 px). Media queries read the real window, so the phone and desktop layouts switch where they did. Rules: (1) never set `zoom` anywhere else; (2) never write a bare `vw` or `vh`, because the browser does not zoom them: use `calc(N * var(--vw))` and `calc(N * var(--vh))`; (3) code that places something from window coordinates (popups, tooltips) divides by `screen_zoom` in `common.rs`. `tools/ui-sizes.mjs` checks the first two. The design system artifact needs the same rule before a new copy is taken from it.
+
+## Spacing rule: 4 px
+
+Every spacing in the dashboard (margin, padding, gap and offsets such as `top` or `left`) is 4 px or a multiple of 4 (owner decision, 2026-11-20). Use a `--space-N` token (`space-4`, `space-8`, `space-12` ...); a raw px value is allowed only if it is also a multiple of 4. The sizes of boxes, fonts, borders, radii and `em` values are not spacings and may vary. `--stroke-2` is the width of a border, outline or ring, not a spacing. `node tools/ui-sizes.mjs` fails on a spacing that is off the grid. Since 2026-11-20 `tokens.json` and `bundle.css` differ from the design system artifact on this point: the artifact must get the same change before a new copy is taken from it.
+
+## Text sizes: five (owner decision, 2026-11-20)
+
+The dashboard uses five sizes: `page-title` 44 px (32 on a phone), `figure` 26 px, `section-title` 18 px (section and card titles, the crumb line, the server name, the brand name), `ui` 14 px (body text, inputs, buttons, toasts) and `caption` 12 px (help lines, captions, chips, table headers, code and IDs). Old 17 and 19 px fold into 18, old 15 and 16 into 14, old 11 and 13 into 12. `tools/ui-sizes.mjs` fails on any other `--fs-*` in `style.css`. The landing page's own types (headline, lead, ...) are outside this scale. Heading weights are not changed yet.
+
+## Universal page layout (approved 2026-11-20, being built in steps)
+
+Every module page has the same frame: header (crumb, big title, "?"), tabs if any, notices, then content in one centred column of 1200 px (cards grid) or 900 px (lists, tables). Detail pages extend the crumb; there is no back button. Content is a cards grid (two columns from 900 px, one below; cards flow in two columns and move up under the card above, no gaps), a stack, a table card, a sortable list, or a workspace (Channel Setup and the message editor are the declared exceptions; Channel Setup's reorderable rows still use the sortable-list look). Rhythm: 24 px between blocks, 20 px inside a card, 12 px between rows. Delete lives in a row's Edit dialog. Plan and pictures: in the data repo. Steps built so far: 1 (text sizes), 2 (page column 1200 px / `--w-narrow` 900 px as tokens in `style.css`, 24 px between blocks, 20 px card padding; `tools/ui-sizes.mjs` fails on any other page-wide `max-width`), 3 (every header is `Head` and every tab row is `PageTabs`, both in `common.rs`; tabs are an orange underline row, not a pill box; a detail page extends the crumb with its parent instead of a "Go Back" button; `tools/ui-sizes.mjs` fails on a hand-written `class="head"` or `class="tabs"` and the e2e sweep checks the open tab's underline), 4 (cards grid: see below; every add button is `AddButton`; number steppers are small circles), 5 (table card: see below), 6 (custom pages: see below).
+
+## Controls (owner decision, 2026-11-20)
+
+- **Add button:** a green pill with a circle plus and a text naming the thing ("Add new permit"). No bare "+", no grey "+ Add", no dashed wide button.
+- **Round buttons:** an icon-only button is a perfect circle (square box, radius 50%). A button with text is a pill.
+- **Tabs (fixed by the owner, must not change):** one quiet row, no pill box; the open tab has an orange underline; never wraps, scrolls sideways when it does not fit.
+- **Sortable list:** rows in a card (`.slist` / `.srow` in `style.css`, `Grip` in `common.rs`; Permits). The whole row is the drag target with a mouse; three grey three-line marks (25% opacity) on the left say it can be moved; the dragged row lifts with an orange outline and an orange line shows where it lands; the focused row moves with the up and down arrow keys, keeps the focus and a screen reader hears its new place; a fixed row shows a lock and does not move. On a phone the drag starts from the three lines (`.touch-grip`, a 40 px zone; provisional, owner decision "yes for now": ask him once whether to keep it). Up, down and Delete buttons are not used on the row: Delete is in the row's Edit dialog. Channel Setup keeps its own tree and row menu but uses the same grey lines and the same lift while a row moves.
+- **Outlines:** orange outline (`--ol-pick`) means selected or being moved; hover on a clickable or movable row or card is a quiet grey outline (`--ol-hover`). Both are defined once in `style.css`; every sortable or selectable row (Permits, Channel Setup, the saved messages list) uses them, no own colour.
+
+- **Cards grid (owner decision, 2026-11-20 "no empty spaces"):** settings cards sit in two fixed columns from 900 px (one below), each card right under the card above it, 24 px apart. `Cards` in `common.rs` keeps the list order (left column top to bottom, then right) and splits it so both columns are about equally tall. It is not CSS columns or a grid: a card that grows when a switch shows more rows stays in its column. `tools/ui-sizes.mjs` fails if `.cards` becomes a grid again.
+
+- **Table card:** every table is `table.data` inside a card: one header row of small muted 600 text, 12 px cell padding, a grey line between rows; a button column is `.tact` (right aligned; not `.act`, which is the settings card action row). On a phone (600 px and below) each row becomes a block: the first cell on top, then the other cells in two columns, each with its column name from `data-label`; buttons take the full width. A grid of cells (Channel Setup's Advanced grid) is `table.data matrix`: same header and row lines, but it stays a table on a phone and scrolls. Empty tables show one muted row or line, never a second add button: a page has one add button (Permits: "Add new permit" at the top, also with no permits of your own). `tools/ui-sizes.mjs` fails on a `<table>` without class `data`.
+
+- **Custom pages (step 6):** the hand-built pages use the same patterns. Home is two cards grids (Setup Wizard and Overview, then the task cards), no own 900 px grid. One backup is its own route (`#/<server>/backups/<code>`, crumb "Backups › Backup #code", the code is the big title) with its Load and Delete buttons on the right and its Channels and General Settings cards in the cards grid; no "Go back". Commands keeps all its text and the list in one narrow column. Pages checked and left as they are because they already fit: Overview (its five module tiles are one equal row), Tickets, Cases, Notes, Update, MCP tokens, Data requests, Saved messages (the editor is the declared message-editor exception).
+
+Built: Add button (`AddButton` in `common.rs`, also inside `Empty`; `tools/ui-sizes.mjs` fails on a button text starting with "+" or a dashed button), round number steppers, cards grid, table card. Built in step 6: the custom pages above. Built after step 6: sortable list (Permits) and outlines.
+
+## Bot messages
+
+- An entry with a required placeholder (`{text}`, "Bot text") shows one notice at the top of its editor: yellow while the placeholder is in the first embed, red with an "Insert Bot text" button when it is not. The notice says what Brim puts there. The save is refused while it is missing.
+- A short reply (one sentence, like "You are already verified.") is an entry of its own, named "Reply: ..." and listed in the group of its area. Its default is message text with no embed; it has no required placeholder.
+- A list row whose edited version has no required placeholder carries a red "Needs Bot text" chip next to "Edited".
+
+## Feeds page (feeds plan F1, 2026-11-20)
+
+- A list page in the narrow 900 px column (`--w-narrow`): one row per feed (a card-like row: on switch, source icon, name with a "Stopped" or "Paused" chip, details line, ⋮ menu). The ⋮ menu holds Check now, Test post, Edit message, Change and Delete; it is a round 40 px button. The menu look is the Channel Setup row menu (`.rowmenu`).
+- Above the list: the limit counter ("3 / 10 feeds"), the per-channel limit, a sort control (Name, Channel, Last post) and the "Add new feed" add button (`AddButton`). An empty list shows one card with what to do first and the same add button.
+- Add and Change open one dialog: source (RSS / YouTube / GitHub / GitLab), address, channel, ping role, and a folded "Name, picture and sender" part with the "Send as Brim" switch (off by default).
+- Edit message opens the message editor on the feed's own version, with "Own version" or "Server's version" and a "Use the server's version" button.
+- GitHub and GitLab feeds: the dialog has no address; it shows one switch per event type in a framed group ("Post these events"). After Add, a setup window shows the steps, the address and the secret (blurred until Show) with Copy buttons; the secret is shown only then. Their ⋮ menu holds Turn on again (only when stopped), Show setup, Make new secret, Edit message, Change and Delete (no Check now or Test post). Edit message has an Event picker above the editor: each event has its own message.
+- The required placeholder notice of the Bot messages editor names the entry's placeholder: `{link}` for feed entries, which may sit in the message text (their default is the plain link), `{text}` for the others.
+
+## Bot Profile page (owner decision, 2026-11-20)
+
+- One panel in one card: images left (avatar and banner tiles you click to upload), fields in the middle (bot name, bio, bot status, activity type, status text), a live member list preview and profile preview on the right. Two columns below 1200 px (previews under the fields), one column on a phone. The change history is a folded "Recent changes" box under the panel.
+- One "Save changes" sends only the fields that changed, one after another, and stops at the first refusal with what was saved. It is off while nothing changed. "Reset to default" removes this server's name, bio, avatar and banner; status and activity stay.
+- Name, bio, avatar and banner are per server. Status and activity are bot-wide: everyone on the page sees them, only the bot's owner can change them (greyed out for others, with a line that says so). This page is the only place to set them; the Update page has no status card.
+- Not tied to one bot account: the page shows the name and images the server sends, never a fixed bot. If one server ever runs under its own bot account (own token, not built), only the server side changes: which bot sends the profile change, and where that bot's status is kept. No token is stored for this page.
+
+## Front page top section (owner decision, 2026-11-20)
+
+The front page opens with a hero (`.hero` in `landing.rs`, rules in `style.css` under "Hero"): steel and copper drawn in CSS and one inline SVG, not from a picture, so it fits any width. "Brim", the slogan and the two main buttons are text on the left; the Brim mascot (`assets/mascot/brim.svg`) is on the right and above the text on a phone. There is no glow behind Brim. The section ends in one full-width copper line (version A, class `line`); removing the class gives version B, a long fade into the page colour. Below it the page keeps the normal dark colour. The hero's colours and its two big type sizes are custom properties at the top of the `.land` rule; they belong in the design system when it is next updated. No animation.
+
+## Brim poses (2026-11-21)
+
+Twelve poses of Brim, `assets/mascot/poses/<name>.webp` (384 px on the long side, about 20 KB each; originals in the private data repo), shown with `Pose` and the `Brim` enum in `common.rs`. Each pose means one thing and is used only there, beside text that says the same; it is decoration (`alt=""`). The list with each rule is on the style page `#/ui` (`Brim::rule`). Sizes are set by `--pose` in `style.css`: 80 px beside a page title (hidden at 1200 px and below), 104 to 112 px in an empty or error card, 88 px in a dialog, 40 to 56 px in a toast, search list, button row or the menu.
+
+- On Guard: Anti-nuke, Anti-nuke filters, the panic pages (title). Stop: No access, wrong 2FA code. Pointing Right: empty lists (`Empty`). Pointing Left: the wizard's first step, at Auto Setup. Thumbs Up: the big "Saved" toast, the wizard's "All done!". Asleep On Duty: only while Brim is offline or restarting for an update. Looking Closer: settings search with no hits; Logging, Raid Log, Join Gate Log, History (title). Shrug: a module that does not exist. Waving: the server list with no server yet. Alarm: panic mode on. Holding A Key: Rescue Key, Secure my account (title). Peeking: the bottom of the dashboard menu.
+- One pose in the page content at a time; the menu's Peeking Brim is part of the frame. The front page shows Brim once (the hero), so it has no pose.

@@ -1,0 +1,608 @@
+# Dashboard UI pitfalls
+
+Pitfalls for the rest of the bot are in [PITFALLS.md](../../../PITFALLS.md) at the repo root.
+
+These are Leptos mistakes that broke the dashboard in November 2026. They compile without a warning, so read this before you change the UI. The e2e sweep (`tests/e2e/dashboard.js`) checks for each of them.
+
+## 1. A `>` in an attribute ends the tag
+
+The `view!` macro reads an attribute value without braces only up to the next `>`. So this:
+
+```rust
+<button disabled=move || lo >= num on:click=move |_| step(-1.0)>"-"</button>
+```
+
+becomes `<button disabled=move || lo>` plus the text `= num on:click=move |_| step(-1.0)>-`. It still compiles. The page then shows that code as text, and the button has no click handler. Every number field with a minimum had this bug: the `-` button showed code and did nothing.
+
+A `<` does no harm, because the macro does not treat it as the end of the tag. That is why the `+` button with `hi <= num` worked.
+
+**Rule:** if an attribute value holds `>` or `>=`, wrap it in braces: `disabled=move || { lo >= num }`. You can also flip the comparison: `num <= lo`. Expressions inside `(...)` are safe, for example `.is_some_and(|a| a.len >= 25)`.
+
+**Check:** the sweep fails if a page shows `move |` or `on:click=` as text. CSS can show the text in capitals, so the check ignores case.
+
+## 2. Reading a signal after its page is gone
+
+A page's signals and `StoredValue`s are disposed when you leave the page. Most reads of a disposed value panic:
+
+```
+panicked at reactive_graph-0.2.16/src/traits.rs:361:29:
+Tried to access a reactive value that has already been disposed.
+```
+
+Rust in wasm cannot recover from a panic, so the whole dashboard stops ("Dashboard failed to start: RuntimeError: unreachable executed"). Reload the page to get it back.
+
+This happens when code runs **after the page is gone**:
+
+- the rest of a `spawn_local` task after an `.await`, while the request was still running when you changed page;
+- a `set_timeout`, `request_animation_frame` or `later(...)` callback;
+- a `load` closure called again after an await, for example `Ok(_) => load`, because `load` reads `g.get_value` or `page.get_untracked`.
+
+A slow or failing server makes this much more likely. That is the normal case while the dashboard restarts during an Update, and Update is where the crash first showed.
+
+What panics and what does not:
+
+| Call on a disposed value | Result |
+|---|---|
+| `.get`, `.get_untracked`, `.with(..)`, `.with_untracked(..)`, `.read` | **panics** |
+| `StoredValue::get_value`, `with_value(..)` | **panics** |
+| `NodeRef::get_untracked` | **panics** |
+| `.set(..)`, `.update(..)`, `update_value(..)` | does nothing, safe |
+| `.try_get_untracked`, `.try_with(..)`, `.is_disposed` | returns `None` / `true`, safe |
+
+**Rules:**
+
+1. After every `.await` in a `spawn_local`, check that the page still exists before you read anything:
+   ```rust
+   let r = api("GET", &path, None).await;
+   if data.is_disposed {
+       return;
+   }
+   ```
+2. A closure that can run again after an await (`load`, `load_mine`, ...) starts with `if g.is_disposed { return; }`.
+3. In timers and frame callbacks, read with `try_` (`msg.stay.try_get_untracked == Some(false)`, `pv.try_get_untracked.flatten`).
+4. `run_act`, `run_change` and `run_save` (in `common.rs`) skip their callback if the page that started them is gone. Use them for actions instead of writing your own `spawn_local`.
+5. Setting a value is fine without a check. Only reads panic.
+
+We did not switch every task to `spawn_local_scoped_with_cancellation`. It also cancels a task when only a smaller part of the page is removed, for example a dialog that closes itself. The save's follow-up step would then never run.
+
+**Check:** the sweep switches through every page while each API response is held back 800 ms, then again while every request fails. Any panic fails the test.
+
+## 3. A hover rule beats the "selected" rule
+
+`nav a:not(.srv):hover` has a higher specificity than `nav a.on`, because `:not(.srv)` counts as a class. Under the mouse the selected link (the server on the server list, the open page in the menu) got the dark hover background while its text stayed dark: 1.1:1 contrast, almost invisible.
+
+**Rule:** a rule for a selected or active state lists its `:hover` variant with the same selectors as the hover rule: `nav a.on, nav a.on:not(.srv):hover { ... }`.
+
+**Check:** the `contrast` phase of `tests/e2e/deep.js` hovers every link and button on every page in light and dark mode and fails under 3:1.
+
+## 4. A page that reads a context signal is rebuilt when the signal is set again
+
+The page closure in `App` read `access.of(p)`. The access is fetched again on every page change, and setting a `RwSignal` notifies even when the value is the same, so every page was built twice and loaded its settings, schema and Discord data twice. The page was also built before the access answer came, so hidden pages started their requests anyway.
+
+**Rule:** read a value that is fetched again through a `Memo` (`page_access`), which only notifies when the value changes. Decide what to show before you build the page's components.
+
+## 5. A dropped browser promise hides a refusal
+
+`clipboard.write_text` returns a promise. `let _ =` dropped it, the button said "Copied!" when the browser refused, and the refusal surfaced as an uncaught page error. That included the Rescue Key, which is shown once.
+
+**Rule:** await browser promises with `JsFuture` and show the result. Use `copy_text` and `copy_label` in `common.rs` for copy buttons.
+
+## 6. An emptied number field saved `null`
+
+Clearing a number field stored `null`, and almost every number setting is a plain `i64`/`u32`/`f64` in Rust, so the save was refused with "invalid type: null, expected i64". A float step also kept the float error (`0.01 + 1 - 1` gave `0.010000000000000009`).
+
+**Rule:** `Field` sets the field's default when a number input is emptied, and float steps are rounded like percent steps. A new number field gets a default (`dv`) unless `null` means something.
+
+## 7. A descendant selector styles more than the field title
+
+`.row label { flex:0 0 100%; font-weight:700 }` is meant for a field's title, but it also hit the Import button of every list field (a `<label>` around the file input). Import grew to the full row, turned bold, and the help text was drawn on top of it (Join Gate's Strict and Wildcard Words).
+
+The first fix (`.io label`) did nothing: it had the same specificity as `.row label`, which comes later in the file, so `.row label` still won. The same rule also made every checkbox in role and channel lists bold and capitalized.
+
+**Rule:** a label that wraps a control (`.row label:has(> input)`) resets what `.row label` sets. When a rule must beat another one, give it a higher specificity, not just an earlier or later spot in the file, and check the result in the browser (`DEEP_ONLY=overflow` measures it). A list field's box takes the full row so its help text goes below it.
+
+## 8. Layout breaks that only show at some widths or with long text
+
+Help text next to a switch was squeezed into two thin columns (Join Gate "Exclude bots added by the owner", Miscellaneous, Auto Mod, Verification), and at 390 px the header was wider than the screen, so the avatar was cut off and the search box covered the logo.
+
+**Rule:** a switch's help text sits on its own line under the label (`.tog > .muted`). On a phone, header links that do not fit move into the account menu (`.m-only`). `DEEP_ONLY=overflow node tests/e2e/deep.js` checks every page at 1400, 1024 and 390 px for text outside its box, cut off, on top of other text, or squeezed.
+
+## 9. One version per widget on a page that saves several sections
+
+Each Overview switch loaded the config and kept its own version, so after one switch saved, the next one sent an old version and was refused with "config changed, reload". Five switches also meant five identical config requests.
+
+**Rule:** widgets on one page that save into the same config share one loaded config and one version signal, and update it after each save.
+
+## 10. Many copies of one SVG icon share its ids
+
+Every icon in `assets/icons` has fixed ids (`info-grad`, `info-cut`). With the info icon shown many times on a page, every copy paints with the first copy's gradient and mask, and draws nothing once that first copy is hidden (Chrome does not render a gradient from a `display:none` SVG).
+
+**Rule:** `icons::icon` numbers the ids of every copy, so every icon is safe to repeat. Never inline an `assets/icons` SVG another way (for example `include_str!` into `inner_html`) without the same numbering.
+
+The first fix added a separate `icon_unique` for the info icon only, while the arrows in sortable lists, the check rows on Overview and the sidebar icons (General, Filters and Panic Mode appear under both Auto Mod and Anti Nuke) still shared ids. Root cause: uniqueness was opt-in. It is now the only way `icon` works.
+
+## 11. A transform on a parent moves its popup too
+
+The info icon grew on hover with `transform:scale` on `.tip`, which also scaled the card inside it, so the card was wider than measured and crossed the screen edge on a phone.
+
+**Rule:** animate the icon (`.tip .i`), not the element that holds the popup. The info card is placed when it opens (`Tip` in `common.rs`): shifted to stay inside `main` and the screen, and moved below the icon near the header. `DEEP_ONLY=overflow` opens every info card and checks it.
+
+## 12. `AnimatedShow` can hide itself while `when` is true
+
+Leptos's `AnimatedShow` starts a hide timer each time it reruns with `when` false, but only remembers the last timer. A form that loads sets `val` and `orig` one after the other, so `when` (`val != orig`) reruns false twice. The first timer is lost and fires later. If the user changes something within 200 ms, the "Changes detected!" bar shows and is hidden again at once. Nothing can be saved or cancelled until the next change. The Cancel e2e check hit this on a fresh server (#158).
+
+**Rule:** use `common::Fade` instead of `AnimatedShow`. It puts `when` behind a `Memo`, so it reruns only when the value really changes. All 8 uses were switched.
+
+Same class of bug, also in #158: the page wrapper read the access level straight from the access signal, so every access answer (one per page change) rebuilt the open page and could throw away edits made before it arrived. It now reads a `Memo` of the level.
+
+**Rule:** when a reactive closure builds a whole page or form, read derived values through a `Memo`, not a signal that is set again with the same content.
+
+## 13. A hidden popup still makes the page wider
+
+The info card (`.tip .bubble`) is only `opacity:0` until hovered, so it still takes layout room. An info icon near the right edge on a phone (MCP tokens page, 390 px) put the hidden card past the screen, and the whole page scrolled sideways.
+
+**Rule:** `main` has `overflow-x:clip` (clip, not hidden, so vertical overflow and sticky parts keep working). A new popup that is hidden with opacity or a transform must also stay inside `main`, as `Tip`'s `place` does when it is shown.
+
+**Check:** on a 390 px viewport `document.documentElement.scrollWidth` equals the viewport width on every page.
+
+## 14. An effect on a new input runs before its `prop:value` is set
+
+Channel Setup's rename box focused and selected its text from an `Effect` on the input's `NodeRef`. The effect ran before `prop:value` was applied, so `select` selected an empty box, the name was filled in afterwards, and typing added to the old name instead of replacing it. A `select` in `on:focus` had the same problem.
+
+**Rule:** an effect that needs a new input's value sets it first (`i.set_value(..)`, then `focus` and `select`). No other page selected text on open.
+
+## 15. Overlapping saves stored an older draft
+
+Channel Setup sent a PUT for every edit. Two in flight could reach the server in either order, so the older draft could be the one stored, and the refused-save path set the page from a follow-up GET without checking that it was still the newest request. An edit made before the first GET answered built on an empty draft and replaced the stored one.
+
+**Rule:** a page that saves on every edit keeps one request in flight: later edits change only the local copy and mark it dirty, and the reply sends the newest copy if it differs. Every reply that sets page data after an await checks its sequence number with `try_get_value` (rule 2). Actions that need the saved state (Push, Discard) are disabled while a request is pending, and editing waits until the first load is in.
+
+## 16. A panel rebuilt from every reply loses the focus
+
+Channel Setup's right panel is rebuilt from the server's reply after each change, so the button, switch or picker that was just used was replaced and keyboard focus fell back to the page.
+
+**Rule:** a reactive closure that rebuilds controls notes the focused control's `aria-label` before it builds and focuses the new control with that label in a `request_animation_frame` (`panel_focus`/`refocus` in `channels.rs`). Every control in such a panel needs a unique `aria-label`.
+
+## 17. A select that acts on `change` fires on every arrow key
+
+In Chrome on Windows and Linux, pressing an arrow key on a closed `<select>` changes its value and fires `change`. Channel Setup's "+ Role" picker added the role at once, so a keyboard user who arrowed through the list added every role on the way, and the first version of the new add-channel menu would have created a channel per key press.
+
+**Rule:** a select that creates or adds something only picks; a button next to it does the action (`kind to add` + "+ Add", `role to add` + "+ Role" in `channels.rs`). A select that only sets a value the user saves later (the settings forms) can keep `on:change`.
+
+## 18. `document.activeElement` does not say which button was clicked
+
+The shared 2FA prompt first picked the control to click again after a good code from `document.activeElement`. Safari (macOS and iOS) does not focus a button on click, so the saved element was the page body or a control focused earlier, and the retry could press a different button with its confirm dialog skipped. Review caught it before merge.
+
+**Rule:** to know which control started an action, use `common::clicked` (a capture-phase click listener records it and clears it after the click). Read it synchronously in the handler; after an `.await` it is gone, so capture it first and pass it on (`need_step_up(need, trigger)`).
+
+## 19. A number field's +/- did not fit its range
+
+Two bugs in `Field` (`form.rs`), found by the deep test (11-15). Anti-nuke Panic's "Heat degradation" was a `float` field: + and - step by 1, but its range is 0.001-0.99, so + went to 0.99 and - to 0.001, never back to 0.01. Join Raid's "Minimum matches" (`id_flag_min`, no default, empty = off, range 2-500): + from empty gave 2, and - was then disabled at the bottom of the range, so the field could not be turned off again with -. The same was true for Join Gate's optional age override (duration field, range from 5 s).
+
+**Rule:** a fraction with a range below 1 is a `pct` field (it steps by 1 %), like Auto Mod's heat decay, not a `float`. A number field without a default keeps - enabled at the bottom of its range, and - there empties it (`at_floor` in `Field`, both the number and the duration branch). Searched: `similarity_floor` (0-1) had the same problem and is a `pct` field now too; the other `float` fields (`heat.max`, heat weights, `webhook_multiplier`) step by 1 without trouble. A range that depends on another setting (heat weights up to `heat.max`) comes as `max_path` in the schema, and `Field` reads it from the section, so the form and the server agree.
+
+## 20. A long string without spaces in a table cell widened the page
+
+The Raider List evidence table shows the Detail JSON (`{"case_kind":"ban","case_no":1}`) in a `<code>` cell. It has no break points, so on a 390 px phone the table pushed past the card and the screen (deep test overflow phase, 11-15).
+
+**Rule:** `td code` wraps anywhere (`style.css`). A new cell with an id, JSON or URL uses `<code>` or its own `overflow-wrap:anywhere`. Searched: the overflow phase over every page at 1400, 1024 and 390 px found only this one.
+
+## 21. The rescue key QR code was never blurred
+
+The Rescue Key page gave the QR code `class:blur`, but the CSS rule was `pre.blur`, so only the key text was blurred and the QR was readable as soon as it showed. The key and QR also shared one Show button, and a new key kept the earlier Show state.
+*Avoid:* a secret QR gets its own `.qr.blur` rule (a stronger blur, so it cannot be scanned) and its own Show button. When a class is added to a new element, check that the CSS selector is not bound to one tag. Reset every reveal when a new secret is made.
+
+## 22. "Too many requests, slow down" hid a 2FA lockout
+
+Every 429 from the dashboard said "too many requests, slow down": the per-session request limit, the 2FA lockout after 5 wrong codes, and the bot profile's 30 changes an hour. After a 2FA reset the owner saw only that text and could not know he was locked out, or for how long.
+**Rule (owner decision 11-15): state the issue, not that "there is a problem".** An error says which limit or check was hit and what the user can do (wait how long, what to change). `ApiError::TooMany` takes its message, so every new limit must write its own. Say no more than the user needs: the lockout and its length, never what an attacker could use (which code was close, the counter).
+
+## 23. A page loaded right after another showed nothing (request limit)
+
+The e2e Logging check failed now and then: the page's `/config` and `/schema` came back 429. The per-session limit allowed 20 requests at once, and the Tickets tab alone sends about 12 on load, so a quick switch to the next page ran out. A real user who clicks fast sees an empty page.
+*Avoid:* `auth::BURST` (40) must hold two page loads in a row. A page that adds many requests on load needs a check against it; the steady rate (20 a second) stays the guard.
+
+## Where it was fixed (#143)
+
+- `form.rs`: the `-` button on number fields (`>=` in the attribute); the settings card's config/schema load; the preview flash frame callback; list import.
+- `update.rs`: the update status request.
+- `pages.rs`: the setup score request.
+- `common.rs`: the toast timer, and the shared `run` behind `run_act`/`run_change`/`run_save`.
+- `appeals.rs`, `embeds.rs`, `lockdown.rs`, `records.rs`: the `load` closures that run again after an action.
+- `main.rs`: config import after the file is read.
+
+**An emptied text field saved null, and the save was refused.** (Tickets 2.0)
+Greeting, closing, pause reason and ban appeal message are plain strings in the config, but the form sent `null` when the box was cleared, so the save failed with "invalid type: null".
+*Avoid:* an emptied number or text field saves its schema default. Give every text field that maps to a plain `String` a `dv(.., "")` default in schema.rs.
+
+## 24. The account menu stayed open after a choice
+
+The account menu and the bell are `<details>` in the header. A link in them changes only the hash, so the page changed and the menu stayed open on top of it, and it moved with its button when the header changed (the Update page has no search box). A tap outside did not close it either.
+*Avoid:* `close_header_menus` (main.rs) closes every open header `<details>` on any click outside its own button, on a hash change and on Escape. A new dropdown in the header is a `<details>` inside `header`, so it gets this for free; a dropdown made another way must close on the same three events.
+
+## 25. A system toggle jumped left while its toast showed
+
+`Fade` wraps its child in `AnimatedShow`'s `<div>`. The toast inside it is `position:fixed`, but the empty wrapper div is not, so in the Overview card footer (`.sys .foot`, flex with `space-between`) it became a third flex item and pushed the toggle to the middle until the toast closed.
+*Avoid:* `Fade` gives its wrapper the class `fade-wrap` (`display:contents`), so the wrapper makes no box anywhere it is used. A component that adds a wrapper element must not change the layout of the place it is dropped into; check it inside a flex row.
+
+## 26. The Overview score did not follow a system toggle
+
+A system toggle on the Overview saved the config but did not load the checks again, so "Join gate is off" stayed listed after Join Gate was turned on, until a page reload.
+*Avoid:* `SystemToggle` takes a `saved` callback, and the Overview passes one that reads the score again. Not the config: that read could land after a second switch's save and show the second switch in its old state. Another page that changes a setting needs nothing: the Overview loads both each time it opens.
+
+## 27. A text box typed in place lost the cursor on every key
+
+The Message Builder types on the message itself (`contenteditable`). A view that reads the whole message rebuilds every box on each key, and setting a box's HTML while it has the focus puts the cursor back at the start.
+
+**Rule:** the editor is rebuilt only from a `Memo` of the message's shape (embeds, fields, inline flags, buttons per row), never from the text. Each box (`Ed` in `embeds.rs`) writes its HTML only while it does not have the focus and only when the text differs. Paste and Enter are handled by the box, so no other page's HTML gets in.
+
+## 28. A popup that grows after it opened ran off the screen
+
+The footer-time popup opens small and grows when "Date and time" adds the calendar, so the check that moves it up (done once, on open) no longer held and the time box was cut off.
+
+**Rule:** a popup that moves itself to stay on screen checks again whenever its content can change (the Message Builder popup re-checks on every change to the message).
+
+## 29. Typed JSON put text where the editor expected an object
+
+The JSON view lets a user write `{"embeds": [1]}` or `"fields": ["x"]`. The editor then indexed that value by key (`e["fields"]`, `em["fields"][i]["inline"]`), and serde_json panics when a string or number is indexed mutably by key or an array past its end.
+
+**Rule:** every write into the message goes through `pointer_mut`/`get_mut`/`as_object_mut` and skips a value of the wrong shape (`put`, `edit_embed`); a popup for an embed or button row closes when that embed or row is removed. The server refuses fields that are not objects.
+
+## 30. A chip class name took a popup's layout rule
+
+The chip for a member variable had the class `mo`. Inside a popup it matched `.pop .mo` (the calendar's month row: `display:flex`), so the chip in a menu answer filled the whole line.
+
+**Rule:** short class names in popups are taken (`.pop .mo`, `.pop .row`, `.pop .seg`). Give new inline parts a name of their own (`vchip`, `mem`) and check them inside a popup too.
+
+## 31. Escape did nothing while the text box kept the focus
+
+The toolbar buttons keep the cursor in the text box (`mousedown` + `prevent_default`), so a popup opened from them never had the focus and its own `keydown` never saw Escape.
+
+**Rule:** Escape for the builder's popups is one `window_event_listener` (removed `on_cleanup`) that closes the top popup first.
+
+## 32. `move || a || b` as a `view!` attribute did not compile as one closure
+
+`disabled=move || busy.get || n >= max.get` was read by the `view!` macro with the second `||` outside the closure, so the types did not match; with parentheses it compiled but clippy refused the extra parentheses. (Feeds page, 11-20.)
+
+**Rule:** an attribute value with `||` or `&&` in a closure is a named closure first (`let off = move || busy.get || n >= max.get;` then `disabled=off`).
+
+## Enter that confirmed an IME word also submitted the box (modern web pass, 2026-11-19)
+
+Typing Chinese, Japanese or Korean, Enter picks the candidate word and fires a `keydown` with `key == "Enter"`, `is_composing` true (keyCode 229 in older browsers). Every `if e.key == "Enter"` handler submitted or inserted a line break in the middle of a word.
+
+**Rule:** a handler that acts on Enter calls `common::is_enter(&e)`, never a plain `e.key == "Enter"` check.
+
+## A typed marker put link HTML into an attribute (audit, 11-17)
+
+`md::inline` stashes code spans, links and `<...>` tokens as `U+0001 n U+0001` and swaps them back in order on the whole string. `esc` leaves U+0001 alone, so an emoji named with a typed marker (`<:\u{1}1\u{1}:42>`) had the next link's HTML swapped into its `alt`, and the link's `"` closed the attribute: `onerror=` ran when an Owner opened the preview (stored XSS from Editor level).
+
+**Rule:** text that a stash-and-swap pass works on must not be able to hold the marker: `inline` drops U+0001 before it stashes anything, and the server refuses control characters in saved messages. Searched: no other UI pass swaps placeholders back into HTML (`wizard::fill` fills JSON-escaped values into sample JSON, `icons::fill_tags` puts fixed svg only).
+
+## A failed save hid the Save bar (audit, 11-17)
+
+The settings form and Permits set `orig` to the edited values before the request. When the save was refused (a conflict, a bad value, or 2FA needed first) the "Changes detected!" bar disappeared, the fields kept the edit, and a later save of another section never sent it. After the 2FA code there was no button to press again.
+
+**Rule:** the saved state (`orig`) follows the server: set it only from a good answer, per section when several are saved one after another (embeds.rs already did this). A `saving` signal disables Save while a request runs, so a double click does not send the same version twice.
+
+## Older answers overwrote newer ones (audit, 11-17)
+
+Record lists (`records::fetch`), appeals, the members search, the trigger "Try a message" box (a POST per key), the schedule "Next:" preview, and the sticky, trigger and schedule lists of a message wrote whatever answer came last. A quick filter change, or opening message B right after A, showed the old rows under the new filter or message.
+
+**Rule:** every request whose answer sets page data checks after the await that it is still the newest: a sequence number (`StoredValue`, or `fetch`'s per-list counter) or the id it was asked for (`embed`). A request per key waits 300 ms after the last key (as `CaptchaPreview`).
+
+## Typed text was cleared before the server took it (audit, 11-17)
+
+"Add note" and Lockdown "Send an update" cleared the box in the click handler, so a refusal lost the text. The appeal reply box was never cleared, so a reply for one member went out with the next decision on another.
+
+**Rule:** clear a text box in the success branch of its request, and clear a box that belongs to one item after that item's action worked.
+
+## Message Builder: Cancel and Save did less than they showed (audit, 11-17)
+
+Cancel restored name, body and channel but not Pings and "Send as", although `snapshot` and the dirty check hold all five, so a picked "@everyone" stayed and was saved later. In the JSON view a text that did not parse kept the last valid body, and Save said "Saved." and leaving gave no prompt. A plain Save did not set `busy`, so a double click on a new message inserted it twice.
+
+**Rule:** Cancel restores every part `snapshot` holds. Save and leaving check the JSON view's error first. Every save sets `busy`, and the bar's Save is disabled while it runs.
+
+## A page built on a config it did not have (audit, 11-17)
+
+After an action, the settings form set the new version before it read the new config, so a failed read left old values with the new version and the next save passed the conflict check and overwrote what the action did. A failed first load showed the defaults as if stored. Overview turned a failed `/config` into `{"config": {}}` and showed every system off.
+
+**Rule:** a version is set together with the config it belongs to. A page whose config did not load says so and does not offer Save or switches (they stay locked) until a reload.
+
+## Errors that hid the cause (audit, 11-17)
+
+`reply` showed "request failed" for every answer without our JSON error (a 413 for a large import, a proxy 502 during an update) and the raw `JsError` for a network error. A failed emoji list showed "This server has no emojis of its own." and was cached; a failed `/schema` left search with page names only, silently; the raw JSON editor dropped the parser's line and column; a number box ignored text that was not a number.
+
+**Rule:** an error names the actual issue: the status and text when the body is not ours, "Could not reach the dashboard server" for a send error, the parser's message. A failed list is shown as failed and asked again the next time, never as empty.
+
+## A Rename approved an unreviewed AutoMod rule (audit, 11-17)
+
+The pencil sent the whole rule through `PUT`, and the server approves the rule on every save, so one click approved a change made in Discord without review. Bulk Activate/Deactivate fired all requests at once, each with its own reload, and a refused switch (changed in Discord already) reloaded nothing.
+
+**Rule:** a paused rule is renamed only through "Review and approve". Bulk actions run one after another, then reload once whatever the answers were, and show every error.
+
+## A comma list split an entry that held a comma (audit, 11-17)
+
+`list` fields show `csv` and save `from_csv`, but Import adds one entry per line, so `hello, world` became two words on the next edit (a phrase filter turned into two single-word filters).
+
+**Rule:** a list that holds an entry with a comma shows one entry per line (the `lines` box). A comma typed into the one-line box still splits the entry.
+
+## A one-click setup dropped unsaved edits (audit, 11-17)
+
+Logging, Catch and Tickets setups rebuild the form from the server after they ran, so edits typed before the click vanished; the setup also read a fresh version, so the conflict check could not protect them.
+
+**Rule:** `Section` reports its dirty state (`dirty` prop); an action that rebuilds the form is disabled with "Save your changes first" while it is set.
+
+## The message preview loaded any image address (audit, 11-17)
+
+The Discord-style preview used thumbnail, author, footer and image URLs as they were, without the `https` check the editor has, so a saved embed could make a viewer's browser call any host.
+
+**Rule:** a preview loads only `https://` images; other addresses are left out.
+
+## The dashboard font came from Google (audit, 11-17)
+
+`index.html` loaded Poppins from fonts.googleapis.com, so every visitor's IP address went to Google, while PRIVACY.md said nothing goes to third parties.
+
+**Rule:** the UI loads nothing from another host: fonts, scripts and styles are files under `assets/` that Trunk copies into `dist` (`assets/fonts`, with its licence). The only exception is Cloudflare Turnstile on the verification page, which PRIVACY.md names.
+
+## A bare `.chip` rule restyled every chip (audit, 11-17)
+
+The Message Builder block in `style.css` declared `.chip { background:none; ... }` for its weekday chips, after the base `.chip` rule, so every plain chip in the app (OWNER, APP, the lockdown chips) lost its filled look. `@keyframes pulse` was also defined twice; the later one won everywhere.
+
+**Rule:** a page's rule is scoped to its container (`.chipset .chip`), and an animation name is defined once (search `@keyframes` before adding one).
+
+## A warning closed before it could be read (Message Builder, owner decision 2026-11-17)
+
+Every toast, errors included, closed after a fixed 3 seconds (`TOAST_LIFE`), whatever its length. `Msg` had a `stay` flag for toasts that wait for a click, but nothing set it any more, so the earlier rule "a refused save stays up" (root PITFALLS, dashboard) was silently broken on every page. Owner decision saw "Sent, but Discord could not load ..." vanish before he could read it.
+
+**Rule:** `msg.err` (errors and warnings) stays until clicked or replaced; an ok toast stays 3 s plus 50 ms per character past 60, and its strip runs as long. A warning about one item is also shown next to that item (the Sent log row keeps a copy's picture warning). The toast sits at the top, so a stuck one never covers the Save bar at the bottom on a phone.
+
+## The account button moved between pages (owner decision 2026-11-16)
+
+Long pages (a server's settings) get a scrollbar and short ones (the server list, Commands) do not. Where the system shows classic scrollbars (a Mac with a mouse, Windows), the scrollbar takes about 15 px from the page width, so the header's right side (bell, theme, account) jumped left on long pages. Headless test browsers hide scrollbars, so the tests never saw it.
+
+**Rule:** `html { scrollbar-gutter: stable; }` keeps the room for the scrollbar on every page. To check a layout jump, launch the test browser without `--hide-scrollbars`.
+
+## "Update now" showed when Brim was up to date (owner decision 2026-11-16)
+
+The Update page offered the update whenever Running and Newest were different commits. After an update, Running can be newer than Newest (Newest is cached for a minute, and the images of a newer commit can be out before the list shows it), so each press restarted the bot and the dashboard for nothing. Root cause: "not the same" was read as "newer".
+
+**Rule:** the dashboard asks GitHub's compare which one is ahead (`update::newer`) and the page offers the update only when Newest is ahead; only when GitHub cannot answer does it fall back to "not the same". Searched: the header's Update link has no "new version" mark, so nothing else compares the two.
+
+## A double click posted twice (Message Builder 3, 2026-11-16)
+
+Send and Edit message started a request on every click, so a quick double click posted two copies. A row without an id would also have turned "Edit message" into a Send, since 0 meant "new copy".
+
+**Rule:** a button that posts to Discord waits while its request runs (a `busy` signal), and a missing id disables the action instead of falling back to a value with another meaning.
+
+## An icon tag broke a link in the preview (security review, 2026-11-17)
+
+`md` swaps `{e:name}` icon tags for icon HTML after the rest of the HTML is built, so a tag typed inside a masked link's target (`[x](https://a/{e:case})`) put the icon's quotes into `href` and closed it early. The leftover attributes were fixed icon markup, so no script ran, but the link broke.
+
+**Rule:** a pass that runs on built HTML must not reach into attributes; encode what it looks for (`{` and `}` as `%7B` / `%7D`) in every attribute value first. `xss_tests.rs` fuzzes the preview renderers for this.
+
+## A server error toast said only "internal error" (owner decision, 2026-11-18)
+
+The toast had no way to find the cause in the log. Now the server sends "Server error, code XXXXXXXX. The cause is in the dashboard log." (or a recognised cause's plain text plus " (code XXXXXXXX)") and logs the cause under `error_id=XXXXXXXX` (root PITFALLS, section 6).
+
+**Rule:** the UI shows the server's error text as it is; never replace it with a fixed text, or the code is lost. `run_act` lets a refused action's toast close by itself, which hid the code after about 3 s; `run` now keeps any toast that starts with "Server error, code " or ends with " (code XXXXXXXX)" up until clicked. If the server text changes, change that check too.
+
+## A new class name picked up another widget's style (score ring, 2026-11-18)
+
+The score ring's landing animation used the class `pop` on its number. `.pop` is already the popup box of the Message Builder (border, background, shadow), so the number showed inside a dark square while it animated. Only a render showed it; clippy and tests passed.
+
+**Rule:** before adding a class, grep `style.css` for `\.<name>\b`. Pick a name that is unique in the file, or scope the rule under its component (`.ring .num.landed`), and render the change once.
+
+## Loading looked different on every page (owner decision, 2026-11-18)
+
+Pages showed "Loading...", a button box with dots, or nothing while a slow action ran. Owner decision: the dots and fun word indicator is the one loading indicator for the dashboard.
+
+**Rule:** every loading or working state uses `<Working />` from `common.rs`: four dots and a fun word, no box (a button that shows it drops its box), the word changes every 4 s, the dots glide slowly. Do not add a spinner, a "Loading..." text or another indicator. Under reduced motion the dots pulse in place, so the global reduced-motion rule must not stop them.
+- **The published dashboard wasm was 37.7 MB because trunk skipped wasm-opt.** (owner decision, 2026-11-18) `index.html` had no `<link data-trunk rel="rust" ...>`, so trunk builds a default app, and that default has wasm-opt off (`new_default` in trunk's `pipelines/rust`); the wasm and its 3.1 MB gzip were served for every page load. A local `trunk build --release` of the unchanged files gave 38.1 MB. **Rule:** the `rust` link stays in `index.html` with `data-wasm-opt`, and `[profile.release]` in `ui/Cargo.toml` stays on `opt-level = "z"`, `lto = "fat"`, `codegen-units = 1`. The built wasm is 3.2 MB (1.2 MB gzip, 0.87 MB brotli); check the size of `dist/*_bg.wasm` after a build, a build that is 30 MB again lost the link. Measured in a browser against the old build: page switches and the full e2e sweep took the same time, the first load was faster.
+
+
+## A page drew its "not available" state before the first answer (Update page, owner decision 2026-11-20)
+
+The Update page started with `data = Null` and drew at once: "Running: unknown", "Could not reach GitHub right now." and "The updater is not running", for the moment until `/api/update` answered. The Commands page did the same with "The bot has not published its commands yet". Cause: every field of a `Null` value reads as missing, and a missing field was taken as "no".
+
+**Rule:** a page that loads one `Value` shows `<Working />` while it is `Null` and draws no empty, "unknown" or "not running" state until the first answer is in. A first answer that fails shows an error line, not the loading sign for ever. Checked: the other pages that start with `Value::Null` hide their card, show a skeleton or `<Working />` until loaded.
+
+## "Diff vs current" did nothing you could see (History, owner decision 2026-11-20)
+
+The button wrote its answer into a `<pre>` at the bottom of the page, below every version row (200 of them), the layout versions and the AI reads. The request worked, but the answer was off screen, with no loading sign, and a failed history load was dropped without a message.
+
+**Rule:** the answer to a button goes where the person is looking: a dialog (as the settings import preview) with `<Working />` while it loads and an error line that states the cause if it fails. Never write a result into a block far from the button. Every load that can fail shows its error (`Err` is not dropped). History rows show the member's name (`records::learn_names` + `records::who`) with the ID beside it and the time in the viewer's local time. Checked: the Revert Center result sits right under its button; no other button writes to a far block.
+
+## A button inside Channel Setup was invisible (Layout Guard L1, 2026-11-18)
+
+The "Fix on Overview" button in the Layout Guard card did not show: `.cs .acts` sets `opacity:0` for the tree's row buttons (they show on hover or select), and the card sits inside `.cs`, so every `.acts` in it was hidden too.
+
+**Rule:** a new card on a page with a wrapper class (`.cs`, `.wizbody` ...) checks the wrapper's rules for the class names it uses, and scopes its own override (`.cs .lg .acts { opacity:1; }`). Look at a screenshot of every state, not only the default one.
+
+## The Overview page read a signal after its page was gone (e2e flake, 2026-11-18)
+
+The "page switch" e2e failed once with `Tried to access a reactive value that has already been disposed`. The cause was the Overview (score) page's `load`: after the config request it matched `Err(e) if all.get_untracked.is_none`, which reads `all` without the check from pitfall 2. When the request failed after the user had left the page, the read panicked. The panic exists with any build; the timing of a failed request decides if the sweep hits it.
+
+**Rule:** the check is `if x.is_disposed { return; }` right after the `.await`, before any `match` arm or guard that reads a signal. A `match` guard (`Err(e) if sig.get_untracked...`) is a read too. A search for `spawn_local` blocks that read after an `.await` without `is_disposed` or `try_` found no other page with this pattern.
+
+## "Add panel" on an empty ticket panel list made a bare panel message (owner decision, 2026-11-18)
+
+With no panel saved, "Add panel" under "More buttons and forms" pushed one "New panel" button and left the message text empty, so #open-a-ticket showed only the title "Open a ticket" and that button. Only "Edit the ticket button" filled the default text. **Rule:** every control that makes the first item of something the bot posts brings the defaults that go with it, the same as the main start button (`form.rs` panels: `start` and `add`). Searched the other "Add" buttons on the form (form questions, snippets, ticket types): their lists are posted without a text of their own.
+
+## A design token name was already a dashboard variable (design system, 2026-11-18)
+
+The design system's tokens are global custom properties (`--page`, `--line`, `--ok`, `--bad`, `--warn`, `--info`). `style.css` already had `--page` (the old gradient) and the four status names. Loaded together, the later file silently won, and a type class from the design tool's generated tokens.css (`.small`) would have restyled every `.small` in the dashboard.
+
+**Rule:** colours, spacing, corners and font stacks come only from `design/tokens.css`, generated by `tools/design-tokens.mjs` (custom properties only, no `@font-face`, no type classes). `style.css` never defines a variable a token already names; its short names (`--b1`, `--fg`, `--primary` ...) only point at tokens. Before adding a token, grep `style.css` for `--<name>\b`. CI checks that `tokens.css` matches `tokens.json`.
+
+## The front page waited for an animation that never ran (front page, 2026-11-18)
+
+The feature picker moves to its next step (pop in, wave, nudges) when the last pebble's animation ends. `design/bundle.css` stops every `tb-` animation under the system setting `prefers-reduced-motion`, but the dashboard's own switch (`data-motion`) ignores that setting, so the code saw "animations on" and waited for an `animationend` that never came.
+
+**Rule:** code that waits for `animationend` or `transitionend` on `tb-` classes treats animations as off when either `data-motion` is `reduced` or the system asks for reduced motion (`landing.rs` `calm`).
+
+## Every page had its own sizes (owner decision, review, 2026-11-19)
+
+`style.css` used 25 font sizes, 16 corner radii and 56 paddings, and 14 pages set sizes inline with `style="..."`, so titles, help text and cards looked a little different on every page.
+
+**Rule:** a size comes from a token: text from `--fs-*` (the design system's type styles, generated into `design/tokens.css`, plus `--fs-figure` and `--fs-page-title-phone` at the top of `style.css`), padding from `--space-*`, corners from `--radius-*`. `0`, a percentage and `em` (relative to a token) are fine. A page never sets a fixed `style="..."`; it uses a class (`.grow`, `.fullrow`, `.vstack`, `.center` ...). A computed style (a colour, a position, a CSS variable) is fine. `tools/ui-sizes.mjs` fails CI otherwise. A new size goes into the design system first. `#/ui` shows every block and size in one place: check a change there.
+
+**Five text sizes (universal layout PR 1, 2026-11-20):** the dashboard uses `page-title` (44, 32 on a phone), `figure` (26), `section-title` (18: headings, card titles, crumb, brand), `ui`/`ui-strong` (14: body, buttons) and `caption` (12: help lines, chips, table headers, code). The old 11, 13, 15, 16, 17 and 19 px tokens are gone from the Dashboard group; a rule that needs a size picks the nearest of the five. `tools/ui-sizes.mjs` fails on any other `var(--fs-*)` in `style.css`. The landing page types (`headline`, `lead`, `body`, `small`, ...) belong to the website part of the design system and are not touched.
+
+**Page widths and rhythm (universal layout PR 2, 2026-11-20):** the page column is `--w-wide` (1200 px, set on `main`) and lists, tables, stacks and notices use `--w-narrow` (900 px); both are defined at the top of `style.css`. Between blocks (header, tabs, cards, stack items) the gap is 24 px, inside a card 20 px. `tools/ui-sizes.mjs` fails on a `max-width` of 800 px or more that is not one of the two tokens. Dialogs, previews and fields smaller than that keep their own max-width.
+
+**One header, one tab row, a crumb instead of "Go Back" (universal layout PR 3, 2026-11-20):** six pages wrote their own `<div class="head">` (no crumb, no "?", a literal "Brim" label) and three "Go Back" variants (a ghost button on Filters sub pages, `.card .back`, `.casepage > .back`) sat beside route tabs and state tabs that were built by hand in 11 places. Every page header is now `Head` (in `common.rs`), a detail page passes `up` so the crumb reads "Module › Parent › Page" (Filters sub pages, cases; the Permissions dialog shows its own `.crumbline`), and every tab row is `PageTabs` with `Tab::link` (route) or `Tab::state` (page state). Tabs are fixed by the owner: a quiet row, an orange underline (`border-bottom-color:var(--primary)`) on the open tab, no pill box, never wraps, scrolls sideways. **Check:** `tools/ui-sizes.mjs` fails on `class="head"` or `class="tabs"` outside `common.rs`, and when the `.tabs` rules lose the underline or get a fill; the e2e sweep checks the open tab's computed bottom border and background on every page with tabs. Channel Setup's `.seg` switch is a declared exception and is not a `.tabs` row.
+
+**Cards move up, no holes; one add button (universal layout PR 4, 2026-11-20):** the settings grid was a CSS grid (two columns only from four cards), so a short card (Status) left an empty hole beside a tall one (Auto timeouts) until the next row started. CSS columns would close the holes but rebalance on every height change, so a card that grows when a switch shows more rows jumps to the other column under the cursor. `Cards` in `common.rs` now splits the card list once into two fixed columns (first k cards left, the rest right, balanced by rows per card via `split_at`); each column is a flex stack, one column below 900 px, same order as the list. About 30 add buttons had five looks (green "+", ghost "+ Add", dashed wide boxes, the `Empty` dashed button, grey dashed preview buttons); every one is now `AddButton` (green pill, circle plus, a text naming the thing). **Check:** `tools/ui-sizes.mjs` fails if `.cards` becomes a grid, on a button text starting with "+" or `label="+` outside `common.rs`, and on a `dashed` button class. e2e selectors use `button.add:has-text(...)` (the plus is its own span, so `text-is` no longer matches).
+
+Text case: field titles come from setting names, so `.row label::first-letter` makes them sentence case (not `capitalize`, which gave Title Case). Only chips are upper case; type button and heading text in sentence case ("Confirm", not "CONFIRM").
+
+## A disabled button looked like a live one (style page, 2026-11-19)
+
+The base `button` rule had no `:disabled` look, so Save while nothing changed, "Fix issues" with nothing to fix and every button a permit locks looked pressable; only a few page rules (`.vitem`, `.chrow`, the wizard arrows) faded theirs. Found on the new `#/ui` style page.
+
+**Rule:** `button:disabled` is at half opacity with a not-allowed cursor (the design system's `.tb-act:disabled`), except a button that shows `<Working />`. A page rule for a disabled button only adds to that.
+
+## Tab pages had no selected sidebar link (2026-11-19)
+
+Raid Log, Join Gate Log, Raider Matches and similar tab pages have their own page key, and the sidebar compared keys with a list of special cases (appeals, reports, lockdown), so on those tabs no sidebar link was selected.
+
+**Rule:** `nav_key` (main.rs) maps a tab page to its sidebar page, and both the sidebar and the header breadcrumb use it. A new tab page adds its key there.
+
+## A five-column table squeezed into strips on a phone (Anti Nuke rule coverage, 2026-11-19)
+
+The coverage table scrolled sideways inside its card, but the columns still shrank first, so the notes were one or two words per line and "Exempt permits" sat past the screen edge.
+
+**Rule:** every table is `table.data` (layout step 5, 2026-11-20); on a phone each row turns into a block, so every cell after the first that shows a value needs `data-label` with its column name, or it shows with no label. A cell with no label (buttons, a detail row) takes the full width. A grid of cells (Channel Setup's Advanced grid) is `table.data matrix` and stays a scrolling table. `tools/ui-sizes.mjs` fails on a `<table>` without class `data`. The overflow test now ignores text that is only scrolled out of a horizontal scroll strip (the wizard steps), which it reported as cut off.
+
+## A "+" let you add past the server's limit (P2 counters, 2026-11-19)
+
+"Add new action" (auto warn actions, at most 5) and "Add snippet" (at most 100) had no limit in the UI, so a sixth action was only refused at Save with a server error. Other lists copied the limit by hand (`100` messages, `7` schedules, `12` panels, `5` and `6` form fields), so a change on the server would leave the UI wrong.
+
+**Rule:** a "+" list takes its limit from the server: `/api/limits` (api.rs `limits`, from the constants the saves check) through `common::limit`, `room` and `<Count>`, or a `cap` the schema sends. Never type the number into the UI. A new limited list adds its key to `limits` and shows `<Count>` next to its "+"; an empty list shows `<Empty>` with a dashed "+ New ...".
+
+## The sidebar lists modules, not pages (2026-11-19)
+
+The sidebar now has a few general links and one line per module; a module's parts are rows on its module page (`#/<server>/module/<slug>`). A page that is not in a NAV group has no row, and the e2e sweeps (`dashboard.js`, `deep.js`) find pages through the sidebar and the module rows, so it would never be tested.
+
+**Rule:** a new page goes into a NAV group in `main.rs` (that is what the header search, the breadcrumb and the module page read) and gets a one-line `blurb` in `modules.rs`. A part with an on/off switch is added to `modules::flag` so the row shows "Set up" while it is off. Old links `#/<server>/<page>` keep working; never remove a route.
+
+- **Reading `access` inside the route closure rebuilt the page on every access fetch** (Notes e2e 400, 2026-11-19). `module_of(.., |k| access.of(k) ..)` ran inside the `move ||` that builds the page, so it tracked `access.pages`; the access is fetched again on each page change, so the page was rebuilt a moment after it appeared and typed text was lost (a real person typing early loses it too). The `page_access` memo exists to prevent exactly that. *Avoid:* inside the route closure read access only through `page_access`; wrap any other access read in `untrack(..)`.
+
+## A log type or event needs its category on the Customize list (2026-11-19)
+
+The Logging "Customize" lists (Brim log types and Discord events) are folded categories built from each option's `group` (`kind_group` and `event_group` in `schema.rs`). An option without a group lands in a nameless category.
+
+**Rule:** a new log type goes into `LOG_KINDS` and gets a category in `kind_group`; a new `LogEvent` gets one in `event_group` (the same function feeds the per-event cards).
+
+## A row list that reads the saved settings closes every open row (Commands, P6b, 2026-11-19)
+
+The Commands rows are `<details>`; a list closure that read the per-command settings would rebuild every row on each save and fold the one the user was reading.
+
+**Rule:** the list closure reads only what changes the rows themselves (the command list, the filter, whether the settings loaded). A row reads its own setting in a small closure (`entry("prefix")`), so a save changes two chips and nothing else. A button or tick box inside a `<summary>` stops the click (`stop_propagation`, plus `prevent_default` on a button) or the row opens with it. The settings are for the server last opened: the page names that server in the dialog, and shows the controls only to its owners after the settings loaded.
+
+
+## An error from a dialog's Save showed behind the dialog (Commands, P6b, 2026-11-19)
+
+The toast had `z-index:41` and a `.modal` has 50, so a refused save from a dialog that stays open (the per-command settings) showed dimmed under the scrim and could not be clicked away.
+
+**Rule:** the toast is the top layer (`z-index:60`); nothing a page opens goes above it. A dialog that sends a request while it stays open is checked with a refused save.
+
+## The 2FA code must count for the server the page saves to (Commands, P6b, 2026-11-19)
+
+The 2FA prompt verified for the server in the address. The Commands page has no server there, so the code counted for no server and the save was refused again, without end. Reading `last_guild` from the browser store instead is wrong too: another tab can change it, and the code then counts for a server the page does not save to.
+
+**Rule:** a page without a server in its address that makes a 2FA-guarded save tells the prompt its server from the same source its save uses (`Access.pages.guild` for Commands).
+
+The prompt also opened behind the settings dialog (both dialogs had the same z-index and the prompt comes first in the page), so the save looked dead. **Rule:** a save made from inside a dialog needs the prompt above it (`.modal.top`); check it in the browser with a login that has no fresh 2FA.
+
+## The bot's captcha picture was missing from every preview (2026-11-19)
+
+`discord.rs::embed` loads only `https://` images (so a typed address cannot learn the viewer's IP). The bot's own captcha sample is a `data:image/png;base64,` address, so the picture was silently dropped in the wizard preview (the Verification page only showed it through a plain `<img>` fallback).
+
+**Rule:** the preview's image filter also lets `data:image/png;base64,` through (it makes no request). Any new sample with an embedded picture must use that form, never another `data:` type. Preview the real message: a missing part of a bot sample is a filter, not a missing sample.
+
+## A switch in the sidebar is no weaker way in (2026-11-19)
+
+The open module's On/Off switch in the sidebar (`modules::ModuleSwitch`) saves with the same `PUT /config/<section>` as the General page, so the server's access and 2FA rules apply to it. It sends the module's whole stored section with `enabled` flipped, never a partial object (the PUT replaces the section).
+
+**Rule:** a new module switch uses `switch_section` and `ModuleSwitch`; never add a separate route for it. The switch sits inside the module's link, so its click calls `prevent_default` and `stop_propagation` and the checkbox follows only the saved config. Turning off asks first (`ask` with `.danger`); the toast, busy flag and 2FA state live in `App`, because the nav is rebuilt when the config changes.
+
+## The landing page showed for a moment after every login (2026-11-20)
+
+`App` drew the landing page as the fallback while `me` was empty, and `me` stays empty until `/api/me` answers. After the login callback sent the browser to `/`, the landing page was drawn first, then the server list replaced it once the session was read.
+
+**Rule:** until `/api/me` has answered, `App` shows only the loading sign (`checked`). Set `me` before `checked`, or the landing page shows between the two sets. Any new "logged in or not" view waits for that answer too.
+
+## After the 2FA code, some actions asked to be pressed again (2026-11-20)
+
+The prompt repeated an action by clicking the control the click landed on again. That failed in two ways. (1) A request sent after an await has no click to repeat (the click record is cleared at the end of the click): Overview Fix all sends its fixes one after another, so a step-up that ran out in the middle of the run opened the prompt with nothing to resume, and the toast said "press the button again"; a second press then ran the whole list again from a list read before the run. Config import (after the file read) never resumed. (2) A control that is gone or drawn again is not in the page any more: the Apply import button, the Channel Setup push dialog, the Delete server data dialog and the Load backup dialog close before their request; the panic mode button shows the other action by then.
+
+**Rule:** a request that starts after an await, or whose control closes, hides or changes, uses `run_resumable` (or `run_change_resumable`): it gets a closure that builds the same request again, and the prompt runs it once after a good code (dropped on Cancel and on a page change). A run of several requests keeps what is left and goes on from there. A plain click handler that keeps its control on the page can stay on `run_act`. The wizard card's setup request (`form.rs` `act`, also sent after a save) is resumable too. A refusal that comes back after the user opened another page opens no prompt. Where nothing can be resumed (the Channel Setup draft auto-save puts the server's draft back on a refusal), the prompt says "Press the button again to finish", never a bare "Verified.". The server checks the step-up and CSRF token on the resumed request as on any other: nothing is stored outside the page's memory.
+
+- Server card without banner (2026-11-20): Discord does send `banner` in the guild list, but only servers with a banner (boost level 2) have one; most have none, so cards showed an empty gradient. Fall back to the zoomed, blurred icon (clip it: `overflow:hidden` on the parent). A button in a flex row needs `flex:none; white-space:nowrap`, or a long name wraps it.
+
+## A new table class took a settings card's layout rule (table card, 2026-11-20)
+
+The table card's button column was first called `.act`. `style.css` already has a bare `.act` rule (the settings card's action row: flex column, 8 px top margin), so the Permits Edit cells became flex boxes and the Actions column sat lower than the Name column. Only the desktop screenshot showed it; the e2e sweep passed.
+
+**Rule:** before naming a new class, grep `style.css` for a bare rule of that name (`\.name\b`). Same cause as "A chip class name took a popup's layout rule" above. The table button column is `.tact`.
+
+## A grey frame around the Backups settings (layout PR 6, 2026-11-20)
+
+The Backups page wraps its settings in a `<fieldset>` so a viewer below the owner level gets them read-only. Only `fieldset.ro` had its border and padding removed, so for the owner the browser's default fieldset frame (2 px groove, padding) drew a box around both settings cards. The e2e sweep did not catch it; only the desktop screenshot showed it.
+
+**Rule:** a plain HTML element that the browser styles (fieldset, legend, details, button) gets its base reset in `style.css` once, for every state, not only in the class one state adds. `fieldset` now has no frame by default; the e2e sweep fails on a framed fieldset on Backups.
+
+## A detail page kept its own big title and back button (Backups, layout PR 6, 2026-11-20)
+
+One backup opened inside the Backups page from a signal: the page drew a second `h1` (the backup code) and a "Go back" button under the page header, against the rule that a detail page extends the crumb. A detail held in page state cannot reach the crumb, which `main.rs` builds from the route.
+
+**Rule:** a detail view is a route (`#/<server>/backups/<code>`, `#/<server>/cases/<no>`), and `main.rs` adds it to the `detail` crumb list; leaving it is the crumb link, and a delete goes back with `set_hash`.
+
+## Everything looked tiny on a big monitor (owner decision, 2026-11-20)
+
+The dashboard used fixed pixel sizes, so on a 2560 px monitor the page was a small column of 14 px text.
+
+**Rule:** the screen scale is one `zoom` on `:root`, stepped by window width through `--z` (`design/README.md`, "Screen scale"). Chrome and Firefox do not zoom `vw` and `vh`, so a bare `100vh` is `--z` times too tall; use `calc(N * var(--vh))` / `var(--vw)`. Window coordinates (`getBoundingClientRect`, `client_x`, `scroll_y`, `inner_width`) are real pixels while a `left`, `top` or `--dx` set from them is a zoomed length: divide by `screen_zoom` (`common.rs`) or the popup lands `--z` times too far (tooltips, the message editor's emoji and variable menus). Ratios inside one rectangle (the colour picker) are fine. `tools/ui-sizes.mjs` fails on a bare `vw`/`vh` and on a second `zoom` in `style.css`.
+## Each list drew its own hover and drag look (sortable list, 2026-11-20)
+
+The saved messages list had an orange outline on hover, Channel Setup a background only, and Permits up and down buttons: three looks for one idea, and orange on hover said "selected" when nothing was. Native HTML drag also does nothing on a touch screen, so a whole-row drag can not be the phone way.
+
+**Rule:** a sortable or selectable row takes its outlines from `--ol-hover` (grey) and `--ol-pick` (orange) in `style.css`, and a new sortable list uses `.slist` / `.srow` with `Grip` from `common.rs` (mouse: native drag on the row; finger: pointer events on the grip only). A confirm dialog opened from another dialog comes after it in the page, or it opens under it.
+
+## The Add feed dialog: both choices orange, a cut-off help bubble, a stray line (Feeds, 2026-11-20)
+
+Four faults from one screenshot, three root causes.
+
+1. **Both source buttons were orange.** `.seg` (the two-choice selector) had no rule of its own: every page scoped it (`.cs .seg`, `.mcard .seg`, `.pop .seg`, `.send .seg`, `.chpick .seg`), so a page outside those parents (Feeds, with its sort control too) got plain orange buttons and no "open" state. **Rule:** `.seg` has a base rule in `style.css` (muted buttons, the open one orange); a scoped rule may only add to it. Any new `class="seg"` works anywhere.
+2. **A help bubble was cut at the dialog's edge, and a thin line showed along its bottom.** `.modal .card` scrolls (`overflow:auto`), so an absolutely placed `.tip .bubble` is clipped by the card and widens its scroll area (the line is the horizontal scrollbar). `Tip` placed the bubble inside `main`, which is wider than a dialog. **Rule:** `Tip` measures against the dialog card when it sits in one (sideways and upward), else the page area. Checked: every `Tip` in a dialog (Feeds, Commands settings, Permits, Channel Setup push) uses it.
+3. **A grey "Type the YouTube channel." line read like an error and moved the buttons.** A missing field is said once, on the field's own hint line and on the disabled button's tooltip, never as a line between the form and its buttons.
+
+**Also:** the add form asks for one link. `guess_kind` (`feeds.rs`) names the source from it (YouTube @handle, channel id or youtube.com page; github.com; gitlab.com; else RSS). YouTube's own `/feeds/` links are RSS. A self-hosted GitLab cannot be told from a website, so "More options" keeps a Source list (Detect from the link, RSS or Atom, YouTube, GitHub, GitLab). The server still gets an explicit `kind`, so no safety rule changed.
+## Fields that a password manager takes for a login
+
+1Password (and LastPass, Bitwarden, Dashlane) guess a login form from field names, search boxes and code fields, with no password field present. It then offered "Sign in" on most pages (Bot Profile has a "Bot name" field and a search box). The dashboard has no login form: sign-in is Discord OAuth.
+
+**Rule:** do nothing per field. `index.html` `quiet` gives every `input` and `textarea` that mounts `autocomplete="off"` (unless it sets its own) plus `data-1p-ignore`, `data-lpignore`, `data-bwignore` and `data-form-type="other"`. The authenticator code field keeps `autocomplete="one-time-code"` so a manager can fill its code. Never add a `type="password"` field. The Rescue Key is shown as text and claimed in Discord, so no dashboard field holds it.
+
+**Check:** the e2e sweep fails on any field without those attributes. The real test is a person with the manager installed.
+
+## The front page hero must not reuse a dashboard class name (front page hero, 2026-11-20)
+
+The first hero draft named its glow circle `.ring`, which is the dashboard's score ring (`.ring` in `style.css`), so the circle came out stretched into an oval. The dashboard's element and class rules are global and the front page shares the stylesheet.
+
+**Rule:** front page classes start with `hero-` or `land-` (`.land .hero-...`). Before adding a class, grep `style.css` for it. Preview a front page change with the real page (`trunk build`, serve `dist/`, answer `/api/*` with 401), not a static copy, since a static copy does not load the dashboard's rules.
+
+## Channel Setup could not move a channel on a phone (owner decision, 2026-11-21)
+
+On a touch screen Channel Setup turns native drag off (it does nothing there) and the ⋮ menu's "Move to category…" only selected the row and called `focus` on the category picker in the side panel, one animation frame later. iOS Safari ignores `focus` that does not run inside the tap itself, and on a phone the panel sits under the whole list, so the tap did nothing visible. The Roles tab had no finger way to reorder at all.
+
+**Rule:** a menu item does its job itself; it never only moves the focus to a control somewhere else. The ⋮ menu now holds the category picker (`<select>` opens from the tap). A list with a selected row (Channel Setup channels and roles) uses `HoldDrag` (`common.rs`) for the finger: tap selects, a press held still for 0.4 s on the selected row lifts it, a finger that moves first scrolls. Its places carry `data-drop`. A menu on one of the last rows opens upwards (`.rowmenu.up`), or the push bar covers it.
+
+## A refresh button must refresh what the person is looking at (server refresh, 2026-11-21)
+
+The sidebar's "refresh server" button only fetched `/api/guilds` again. The server list changed nowhere visible and the open page never fetched its data again, so a tap did nothing a person could see. The button was also a green pill set absolutely inside the server link (`<a><button>`), which is invalid HTML and sat out of place on top of the name.
+
+**Rule:** a refresh control refetches the data on screen (main.rs `refresh`: the server list, then `page_tick` builds the open page anew) and asks first when a save bar (`main .bar`) shows unsaved edits. A failure shows in the toast. Never put a button inside a link: put it next to the link in a row (`.srv-row`).
+
+**Check:** in the browser, count the `/api/` requests after the tap: more than the server list must go out, and the page content must load again.

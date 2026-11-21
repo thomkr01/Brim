@@ -1,0 +1,102 @@
+//! Warn points (spec 4.9): thresholds map accumulated points to a punishment; harshest crossed wins.
+use serde::Deserialize;
+
+/// Stored as `{"points": 5, "action": "timeout", "secs": 600}` in the misc config's `warn_actions`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Threshold {
+    pub points: i32,
+    #[serde(flatten)]
+    pub action: Action,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum Action {
+    /// 0 (set by `misc 3b`) means the default timeout duration (`misc 2c`).
+    Timeout {
+        #[serde(default)]
+        secs: i64,
+    },
+    Kick,
+    Ban,
+}
+
+impl Action {
+    fn severity(&self) -> u8 {
+        match self {
+            Action::Timeout { .. } => 0,
+            Action::Kick => 1,
+            Action::Ban => 2,
+        }
+    }
+}
+
+/// Returns the punishment when `before` -> `after` crosses one or more thresholds.
+pub fn crossed(thresholds: &[Threshold], before: i32, after: i32) -> Option<Threshold> {
+    thresholds
+        .iter()
+        .filter(|t| t.points > before && t.points <= after)
+        .max_by_key(|t| (t.action.severity(), t.points))
+        .cloned()
+}
+
+/// The nearest threshold above `points`: how far away the next punishment is.
+pub fn next(thresholds: &[Threshold], points: i32) -> Option<&Threshold> {
+    thresholds
+        .iter()
+        .filter(|t| t.points > points)
+        .min_by_key(|t| t.points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_is_the_nearest_threshold_above() {
+        let t = |points| Threshold {
+            points,
+            action: Action::Kick,
+        };
+        let ts = [t(10), t(5), t(20)];
+        assert_eq!(next(&ts, 5).map(|t| t.points), Some(10));
+        assert_eq!(next(&ts, 20), None);
+    }
+
+    #[test]
+    fn harshest_crossed_wins() {
+        let ts = [
+            Threshold {
+                points: 3,
+                action: Action::Timeout { secs: 600 },
+            },
+            Threshold {
+                points: 6,
+                action: Action::Kick,
+            },
+            Threshold {
+                points: 9,
+                action: Action::Ban,
+            },
+        ];
+        assert_eq!(crossed(&ts, 0, 2), None);
+        assert_eq!(next(&ts, 4).map(|t| t.points), Some(6));
+        assert!(next(&ts, 9).is_none());
+        assert_eq!(
+            crossed(&ts, 0, 3).unwrap().action,
+            Action::Timeout { secs: 600 }
+        );
+        assert_eq!(crossed(&ts, 2, 7).unwrap().action, Action::Kick);
+        assert_eq!(crossed(&ts, 7, 7), None);
+    }
+
+    #[test]
+    fn parses_stored_rows() {
+        let ts: Vec<Threshold> = serde_json::from_str(
+            r#"[{"points":3,"action":"timeout","secs":600},{"points":6,"action":"ban"}]"#,
+        )
+        .unwrap();
+        assert_eq!(ts[0].action, Action::Timeout { secs: 600 });
+        assert_eq!(ts[1].action, Action::Ban);
+    }
+}

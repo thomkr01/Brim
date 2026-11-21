@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+exclude = ["vendor"]
+
+[workspace.package]
+edition = "2021"
+license-file = "LICENSE"
+
+[workspace.dependencies]
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "time", "net"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "macros", "migrate", "json", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
+twilight-gateway = "0.18"
+twilight-http = "0.18"
+twilight-model = "0.18"
+twilight-util = { version = "0.18", features = ["builder", "permission-calculator"] }
+brim-core = { path = "crates/core" }
+brim-antinuke = { path = "crates/antinuke" }
+brim-automod = { path = "crates/automod" }
+brim-logging = { path = "crates/logging" }
+
+# twilight-model 0.18.0 with one change: Permissions deserializes with from_bits_retain, so roles and
+# overwrites read from Discord keep bits twilight does not know (1<<48 Set Voice Channel Status).
+# Re-apply the patch (src/guild/permissions.rs, visit_u64) on every twilight upgrade, then update
+# vendor/twilight-model.lock and vendor/twilight-model.patch: CI's scripts/check-vendor.sh checks them.
+[patch.crates-io]
+twilight-model = { path = "vendor/twilight-model" }

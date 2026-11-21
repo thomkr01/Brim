@@ -1,0 +1,29 @@
+[package]
+name = "brim-automod"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+decancer = "4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+brim-antinuke.workspace = true
+brim-logging.workspace = true
+base64 = "0.23"
+sha2 = "0.11"
+rand = "0.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
+ab_glyph = "0.2"
+fst = "0.4"
+libc = "0.2"
+feed-rs = "3"
+
+[dev-dependencies]
+brim-core.workspace = true

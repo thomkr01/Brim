@@ -1,0 +1,136 @@
+//! Staff notes: edits that keep a history row, and the mod-log entry every note change sends.
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NoteAction {
+    #[default]
+    Add,
+    Modify,
+    Remove,
+    Sweep,
+}
+
+/// What changed; the payload of the `note_log` job, also built by the bot's note commands.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NoteLog {
+    pub action: NoteAction,
+    pub id: Option<String>,
+    /// The member the note is about (for a sweep: the member filter).
+    pub user: Option<u64>,
+    pub by: u64,
+    /// The note's text (new text for a modify).
+    pub text: Option<String>,
+    /// The text before a modify.
+    pub old: Option<String>,
+    /// For a sweep: notes removed, and the author filter.
+    pub count: Option<u64>,
+    pub author: Option<u64>,
+    /// The MCP token that wrote it for the bot owner (`by`); None for a person.
+    #[serde(default)]
+    pub ai: Option<String>,
+}
+
+/// How a record written through MCP names its author: the AI client, acting as the bot owner.
+pub fn ai_label(client: &str) -> String {
+    format!("AI via bot owner, token {client}")
+}
+
+/// Changes a note's text and records the old one in `note_edits`, in one statement. Returns the
+/// note's member and its old text, or None when the guild has no note `short_id`.
+pub async fn edit(
+    pool: &PgPool,
+    guild: i64,
+    short_id: &str,
+    text: &str,
+    editor: i64,
+    ai_client: Option<&str>,
+) -> sqlx::Result<Option<(i64, String)>> {
+    sqlx::query_as(
+        "WITH old AS (SELECT id, user_id, text FROM notes WHERE guild_id = $1 AND short_id = $2 FOR UPDATE),
+              up AS (UPDATE notes n SET text = $3 FROM old WHERE n.id = old.id AND old.text <> $3),
+              ed AS (INSERT INTO note_edits (note_id, guild_id, old_text, new_text, editor_id, ai_client)
+                     SELECT id, $1, text, $3, $4, $5 FROM old WHERE text <> $3)
+         SELECT user_id, text FROM old",
+    )
+    .bind(guild)
+    .bind(short_id)
+    .bind(text)
+    .bind(editor)
+    .bind(ai_client)
+    .fetch_optional(pool)
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn edits_keep_the_history_and_the_created_time() {
+        let Ok(url) = crate::db::test_url() else {
+            return;
+        };
+        let pool = crate::db::connect(&url).await.unwrap();
+        let g = 9_100_000_000 + std::process::id() as i64;
+        sqlx::query("DELETE FROM notes WHERE guild_id = $1")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (id, short, created): (i64, String, String) = sqlx::query_as(
+            "INSERT INTO notes (guild_id, user_id, author_id, text) VALUES ($1, 7, 8, 'first')
+             RETURNING id, short_id, created_at::text",
+        )
+        .bind(g)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            super::edit(&pool, g, &short, "second", 9, None)
+                .await
+                .unwrap(),
+            Some((7, "first".into()))
+        );
+        super::edit(&pool, g, &short, "third", 10, None)
+            .await
+            .unwrap();
+        // Saving the same text again is not an edit.
+        assert_eq!(
+            super::edit(&pool, g, &short, "third", 11, None)
+                .await
+                .unwrap(),
+            Some((7, "third".into()))
+        );
+        assert_eq!(
+            super::edit(&pool, g, "nope", "x", 9, None).await.unwrap(),
+            None
+        );
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT old_text, new_text, editor_id FROM note_edits WHERE note_id = $1 ORDER BY id",
+        )
+        .bind(id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            [
+                ("first".into(), "second".into(), 9),
+                ("second".into(), "third".into(), 10)
+            ]
+        );
+        let (text, at): (String, String) =
+            sqlx::query_as("SELECT text, created_at::text FROM notes WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!((text.as_str(), at), ("third", created));
+        sqlx::query("DELETE FROM notes WHERE guild_id = $1")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+}

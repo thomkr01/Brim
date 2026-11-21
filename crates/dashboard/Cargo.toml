@@ -1,0 +1,30 @@
+[package]
+name = "brim-dashboard"
+version = "0.1.0"
+edition.workspace = true
+license-file.workspace = true
+
+[dependencies]
+brim-core.workspace = true
+brim-antinuke = { path = "../antinuke" }
+brim-automod = { path = "../automod" }
+brim-logging = { path = "../logging" }
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+axum = "0.8"
+axum-extra = { version = "0.12", features = ["cookie"] }
+base64 = "0.23"
+rand = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+totp-rs = { version = "6", features = ["gen_secret", "otpauth"] }
+tower-http = { version = "0.7", features = ["fs", "trace", "set-header"] }
+sha2 = "0.11"
+hmac = "0.13"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+tower = { version = "0.5", features = ["util"] }

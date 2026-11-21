@@ -1,0 +1,22 @@
+name: Audit
+
+# CI's supply-chain job checks advisories (RustSec) on every push and pull request. This weekly run
+# shows a new advisory even when nobody pushes. Ignored advisories are listed in .cargo/audit.toml.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
+        with:
+          tool: cargo-audit@0.22.2
+      - run: cargo audit
+      - run: cargo audit -f vendor/twilight-model.lock

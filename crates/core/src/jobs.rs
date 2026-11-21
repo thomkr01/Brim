@@ -1,0 +1,466 @@
+//! Restart-safe timers on `scheduled_jobs`: one row per pending action, claimed by deleting it.
+use anyhow::Result;
+use serde_json::Value;
+use sqlx::PgPool;
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct Job {
+    pub id: i64,
+    pub guild_id: i64,
+    pub kind: String,
+    pub payload: Value,
+    pub attempts: i32,
+}
+
+/// Returns the job id, for [`finish`]. Takes a pool or a transaction, so a job can be written
+/// together with the state it undoes.
+pub async fn enqueue<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    guild: i64,
+    kind: &str,
+    payload: Value,
+    run_at_secs: i64,
+) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "INSERT INTO scheduled_jobs (guild_id, kind, payload, run_at)
+         VALUES ($1, $2, $3, to_timestamp($4::float8)) RETURNING id",
+    )
+    .bind(guild)
+    .bind(kind)
+    .bind(payload)
+    .bind(run_at_secs as f64)
+    .fetch_one(db)
+    .await?)
+}
+
+/// Queues a `kind` job (empty payload) unless one is already pending for the guild: one run
+/// covers every change made before it starts. A job being run (leased) does not count.
+pub async fn enqueue_once<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    guild: i64,
+    kind: &str,
+    run_at_secs: i64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO scheduled_jobs (guild_id, kind, payload, run_at)
+         SELECT $1, $2, '{}', to_timestamp($3::float8) WHERE NOT EXISTS (
+           SELECT 1 FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2
+             AND (locked_until IS NULL OR locked_until < now()))",
+    )
+    .bind(guild)
+    .bind(kind)
+    .bind(run_at_secs as f64)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Jobs that fail this many times are dropped by the scheduler.
+pub const MAX_ATTEMPTS: i32 = 5;
+/// Kinds that can run for minutes; a separate worker takes them so they never delay unbans or unlocks.
+pub const HEAVY: [&str; 6] = [
+    "backup_load",
+    "raider_scan",
+    // Startup catch-ups that page members or the audit log (D58).
+    "requarantine_missed",
+    "verify_catch_up",
+    "permit_sync",
+    "verify_sweep",
+];
+/// Protection that must start at once: its own worker, so no other server's heavy job delays it
+/// (security review-11-17, s02:t-cap-job-fifo). Can run for minutes too.
+pub const URGENT: [&str; 2] = ["panic_start", "nuke_revert"];
+
+/// Which worker claims a job.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Lane {
+    Light,
+    Heavy,
+    Urgent,
+}
+
+const LEASE_SECS: i32 = 60;
+const HEAVY_LEASE_SECS: i32 = 900;
+
+/// Replaces any pending job of the same guild and kind (e.g. panic mode restarted).
+pub async fn replace(
+    pool: &PgPool,
+    guild: i64,
+    kind: &str,
+    payload: Value,
+    run_at_secs: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2")
+        .bind(guild)
+        .bind(kind)
+        .execute(pool)
+        .await?;
+    enqueue(pool, guild, kind, payload, run_at_secs)
+        .await
+        .map(drop)
+}
+
+/// Leases due jobs of one [`Lane`] ([`URGENT`], [`HEAVY`] or all others) and returns them; call
+/// [`finish`] when done.
+/// SKIP LOCKED keeps two instances from claiming the same row, and a crashed claimer's jobs
+/// return after the lease.
+pub async fn claim_due(pool: &PgPool, limit: i64, lane: Lane) -> Result<Vec<Job>> {
+    let (kinds, light): (Vec<&str>, bool) = match lane {
+        Lane::Urgent => (URGENT.to_vec(), false),
+        Lane::Heavy => (HEAVY.to_vec(), false),
+        Lane::Light => ([HEAVY.as_slice(), URGENT.as_slice()].concat(), true),
+    };
+    Ok(sqlx::query_as(
+        "WITH c AS (
+             UPDATE scheduled_jobs
+             SET locked_until = now() + make_interval(secs => $2), attempts = attempts + 1
+             WHERE id IN (
+                 SELECT id FROM scheduled_jobs
+                 WHERE run_at <= now() AND (locked_until IS NULL OR locked_until < now())
+                   AND (kind = ANY($4)) <> $3
+                 ORDER BY run_at FOR UPDATE SKIP LOCKED LIMIT $1)
+             RETURNING id, guild_id, kind, payload, run_at, attempts)
+         SELECT id, guild_id, kind, payload, attempts FROM c ORDER BY run_at",
+    )
+    .bind(limit)
+    .bind(if light { LEASE_SECS } else { HEAVY_LEASE_SECS })
+    .bind(light)
+    .bind(&kinds)
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn finish(pool: &PgPool, id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM scheduled_jobs WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// The pending, unclaimed `kind` job for `user` (payload `user`) as (id, run_at secs, payload).
+pub async fn of_user(
+    pool: &PgPool,
+    guild: i64,
+    kind: &str,
+    user: u64,
+) -> Result<Option<(i64, i64, Value)>> {
+    Ok(sqlx::query_as(
+        "SELECT id, extract(epoch from run_at)::bigint, payload FROM scheduled_jobs
+         WHERE guild_id = $1 AND kind = $2 AND payload->>'user' = $3
+           AND (locked_until IS NULL OR locked_until < now())
+         ORDER BY run_at LIMIT 1",
+    )
+    .bind(guild)
+    .bind(kind)
+    .bind(user.to_string())
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// Deletes the pending jobs of these `kinds` for `user` (payload `user`) other than `keep`: a later
+/// ban or a lift makes an older temp ban's unban, or an older timeout's renewal, wrong.
+pub async fn cancel_user<'e>(
+    db: impl sqlx::PgExecutor<'e>,
+    guild: i64,
+    kinds: &[&str],
+    user: u64,
+    keep: Option<i64>,
+) -> Result<u64> {
+    Ok(sqlx::query(
+        "DELETE FROM scheduled_jobs WHERE guild_id = $1 AND kind = ANY($2) AND payload->>'user' = $3
+           AND id IS DISTINCT FROM $4",
+    )
+    .bind(guild)
+    .bind(kinds)
+    .bind(user.to_string())
+    .bind(keep)
+    .execute(db)
+    .await?
+    .rows_affected())
+}
+
+/// Moves a pending job to a new time and payload.
+pub async fn reschedule(pool: &PgPool, id: i64, run_at_secs: i64, payload: Value) -> Result<()> {
+    sqlx::query(
+        "UPDATE scheduled_jobs SET run_at = to_timestamp($2::float8), payload = $3
+         WHERE id = $1 AND (locked_until IS NULL OR locked_until < now())",
+    )
+    .bind(id)
+    .bind(run_at_secs as f64)
+    .bind(payload)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Pending jobs of one kind as (guild, payload), for rebuilding in-memory state at boot. Oldest
+/// `run_at` first, so a caller keeping one per guild keeps the latest.
+pub async fn pending(pool: &PgPool, kind: &str) -> Result<Vec<(i64, Value)>> {
+    Ok(sqlx::query_as(
+        "SELECT guild_id, payload FROM scheduled_jobs WHERE kind = $1 ORDER BY run_at, id",
+    )
+    .bind(kind)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Jobs that are due now and not leased, for the metrics endpoint.
+pub async fn backlog(pool: &PgPool) -> Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_jobs
+         WHERE run_at <= now() AND (locked_until IS NULL OR locked_until < now())",
+    )
+    .fetch_one(pool)
+    .await?)
+}
+
+/// Deactivates cases whose expiry passed; returns how many.
+pub async fn expire_cases(pool: &PgPool) -> Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE cases SET active = false
+         WHERE active AND expires_at IS NOT NULL AND expires_at < now()",
+    )
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    /// Skips (None) without DATABASE_URL. Other tests share the tables, so each uses its own guild.
+    async fn setup(offset: i64) -> Option<(PgPool, i64)> {
+        let url = crate::db::test_url().ok()?;
+        let pool = crate::db::connect(&url).await.unwrap();
+        let gid = 5_000_000_000 + std::process::id() as i64 * 10 + offset;
+        clean(&pool, gid).await;
+        Some((pool, gid))
+    }
+
+    async fn clean(pool: &PgPool, gid: i64) {
+        for t in ["scheduled_jobs", "cases"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {t} WHERE guild_id = $1"
+            )))
+            .bind(gid)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn claims_in_order_and_never_twice() {
+        let Some((pool, gid)) = setup(1).await else {
+            return;
+        };
+        let n = now();
+        enqueue(&pool, gid, "b", Value::Null, n - 10).await.unwrap();
+        enqueue(&pool, gid, "a", Value::Null, n - 20).await.unwrap();
+        enqueue(&pool, gid, "later", Value::Null, n + 3600)
+            .await
+            .unwrap();
+        let got = claim_due(&pool, 1000, Lane::Light).await.unwrap();
+        let kinds: Vec<_> = got
+            .iter()
+            .filter(|j| j.guild_id == gid)
+            .map(|j| j.kind.as_str())
+            .collect();
+        assert_eq!(kinds, ["a", "b"]);
+        // Leased jobs are not handed out again until finished or the lease runs out.
+        let again = claim_due(&pool, 1000, Lane::Light).await.unwrap();
+        assert!(again.iter().all(|j| j.guild_id != gid));
+        for j in got.iter().filter(|j| j.guild_id == gid) {
+            finish(&pool, j.id).await.unwrap();
+        }
+        let (left,): (i64,) =
+            sqlx::query_as("SELECT count(*) FROM scheduled_jobs WHERE guild_id=$1")
+                .bind(gid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(left, 1);
+        clean(&pool, gid).await;
+
+        // Same test on purpose: claim_due takes every guild's rows, so parallel tests would steal from each other.
+        for i in 0..20 {
+            enqueue(&pool, gid, "k", Value::from(i), now() - 5)
+                .await
+                .unwrap();
+        }
+        let (a, b) = tokio::join!(
+            claim_due(&pool, 10, Lane::Light),
+            claim_due(&pool, 10, Lane::Light)
+        );
+        let mut ids: Vec<i64> = [a.unwrap(), b.unwrap()]
+            .into_iter()
+            .flatten()
+            .filter(|j| j.guild_id == gid)
+            .map(|j| j.id)
+            .collect();
+        let total = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), total);
+        clean(&pool, gid).await;
+        each_lane_claims_only_its_kinds(&pool, gid).await;
+        lease_expiry_and_replace(&pool, gid).await;
+    }
+
+    async fn each_lane_claims_only_its_kinds(pool: &PgPool, gid: i64) {
+        for k in ["unban", "backup_load", "panic_start"] {
+            enqueue(pool, gid, k, Value::Null, now() - 5).await.unwrap();
+        }
+        let kinds = |v: Vec<Job>| -> Vec<String> {
+            v.into_iter()
+                .filter(|j| j.guild_id == gid)
+                .map(|j| j.kind)
+                .collect()
+        };
+        assert_eq!(
+            kinds(claim_due(pool, 1000, Lane::Heavy).await.unwrap()),
+            ["backup_load"]
+        );
+        assert_eq!(
+            kinds(claim_due(pool, 1000, Lane::Urgent).await.unwrap()),
+            ["panic_start"]
+        );
+        assert_eq!(
+            kinds(claim_due(pool, 1000, Lane::Light).await.unwrap()),
+            ["unban"]
+        );
+        clean(pool, gid).await;
+    }
+
+    /// Future jobs only, so the claim test never takes them.
+    #[tokio::test]
+    async fn reschedule_moves_a_users_job() {
+        let Some((pool, gid)) = setup(4).await else {
+            return;
+        };
+        let at = now() + 600;
+        let job = serde_json::json!({"user": 42});
+        enqueue(&pool, gid, "v", job.clone(), at).await.unwrap();
+        assert!(of_user(&pool, gid, "v", 43).await.unwrap().is_none());
+        let (id, run_at, payload) = of_user(&pool, gid, "v", 42).await.unwrap().unwrap();
+        assert_eq!((run_at, &payload), (at, &job));
+        let moved = serde_json::json!({"user": 42, "paused_until": at});
+        reschedule(&pool, id, at + 300, moved.clone())
+            .await
+            .unwrap();
+        let got = of_user(&pool, gid, "v", 42).await.unwrap().unwrap();
+        assert_eq!(got, (id, at + 300, moved));
+        clean(&pool, gid).await;
+    }
+
+    #[tokio::test]
+    async fn cancel_user_keeps_other_users_and_the_new_job() {
+        let Some((pool, gid)) = setup(5).await else {
+            return;
+        };
+        let at = now() + 600;
+        let user = |u: u64| serde_json::json!({ "user": u });
+        enqueue(&pool, gid, "unban", user(42), at).await.unwrap();
+        enqueue(&pool, gid, "unban", user(43), at).await.unwrap();
+        enqueue(&pool, gid, "timeout_renew", user(42), at)
+            .await
+            .unwrap();
+        let new = enqueue(&pool, gid, "unban", user(42), at).await.unwrap();
+        assert_eq!(
+            cancel_user(&pool, gid, &["unban"], 42, Some(new))
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            of_user(&pool, gid, "unban", 42).await.unwrap().unwrap().0,
+            new
+        );
+        assert!(of_user(&pool, gid, "unban", 43).await.unwrap().is_some());
+        assert!(of_user(&pool, gid, "timeout_renew", 42)
+            .await
+            .unwrap()
+            .is_some());
+        assert_eq!(
+            cancel_user(&pool, gid, &["unban"], 42, None).await.unwrap(),
+            1
+        );
+        assert!(of_user(&pool, gid, "unban", 42).await.unwrap().is_none());
+        clean(&pool, gid).await;
+    }
+
+    /// Called from the claim test: claim_due takes every guild's rows, so it cannot run in parallel.
+    async fn lease_expiry_and_replace(pool: &PgPool, gid: i64) {
+        let pool = pool.clone();
+        enqueue(&pool, gid, "x", Value::Null, now() - 5)
+            .await
+            .unwrap();
+        let first = claim_due(&pool, 1000, Lane::Light).await.unwrap();
+        assert!(first.iter().any(|j| j.guild_id == gid && j.attempts == 1));
+        // Simulate a crash: the claimer never finished and the lease ran out.
+        sqlx::query("UPDATE scheduled_jobs SET locked_until = now() - interval '1 second' WHERE guild_id=$1")
+            .bind(gid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let second = claim_due(&pool, 1000, Lane::Light).await.unwrap();
+        assert!(second.iter().any(|j| j.guild_id == gid && j.attempts == 2));
+        clean(&pool, gid).await;
+
+        replace(&pool, gid, "p", Value::from(1), now() + 60)
+            .await
+            .unwrap();
+        replace(&pool, gid, "p", Value::from(2), now() + 120)
+            .await
+            .unwrap();
+        let p: Vec<_> = pending(&pool, "p")
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.0 == gid)
+            .collect();
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].1, Value::from(2));
+        clean(&pool, gid).await;
+    }
+
+    #[tokio::test]
+    async fn expiry_flips_only_expired_cases() {
+        let Some((pool, gid)) = setup(3).await else {
+            return;
+        };
+        for (no, expiry) in [
+            (1, "now() - interval '1 hour'"),
+            (2, "now() + interval '1 hour'"),
+            (3, "NULL"),
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO cases (guild_id, case_no, kind, user_id, mod_id, expires_at)
+                 VALUES ($1, $2, 'warn', 1, 1, {expiry})"
+            )))
+            .bind(gid)
+            .bind(no)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        expire_cases(&pool).await.unwrap();
+        let rows: Vec<(i32, bool)> =
+            sqlx::query_as("SELECT case_no, active FROM cases WHERE guild_id=$1 ORDER BY case_no")
+                .bind(gid)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(rows, [(1, false), (2, true), (3, true)]);
+        clean(&pool, gid).await;
+    }
+}

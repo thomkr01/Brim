@@ -1,0 +1,22 @@
+//! Shared config, database access and models. Feature crates depend on this.
+pub mod cases;
+pub mod cmdcfg;
+pub mod config;
+pub mod db;
+pub mod duration;
+pub mod invites;
+pub mod jobs;
+pub mod limits;
+pub mod log;
+pub mod models;
+pub mod msgsched;
+pub mod msgtrig;
+pub mod msgvars;
+pub mod notes;
+pub mod permits;
+pub mod persondata;
+pub mod raiders;
+pub mod ratelimit;
+pub mod roles;
+pub mod sections;
+pub mod warn;

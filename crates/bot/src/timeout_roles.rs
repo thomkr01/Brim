@@ -1,0 +1,119 @@
+//! Misc "Remove Main Roles on TO": a timed-out member loses the main roles, and gets them back
+//! when the timeout ends or is lifted.
+use anyhow::{Context, Result};
+use brim_core::jobs;
+use serde_json::{json, Value};
+use twilight_http::request::AuditLogReason;
+use twilight_model::{
+    gateway::payload::incoming::MemberUpdate,
+    id::{marker::GuildMarker, Id},
+    util::Timestamp,
+};
+
+use crate::app::{now_secs, App};
+
+pub(crate) const KIND: &str = "restore_main_roles";
+
+/// The end of a timeout that has not run out yet.
+fn active(until: Option<Timestamp>) -> Option<i64> {
+    until.map(|t| t.as_secs()).filter(|&t| t > now_secs())
+}
+
+pub async fn on_member_update(app: &App, m: &MemberUpdate) -> Result<()> {
+    let cfg = app.cfg(m.guild_id.get()).await?;
+    if !cfg.misc.remove_main_roles_on_timeout {
+        return Ok(());
+    }
+    let main = &cfg.lockdown.main_roles;
+    let g = m.guild_id.get() as i64;
+    if let Some(until) = active(m.communication_disabled_until) {
+        let held: Vec<_> = main.iter().filter(|r| m.roles.contains(r)).collect();
+        if held.is_empty() {
+            return Ok(());
+        }
+        // Queued first, so a restart halfway never loses the roles for good.
+        let roles: Vec<u64> = held.iter().map(|r| r.get()).collect();
+        // joined_at: a rejoin (Discord keeps the timeout) must not get them back unverified.
+        let joined = m.joined_at.map(|t| t.as_micros());
+        let job = json!({"user": m.user.id.get(), "roles": roles, "joined_at": joined});
+        jobs::enqueue(&app.pool, g, KIND, job, until).await?;
+        for r in &held {
+            app.http
+                .remove_guild_member_role(m.guild_id, m.user.id, **r)
+                .reason("Timed out: main roles removed")
+                .await?;
+        }
+        return Ok(());
+    }
+    if main.iter().all(|r| m.roles.contains(r)) {
+        return Ok(());
+    }
+    // Timeout lifted early: restore now instead of at the old end.
+    let early: Vec<Value> = sqlx::query_scalar(
+        "DELETE FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2 AND payload->>'user' = $3
+         RETURNING payload",
+    )
+    .bind(g)
+    .bind(KIND)
+    .bind(m.user.id.get().to_string())
+    .fetch_all(&app.pool)
+    .await?;
+    let mut failed = None;
+    for p in early {
+        // The job is already gone: a failed restore queues it again, or the roles are lost.
+        if let Err(e) = restore(app, m.guild_id, &p).await {
+            if let Err(q) = jobs::enqueue(&app.pool, g, KIND, p, now_secs() + 60).await {
+                tracing::warn!(?q, "queueing the role restore again failed");
+            }
+            failed = Some(e);
+        }
+    }
+    failed.map_or(Ok(()), Err)
+}
+
+/// Gives the removed roles back, or waits again if the timeout was extended. A quarantined member's
+/// roles go into the quarantine's saved list, so the release gives them back. Nothing for a member
+/// who left or is held for verification, nor for a job whose membership (`joined_at`, µs) is over.
+pub async fn restore(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let user = Id::new(p["user"].as_u64().context("job payload has no user")?);
+    let Some(member) = crate::http_err::member(&app.http, gid, user).await? else {
+        return Ok(());
+    };
+    let joined = member.joined_at.map(|t| t.as_micros());
+    if p["joined_at"].as_i64().is_some_and(|j| Some(j) != joined) {
+        return Ok(());
+    }
+    if let Some(t) = active(member.communication_disabled_until) {
+        return jobs::enqueue(&app.pool, gid.get() as i64, KIND, p.clone(), t)
+            .await
+            .map(drop);
+    }
+    let roles: Vec<i64> = p["roles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_i64)
+        .collect();
+    let (g, u) = (gid.get() as i64, user.get() as i64);
+    let quarantined = sqlx::query(
+        "UPDATE quarantines SET saved_roles = ARRAY(SELECT DISTINCT unnest(saved_roles || $3))
+         WHERE guild_id = $1 AND user_id = $2",
+    )
+    .bind(g)
+    .bind(u)
+    .bind(&roles)
+    .execute(&app.pool)
+    .await?
+    .rows_affected()
+        > 0;
+    if quarantined || crate::sticky::pending(&app.pool, g, u).await? {
+        return Ok(());
+    }
+    for r in roles {
+        app.http
+            .add_guild_member_role(gid, user, Id::new(r as u64))
+            .reason("Timeout ended: main roles restored")
+            .await?;
+    }
+    Ok(())
+}

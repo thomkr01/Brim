@@ -1,0 +1,8 @@
+/target
+.env
+.env.*
+!.env.example
+*.sql.gz
+*.sql.gz.age
+__pycache__/
+graphify-out/

@@ -1,0 +1,811 @@
+//! Appeals: the public form a banned or timed-out user fills in, and the staff list and blacklist.
+use crate::{access::Level, api, auth::Sess, ApiError, AppState};
+use axum::{
+    extract::{Path, Query, State},
+    routing::{get, post},
+    Json, Router,
+};
+use brim_core::sections::{AppealField, AppealsCfg, MAX_APPEAL_FIELDS};
+use reqwest::Method;
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+type Res = Result<Json<Value>, ApiError>;
+
+type Row = (
+    i64,
+    String,
+    String,
+    String,
+    Value,
+    String,
+    chrono::DateTime<chrono::Utc>,
+);
+
+type MineRow = (
+    i64,
+    String,
+    String,
+    Option<String>,
+    chrono::DateTime<chrono::Utc>,
+);
+
+const MAX_ANSWER: usize = 1000;
+
+/// Validates one answer with its texts and returns what is stored. A multi choice answer is the
+/// picked options, one per line.
+fn check(f: &AppealField, a: &str) -> Result<String, String> {
+    let a = a.trim();
+    let none = || {
+        if f.required {
+            Err("This field must have a selected item.".to_string())
+        } else {
+            Ok("Not answered.".to_string())
+        }
+    };
+    if !f.options.is_empty() {
+        let picked: Vec<&str> = a.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        if picked.is_empty() {
+            return none();
+        }
+        if (picked.len() > 1 && !f.multi)
+            || picked.iter().any(|p| !f.options.iter().any(|o| o == p))
+        {
+            return Err("Check what is highlighted in red.".into());
+        }
+        return Ok(picked.join(", "));
+    }
+    let max = f.max.unwrap_or(MAX_ANSWER).min(MAX_ANSWER);
+    let min = f.min.unwrap_or(usize::from(f.required)).min(max);
+    let n = a.chars().count();
+    if n == 0 && !f.required {
+        return Ok("Not answered.".into());
+    }
+    if n < min || n > max {
+        return Err(format!(
+            "This content has to be between {min} and {max} characters long."
+        ));
+    }
+    Ok(a.into())
+}
+
+pub fn routes() -> Router<AppState> {
+    let g = "/api/guilds/{guild}/appeals";
+    Router::new()
+        .route("/api/appeal/{guild}", get(form).post(submit))
+        .route("/api/appeal/notifications", get(unread).post(mark_seen))
+        .route("/api/appeal/{guild}/mine", get(mine))
+        .route("/api/appeal/{guild}/withdraw", post(withdraw))
+        .route(g, get(list))
+        .route(&format!("{g}/{{id}}/decide"), post(decide))
+        .route(
+            &format!("{g}/blacklist"),
+            get(blacklist).post(blacklist_add),
+        )
+        .route(&format!("{g}/blacklist/purge"), post(blacklist_purge))
+        .route(
+            &format!("{g}/blacklist/{{user}}/remove"),
+            post(blacklist_remove),
+        )
+}
+
+async fn cfg(st: &AppState, guild: i64) -> Result<AppealsCfg, ApiError> {
+    let (_, config) = crate::store::current(&st.db, guild).await?;
+    Ok(config
+        .get("appeals")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default())
+}
+
+fn not_found(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<reqwest::Error>().and_then(|e| e.status())
+        == Some(reqwest::StatusCode::NOT_FOUND)
+}
+
+/// What the user can appeal in this server: "ban", "timeout" or None.
+async fn punishment(
+    st: &AppState,
+    guild: i64,
+    user: i64,
+) -> Result<Option<&'static str>, ApiError> {
+    match st
+        .discord
+        .call(Method::GET, &format!("/guilds/{guild}/bans/{user}"), None)
+        .await
+    {
+        Ok(_) => return Ok(Some("ban")),
+        Err(e) if not_found(&e) => {}
+        Err(e) => return Err(e.into()),
+    }
+    match st
+        .discord
+        .call(
+            Method::GET,
+            &format!("/guilds/{guild}/members/{user}"),
+            None,
+        )
+        .await
+    {
+        Ok(m) => {
+            let until = m["communication_disabled_until"]
+                .as_str()
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
+            Ok(until.filter(|t| *t > chrono::Utc::now()).map(|_| "timeout"))
+        }
+        Err(e) if not_found(&e) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn blacklisted(st: &AppState, guild: i64, user: i64) -> Result<bool, ApiError> {
+    Ok(sqlx::query_scalar(
+        "select exists(select 1 from appeal_blacklist where guild_id = $1 and user_id = $2)",
+    )
+    .bind(guild)
+    .bind(user)
+    .fetch_one(&st.db)
+    .await?)
+}
+
+/// The appellant's view: the form fields and whether they can submit.
+async fn form(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    let c = cfg(&st, guild).await?;
+    if !c.enabled {
+        return Err(ApiError::NotFound);
+    }
+    let kind = punishment(&st, guild, s.user_id).await?;
+    let fields: Vec<Value> = c
+        .fields
+        .iter()
+        .take(MAX_APPEAL_FIELDS)
+        .map(|f| json!({"label": f.label, "long": f.long, "required": f.required, "options": f.options, "multi": f.multi, "min": f.min, "max": f.max}))
+        .collect();
+    Ok(Json(
+        json!({"fields": fields, "kind": kind, "blacklisted": blacklisted(&st, guild, s.user_id).await?}),
+    ))
+}
+
+#[derive(Deserialize)]
+struct Submit {
+    answers: Vec<String>,
+}
+
+async fn submit(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Json(b): Json<Submit>,
+) -> Res {
+    let c = cfg(&st, guild).await?;
+    if !c.enabled {
+        return Err(ApiError::NotFound);
+    }
+    let fields: Vec<_> = c.fields.iter().take(MAX_APPEAL_FIELDS).collect();
+    if b.answers.len() != fields.len() {
+        return Err(ApiError::BadRequest(
+            "answer count does not match the form".into(),
+        ));
+    }
+    let mut given = Vec::new();
+    for (f, a) in fields.iter().zip(&b.answers) {
+        given.push(check(f, a).map_err(|m| ApiError::BadRequest(format!("{}: {m}", f.label)))?);
+    }
+    if blacklisted(&st, guild, s.user_id).await? {
+        return Err(ApiError::Forbidden(
+            "you can no longer appeal in this server",
+        ));
+    }
+    let kind = punishment(&st, guild, s.user_id)
+        .await?
+        .ok_or(ApiError::Forbidden("you are not banned or timed out here"))?;
+    // Withdraw and appeal again must not become a way to flood staff.
+    let today: i64 = sqlx::query_scalar(
+        "select count(*) from appeals where guild_id = $1 and user_id = $2 and created_at > now() - interval '1 day'",
+    )
+    .bind(guild)
+    .bind(s.user_id)
+    .fetch_one(&st.db)
+    .await?;
+    if today >= 3 {
+        return Err(ApiError::Forbidden(
+            "you sent 3 appeals today, try again tomorrow",
+        ));
+    }
+    let answers: Vec<Value> = fields
+        .iter()
+        .zip(&given)
+        .map(|(f, a)| json!({"label": f.label, "answer": a}))
+        .collect();
+    let id: Option<i64> = sqlx::query_scalar(
+        "insert into appeals (guild_id, user_id, username, kind, answers) values ($1,$2,$3,$4,$5) on conflict do nothing returning id")
+        .bind(guild).bind(s.user_id).bind(&s.username).bind(kind).bind(Value::Array(answers)).fetch_optional(&st.db).await?;
+    let id = id.ok_or(ApiError::Forbidden("you already have an open appeal"))?;
+    let (_, config) = crate::store::current(&st.db, guild).await?;
+    let lc: brim_logging::LogConfig = config
+        .get("logging")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let channel = lc
+        .routes
+        .get(&brim_logging::LogKind::Appeal)
+        .copied()
+        .or(c.channel)
+        .or(lc.fallback);
+    if let Some(ch) = channel {
+        let mut log = sent_log(kind, &s.username, s.user_id, id);
+        for (f, a) in fields.iter().zip(&given) {
+            // The appellant's text: a masked link or a mention must show as typed, not work.
+            log = log.field(&format!("{}:", f.label), &brim_core::msgvars::escape(a));
+        }
+        let log = crate::discord::framed(&st.db, guild, "log.appeal", log).await;
+        let button = |label: &str, act: &str, style: u8| json!({"type": 2, "style": style, "label": label, "custom_id": format!("appeal:{id}:{act}")});
+        let row = json!([{"type": 1, "components": [
+            button("Approve", "accept", 3),
+            button("Deny", "deny", 4),
+            button("Deny + Blacklist", "blacklist", 4),
+            button("Dismiss", "dismiss", 2),
+        ]}]);
+        // The appeal is saved: a failed notice is only logged.
+        let posted = match crate::discord::Readers::load(&st.db, guild, &config).await {
+            Ok(who) => {
+                st.discord
+                    .post_embed_with(guild, &who, &ch.to_string(), log, row)
+                    .await
+            }
+            Err(e) => Err(e),
+        };
+        match posted {
+            Ok(msg) => {
+                sqlx::query("update appeals set log_channel = $2, log_message = $3 where id = $1")
+                    .bind(id)
+                    .bind(ch.get() as i64)
+                    .bind(msg.parse::<i64>().unwrap_or_default())
+                    .execute(&st.db)
+                    .await?;
+            }
+            Err(e) => tracing::warn!(?e, "appeal notice failed"),
+        }
+    }
+    Ok(Json(json!({"id": id})))
+}
+
+/// The member's own appeals with their status and the staff reply.
+async fn mine(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    let rows: Vec<MineRow> = sqlx::query_as(
+        "select id, kind, status, reply, created_at from appeals
+         where guild_id = $1 and user_id = $2 order by created_at desc limit 20",
+    )
+    .bind(guild)
+    .bind(s.user_id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(id, kind, status, reply, at)| json!({"id": id, "kind": kind, "status": status, "reply": reply, "at": at}))
+        .collect::<Vec<_>>())))
+}
+
+/// Verdicts the member has not seen yet, across servers, for the header bell.
+async fn unread(State(st): State<AppState>, s: Sess) -> Res {
+    let rows: Vec<(i64, i64, String, String)> = sqlx::query_as(
+        "select id, guild_id, kind, status from appeals
+         where user_id = $1 and status in ('accepted', 'denied') and seen_at is null
+         order by created_at desc limit 20",
+    )
+    .bind(s.user_id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(id, guild, kind, status)| json!({"id": id, "guild": guild.to_string(), "kind": kind, "status": status}))
+        .collect::<Vec<_>>())))
+}
+
+async fn mark_seen(State(st): State<AppState>, s: Sess) -> Res {
+    sqlx::query("update appeals set seen_at = now() where user_id = $1 and seen_at is null and status <> 'open'")
+        .bind(s.user_id)
+        .execute(&st.db)
+        .await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// The member takes back their open appeal.
+async fn withdraw(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    let id: Option<i64> = sqlx::query_scalar(
+        "update appeals set status = 'withdrawn' where guild_id = $1 and user_id = $2 and status = 'open' returning id",
+    )
+    .bind(guild)
+    .bind(s.user_id)
+    .fetch_optional(&st.db)
+    .await?;
+    let id = id.ok_or(ApiError::NotFound)?;
+    close_log(&st, guild, id, "Withdrawn by the member").await;
+    Ok(Json(json!({"ok": true})))
+}
+
+#[derive(Deserialize)]
+struct Filter {
+    kind: Option<String>,
+    q: Option<String>,
+    #[serde(default)]
+    page: i64,
+}
+
+async fn list(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Query(f): Query<Filter>,
+) -> Res {
+    reviewer(&st, &s, guild).await?;
+    let q = f.q.unwrap_or_default();
+    let rows: Vec<Row> = sqlx::query_as(
+        "select id, user_id::text, username, kind, answers, status, created_at from appeals
+         where guild_id = $1 and ($2::text is null or kind = $2)
+           and ($3 = '' or user_id::text = $3 or username ilike '%' || $3 || '%')
+         order by (status = 'open') desc, created_at desc limit 50 offset $4",
+    )
+    .bind(guild)
+    .bind(f.kind.filter(|k| k == "ban" || k == "timeout"))
+    .bind(q.trim())
+    .bind(crate::records::offset(f.page))
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(json!(rows.into_iter().map(|(id, user_id, username, kind, answers, status, at)|
+        json!({"id": id, "user_id": user_id, "username": username, "kind": kind, "answers": answers, "status": status, "at": at})).collect::<Vec<_>>())))
+}
+
+async fn reviewer(st: &AppState, s: &Sess, guild: i64) -> Result<(), ApiError> {
+    api::staff(st, s, guild, &["appeals"]).await.map(drop)
+}
+
+async fn has_perm(st: &AppState, s: &Sess, guild: i64, perm: &str) -> Result<bool, ApiError> {
+    Ok(api::permit_perms(st, s, guild)
+        .await?
+        .iter()
+        .any(|p| p == perm))
+}
+
+#[derive(Deserialize)]
+struct Decide {
+    #[serde(default)]
+    accept: bool,
+    #[serde(default)]
+    blacklist: bool,
+    /// Closes the appeal without telling the appellant.
+    #[serde(default)]
+    dismiss: bool,
+    /// Optional staff reply, sent to the appellant.
+    #[serde(default)]
+    reply: String,
+}
+
+/// Accepting lifts the ban or timeout; denying can also blacklist the user from appealing again.
+async fn decide(
+    State(st): State<AppState>,
+    s: Sess,
+    Path((guild, id)): Path<(i64, i64)>,
+    Json(b): Json<Decide>,
+) -> Res {
+    reviewer(&st, &s, guild).await?;
+    let mut tx = st.db.begin().await?;
+    let (user, kind): (i64, String) = sqlx::query_as("select user_id, kind from appeals where id = $1 and guild_id = $2 and status = 'open' for update")
+        .bind(id).bind(guild).fetch_optional(&mut *tx).await?.ok_or(ApiError::NotFound)?;
+    // Every decision, not only an accept: the log button runs them all through `commands::gated`.
+    mod_lock_guard(&st, &s, guild, &mut tx).await?;
+    let accept = b.accept && !b.dismiss;
+    if accept {
+        accept_appeal(&st, &s, guild, (id, &kind), &b.reply, &mut tx).await?;
+        tx.commit().await?;
+        return Ok(Json(json!({"queued": true})));
+    }
+    let status = match (b.dismiss, b.accept) {
+        (true, _) => "dismissed",
+        (_, true) => "accepted",
+        _ => "denied",
+    };
+    let reply = b.reply.trim().chars().take(1000).collect::<String>();
+    sqlx::query(
+        "update appeals set status = $2, decided_by = $3, reply = nullif($4, '') where id = $1",
+    )
+    .bind(id)
+    .bind(status)
+    .bind(s.user_id)
+    .bind(&reply)
+    .execute(&mut *tx)
+    .await?;
+    if b.blacklist && status == "denied" {
+        add_blacklist(&mut tx, guild, user, s.user_id).await?;
+    }
+    tx.commit().await?;
+    let word = match status {
+        "dismissed" => "Dismissed",
+        "accepted" => "Approved",
+        _ if b.blacklist => "Denied and blacklisted",
+        _ => "Denied",
+    };
+    let mut decision = format!("{word} by <@{}>", s.user_id);
+    if !reply.is_empty() {
+        decision.push_str(&format!("\n{reply}"));
+    }
+    close_log(&st, guild, id, &decision).await;
+    if !b.dismiss {
+        let verdict = if b.accept { "approved" } else { "denied" };
+        let (id_s, reply_s) = (id.to_string(), reply.to_string());
+        let vars = [
+            ("kind", kind.as_str()),
+            ("id", id_s.as_str()),
+            ("verdict", verdict),
+            ("reply", reply_s.as_str()),
+        ];
+        if let Err(e) = st
+            .discord
+            .dm(
+                &st.db,
+                Some(guild),
+                user,
+                if b.accept {
+                    "dm.appeal_approved"
+                } else {
+                    "dm.appeal_denied"
+                },
+                &vars,
+            )
+            .await
+        {
+            tracing::warn!(?e, "appeal verdict DM failed");
+        }
+    }
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Closes the Discord log of an appeal decided elsewhere: buttons off, a Decision field added.
+async fn close_log(st: &AppState, guild: i64, id: i64, decision: &str) {
+    let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+        "select log_channel, log_message from appeals where id = $1 and guild_id = $2",
+    )
+    .bind(id)
+    .bind(guild)
+    .fetch_optional(&st.db)
+    .await
+    .ok()
+    .flatten();
+    let Some((Some(ch), Some(msg))) = row else {
+        return;
+    };
+    let path = format!("/channels/{ch}/messages/{msg}");
+    let Ok(mut m) = st.discord.call(Method::GET, &path, None).await else {
+        return;
+    };
+    let mut embeds = m["embeds"].take();
+    add_decision(&mut embeds, decision);
+    let body = if embeds.is_array() {
+        json!({"embeds": embeds, "components": []})
+    } else {
+        json!({"components": []})
+    };
+    if let Err(e) = st.discord.call(Method::PATCH, &path, Some(body)).await {
+        tracing::warn!(?e, "closing the appeal log failed");
+    }
+}
+
+/// Adds the Decision field to the log's first embed. A log without an embed is left as it is
+/// (`embeds[0]` would panic and kill `decide` before the verdict DM).
+fn add_decision(embeds: &mut Value, decision: &str) {
+    let Some(e) = embeds.get_mut(0).and_then(Value::as_object_mut) else {
+        return;
+    };
+    // Discord refuses the whole PATCH (buttons stay) for a value over 1024 or a 26th field.
+    let value: String = decision.chars().take(1024).collect();
+    if let Some(fields) = e.entry("fields").or_insert(json!([])).as_array_mut() {
+        if fields.len() < 25 {
+            fields.push(json!({"name": "Decision", "value": value, "inline": false}));
+        }
+    }
+}
+
+/// Queues the accept for the bot (job `appeal_accept`), so the lift goes through the bot's permit
+/// check, panic lock and command rate limit like the log button. The bot lifts, logs the
+/// undo, marks the appeal and sends the verdict; the checks here only answer early.
+async fn accept_appeal(
+    st: &AppState,
+    s: &Sess,
+    guild: i64,
+    (id, kind): (i64, &str),
+    reply: &str,
+    tx: &mut sqlx::PgConnection,
+) -> Result<(), ApiError> {
+    // Lifting a punishment takes its permit ("ban" or "timeout"), not just Review Appeals (spec 2).
+    let level = api::level_of(st, s, guild).await?;
+    if level < Level::Admin && !has_perm(st, s, guild, kind).await? {
+        return Err(ApiError::Forbidden(
+            "accepting needs the ban or timeout permit",
+        ));
+    }
+    // The appeal row is locked (`for update`), so two clicks cannot queue two accepts.
+    let queued: bool = sqlx::query_scalar(
+        "select exists(select 1 from scheduled_jobs where guild_id = $1 and kind = 'appeal_accept'
+         and (payload->>'id')::bigint = $2)",
+    )
+    .bind(guild)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if queued {
+        return Err(ApiError::BadRequest(
+            "this appeal is already being accepted".into(),
+        ));
+    }
+    let reply: String = reply.trim().chars().take(1000).collect();
+    let p = json!({"id": id, "by": s.user_id, "reply": reply});
+    brim_core::jobs::enqueue(
+        &mut *tx,
+        guild,
+        "appeal_accept",
+        p,
+        chrono::Utc::now().timestamp(),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Refuses below Trusted Admin while panic mode locks mod commands, as `commands::gated` does for
+/// the bot twin of a dashboard mod action.
+pub(crate) async fn mod_lock_guard(
+    st: &AppState,
+    s: &Sess,
+    guild: i64,
+    c: &mut sqlx::PgConnection,
+) -> Result<(), ApiError> {
+    if api::level_of(st, s, guild).await? < Level::Admin && mod_lock(c, guild).await? {
+        return Err(ApiError::Forbidden(
+            "panic mode has locked mod commands; only owners, Extra Owners and Trusted Admins can do this now",
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a running panic mode locked mod commands (its pending `panic_end` job says so).
+pub(crate) async fn mod_lock(c: &mut sqlx::PgConnection, guild: i64) -> Result<bool, ApiError> {
+    Ok(sqlx::query_scalar(
+        "select exists(select 1 from scheduled_jobs where guild_id = $1 and kind = 'panic_end'
+         and (payload->>'lock_mod_commands')::boolean)",
+    )
+    .bind(guild)
+    .fetch_one(c)
+    .await?)
+}
+
+async fn add_blacklist(
+    c: &mut sqlx::PgConnection,
+    guild: i64,
+    user: i64,
+    by: i64,
+) -> Result<(), ApiError> {
+    sqlx::query("insert into appeal_blacklist (guild_id, user_id, added_by) values ($1,$2,$3) on conflict do nothing")
+        .bind(guild).bind(user).bind(by).execute(c).await?;
+    Ok(())
+}
+
+async fn blacklist(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    let rows: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as("select user_id::text, added_at from appeal_blacklist where guild_id = $1 order by added_at desc")
+        .bind(guild).fetch_all(&st.db).await?;
+    Ok(Json(json!(rows
+        .into_iter()
+        .map(|(u, at)| json!({"user_id": u, "at": at}))
+        .collect::<Vec<_>>())))
+}
+
+#[derive(Deserialize)]
+struct Add {
+    user_id: String,
+}
+
+async fn blacklist_add(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Json(b): Json<Add>,
+) -> Res {
+    // The bot's twin is the log's Deny + Blacklist button: the appeals permit, and panic's lock.
+    reviewer(&st, &s, guild).await?;
+    let user = b
+        .user_id
+        .trim()
+        .parse::<i64>()
+        .map_err(|_| ApiError::BadRequest("user ID must be a number".into()))?;
+    let mut c = st.db.acquire().await?;
+    mod_lock_guard(&st, &s, guild, &mut c).await?;
+    add_blacklist(&mut c, guild, user, s.user_id).await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn blacklist_remove(
+    State(st): State<AppState>,
+    s: Sess,
+    Path((guild, user)): Path<(i64, i64)>,
+) -> Res {
+    reviewer(&st, &s, guild).await?;
+    let mut c = st.db.acquire().await?;
+    mod_lock_guard(&st, &s, guild, &mut c).await?;
+    sqlx::query("delete from appeal_blacklist where guild_id = $1 and user_id = $2")
+        .bind(guild)
+        .bind(user)
+        .execute(&mut *c)
+        .await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Purge all: clears the whole blacklist, so it needs an admin.
+async fn blacklist_purge(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    api::require(&st, &s, guild, Level::Admin, false).await?;
+    let n = sqlx::query("delete from appeal_blacklist where guild_id = $1")
+        .bind(guild)
+        .execute(&st.db)
+        .await?
+        .rows_affected();
+    Ok(Json(json!({"removed": n})))
+}
+
+/// The appeal log: who sent which kind of appeal (the answers follow as fields).
+pub(crate) fn sent_log(kind: &str, username: &str, user_id: i64, id: i64) -> brim_logging::Log {
+    use brim_logging::{embed, Log};
+    Log::new(
+        &format!("A {kind} appeal by {username} has been sent!"),
+        embed::ORANGE,
+    )
+    .entry("log.appeal.appeal_sent")
+    .line("Member", &format!("{username} [{user_id}]"))
+    .line("Appeal", &format!("`#{id}`"))
+    .time()
+    .text(&format!("{} Review it on the dashboard.", embed::ARROW))
+    .var("kind", kind)
+    .var("member.username", username)
+    .var("member.id", &user_id.to_string())
+    .var("appeal", &id.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The appeal log reads as its default until edited; an edit fills the values and keeps the
+    /// appellant's answers.
+    #[test]
+    fn appeal_log_default_and_edit() {
+        use brim_logging::overlay;
+        let log = sent_log("ban", "alex", 6, 4).field("Why?:", "sorry");
+        let (built, vars) = log.parts();
+        let vars: Vec<(&str, &str)> = vars.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let key = "log.appeal.appeal_sent";
+        let e = overlay::bot_embed(key, None, &vars);
+        assert_eq!(e.title, built.title);
+        assert_eq!(e.description, built.description);
+        assert_eq!(e.color, built.color);
+        let stored = json!({"content": "", "embeds": [{"title": "Appeal {appeal}", "description": "{member.username} wants their {kind} lifted"}]});
+        assert!(brim_logging::botmsg::missing_text(key, &stored).is_none());
+        let owned: Vec<(String, String)> = vars
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect();
+        let e = overlay::over(key, &stored, &built, &owned, false);
+        assert_eq!(e.title.as_deref(), Some("Appeal 4"));
+        assert_eq!(
+            e.description.as_deref(),
+            Some("alex wants their ban lifted")
+        );
+        assert_eq!(e.fields.len(), 1);
+    }
+
+    /// Runs only when DATABASE_URL points at a scratch Postgres.
+    #[tokio::test]
+    async fn mod_lock_follows_the_panic_end_job() {
+        let Ok(url) = brim_core::db::test_url() else {
+            return;
+        };
+        let db = brim_core::db::connect(&url).await.unwrap();
+        let g = 9_850_000_000 + std::process::id() as i64;
+        let mut c = db.acquire().await.unwrap();
+        assert!(!mod_lock(&mut c, g).await.unwrap());
+        for (lock, want) in [(false, false), (true, true)] {
+            sqlx::query("delete from scheduled_jobs where guild_id = $1")
+                .bind(g)
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            sqlx::query("insert into scheduled_jobs (guild_id, kind, payload, run_at) values ($1, 'panic_end', $2, now())")
+                .bind(g)
+                .bind(serde_json::json!({"lock_mod_commands": lock, "unlock": true}))
+                .execute(&mut *c)
+                .await
+                .unwrap();
+            assert_eq!(mod_lock(&mut c, g).await.unwrap(), want);
+        }
+        sqlx::query("delete from scheduled_jobs where guild_id = $1")
+            .bind(g)
+            .execute(&mut *c)
+            .await
+            .unwrap();
+    }
+
+    fn field(options: &[&str], multi: bool, required: bool) -> AppealField {
+        AppealField {
+            label: "q".into(),
+            long: false,
+            required,
+            options: options.iter().map(|o| o.to_string()).collect(),
+            multi,
+            min: Some(4),
+            max: Some(10),
+        }
+    }
+
+    #[test]
+    fn text_length_and_optional() {
+        let f = field(&[], false, true);
+        assert_eq!(check(&f, "abcd").unwrap(), "abcd");
+        assert_eq!(
+            check(&f, "abc").unwrap_err(),
+            "This content has to be between 4 and 10 characters long."
+        );
+        assert_eq!(
+            check(&field(&[], false, false), " ").unwrap(),
+            "Not answered."
+        );
+    }
+
+    #[test]
+    fn min_above_max_still_accepts_a_max_length_answer() {
+        let mut f = field(&[], false, true);
+        f.min = Some(20);
+        assert!(check(&f, "0123456789").is_ok());
+    }
+
+    #[test]
+    fn decision_on_logs_of_any_shape() {
+        let d = json!({"name": "Decision", "value": "Denied", "inline": false});
+        for (mut embeds, want) in [
+            (json!([]), json!([])),
+            (Value::Null, Value::Null),
+            (json!("x"), json!("x")),
+            (json!([5]), json!([5])),
+            (json!([{}]), json!([{"fields": [d]}])),
+            (json!([{"fields": 1}]), json!([{"fields": 1}])),
+            (json!([{"fields": [d]}]), json!([{"fields": [d, d]}])),
+        ] {
+            add_decision(&mut embeds, "Denied");
+            assert_eq!(embeds, want);
+        }
+        let mut long = json!([{}]);
+        add_decision(&mut long, &"x".repeat(1100));
+        assert_eq!(
+            long[0]["fields"][0]["value"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            1024
+        );
+        let mut full = json!([{"fields": vec![d.clone(); 25]}]);
+        add_decision(&mut full, "Denied");
+        assert_eq!(full[0]["fields"].as_array().unwrap().len(), 25);
+    }
+
+    #[test]
+    fn choices() {
+        let single = field(&["a", "b"], false, true);
+        assert_eq!(
+            check(&single, "").unwrap_err(),
+            "This field must have a selected item."
+        );
+        assert!(check(&single, "a\nb").is_err());
+        assert_eq!(
+            check(&field(&["a", "b"], true, true), "a\nb").unwrap(),
+            "a, b"
+        );
+        assert!(check(&single, "c").is_err());
+    }
+}

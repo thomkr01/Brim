@@ -1,0 +1,1298 @@
+//! Join gate, join raid detection and the punishments they share with native AutoMod.
+use anyhow::Result;
+use brim_automod::{
+    filters,
+    join::{gate, harshest, is_suspicious, Action, Filter, GateCfg, Joiner, RaidCfg},
+    lockdown::JoinLock,
+};
+use brim_core::{
+    cases::{self, NewCase},
+    invites::How,
+    jobs,
+    permits::Level,
+};
+use brim_logging::{
+    embed::{duration, ALERT, ARROW, DONE, NO, ORANGE, RED, YES},
+    Log, LogKind,
+};
+use twilight_http::request::AuditLogReason;
+use twilight_model::{
+    gateway::payload::incoming::{MemberAdd, MemberUpdate},
+    id::{
+        marker::{GuildMarker, RoleMarker},
+        Id,
+    },
+    user::UserFlags,
+};
+
+use crate::{
+    antinuke::Rejoin,
+    app::{now_secs, App, GuildCfg},
+    commands::timeout,
+    events::{send_log, send_log_pinging},
+    lockdown, reply, verify,
+};
+
+use crate::automod::{now_ms, warn_actions};
+
+pub async fn on_join(app: &std::sync::Arc<App>, m: &MemberAdd, spammer: bool) -> Result<()> {
+    // First, so every early return drops it.
+    let invite = crate::invites::take_result(app, m.guild_id.get(), m.user.id.get());
+    if spammer {
+        // Discord does not document the flag: one line per process shows it really arrives.
+        static SEEN: std::sync::Once = std::sync::Once::new();
+        SEEN.call_once(|| {
+            tracing::info!(
+                user = m.user.id.get(),
+                "first join with Discord's spammer flag"
+            )
+        });
+    }
+    let (gid, user) = (m.guild_id, &m.member.user);
+    let cfg = app.cfg(gid.get()).await?;
+    let now = now_ms();
+    // Before the other checks and the join lock, so a failed join gate step cannot let a
+    // quarantined member back in. A failed check counts as quarantined, so sticky roles never
+    // gives roles to a held member. `held`: still in the server but quarantined; `gone`: kicked or
+    // banned.
+    let rejoin = crate::antinuke::requarantine_rejoin(app, gid, user.id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(?e, "quarantining a rejoined member failed");
+            Rejoin::Held
+        });
+    let held = rejoin == Rejoin::Held;
+    // Owner, EO and TA bypass every join step that punishes. None: unread, so nothing punishes
+    // now and a kick, ban or timeout waits for the retry job, which reads it again.
+    let immune = match joiner_immune(app, m).await {
+        Ok(i) => Some(i),
+        Err(e) => {
+            tracing::warn!(
+                ?e,
+                "joiner's immunity unread: punishments wait for the retry job"
+            );
+            None
+        }
+    };
+    // An unread lock skips only the lock's kick or ban: raid counting, verification and the
+    // Join Gate below still run (never return early before a step that contains).
+    let lock = lockdown::join_lock(app, gid).await.unwrap_or_else(|e| {
+        tracing::warn!(
+            ?e,
+            "join lock unread: its kick or ban is skipped for this joiner"
+        );
+        None
+    });
+    if let Some(lock) = lock.filter(|_| immune != Some(true)) {
+        let action = match lock {
+            JoinLock::Kick => Action::Kick,
+            JoinLock::Ban => Action::Ban,
+        };
+        match immune {
+            // An outage retries, so the joiner cannot stay through the lock. Not removed (a
+            // refusal, or the retry is due later): the rest of the join still counts and holds them.
+            Some(_) => {
+                let d = Detail::default();
+                if punish_or_retry(app, &cfg, gid, user.id.get(), action, "join lock", d).await {
+                    return Ok(());
+                }
+            }
+            // Unread: the retry waits, and the rest of the join (verification) still holds them.
+            None => hold_back(app, gid, user.id.get(), action, "join lock").await,
+        }
+    }
+    let listed = crate::raiders::on_join(app, &cfg, gid, user.id).await;
+    let name = names(&[Some(&user.name), user.global_name.as_ref()]);
+    let mut j = Joiner {
+        id: user.id.get(),
+        name: &name,
+        has_avatar: user.avatar.is_some(),
+        is_bot: user.bot,
+        bot_verified: user
+            .public_flags
+            .is_some_and(|f| f.contains(UserFlags::VERIFIED_BOT)),
+        added_by_authorized: true,
+        spammer,
+        ..Joiner::default()
+    };
+    let suspicious = is_suspicious(&j, &cfg.joingate, cfg.joingate.min_age_ms(), now);
+    // Raid detection comes before this join's REST calls (bot adder, verification),
+    // so a raid is caught as it starts. A Raider List hit counts but is not punished again.
+    // A raid hit that keeps the member holds their sticky roles back, but keeps them saved.
+    // `raid_removed`: the raid's kick or ban of this joiner went through.
+    let (mut raided, mut gone, mut raid_removed) = (false, false, None);
+    let raid = cfg.joinraid.as_ref().filter(|r| r.enabled);
+    if let Some(raid) = raid {
+        let roles: Vec<u64> = m.member.roles.iter().map(|r| r.get()).collect();
+        let level = (listed, immune, &roles[..]);
+        match join_raid(app, &cfg, gid, raid, &j, suspicious, now, level).await {
+            Ok((hit, removed)) => {
+                raided = hit;
+                if removed {
+                    (gone, raid_removed) = (true, Some(raid.action));
+                }
+            }
+            Err(e) => tracing::warn!(?e, "join raid check failed"),
+        }
+    }
+    if listed {
+        return Ok(());
+    }
+    // The tracker answers later; nothing below waits for it.
+    let log = cfg.logging.target(LogKind::Member, None).is_some();
+    if let Some(rx) = invite.filter(|_| raid.is_some() || log) {
+        let (app, uid, noted) = (app.clone(), j.id, raid.is_some());
+        // The raid this join belongs to, named now: a new raid may start before the tracker answers.
+        let raid_code = app
+            .raids
+            .lock()
+            .unwrap()
+            .get(&gid.get())
+            .map(|d| d.code.clone());
+        tokio::spawn(async move {
+            let Ok(Ok(r)) = tokio::time::timeout(std::time::Duration::from_secs(10), rx).await
+            else {
+                return;
+            };
+            let (Some(code), Some(inviter)) = (&r.code, r.inviter) else {
+                return;
+            };
+            if !matches!(r.how, How::Single | How::Group) {
+                return;
+            }
+            if noted {
+                note_invite(&app, gid, uid, code, raid_code.as_deref()).await;
+            }
+            if log {
+                let group = (r.how == How::Group).then_some(r.group);
+                let entry = invite_log(uid, code, inviter, group);
+                if let Err(e) = send_log(&app, gid.get(), LogKind::Member, entry).await {
+                    tracing::warn!(?e, "invite log failed");
+                }
+            }
+        });
+    }
+    // A bot whose adder cannot be read, after one retry, is blocked; so is one whose adder's
+    // level cannot be read.
+    let found = if user.bot {
+        Some(crate::welcome::bot_adder_retry(app, gid, user.id).await)
+    } else {
+        None
+    };
+    // None: unread, so the bot is blocked but its adder is not punished now.
+    let adder_immune = match &found {
+        Some(Ok(a)) => app.is_immune(gid, *a).await.map_or_else(
+            |e| {
+                tracing::warn!(?e, "checking who added a bot failed, blocking it");
+                None
+            },
+            Some,
+        ),
+        _ => None,
+    };
+    j.added_by_authorized = match &found {
+        Some(Ok(_)) => adder_immune == Some(true),
+        Some(Err(e)) => {
+            tracing::warn!(?e, "no adder for a joining bot, blocking it");
+            false
+        }
+        None => true,
+    };
+    let adder = found.and_then(Result::ok);
+    // Only asked when the exception is on: no audit entry, or a failed lookup, means no exception.
+    j.added_by_owner = match adder {
+        Some(a) if cfg.joingate.exclude_trusted_bots => match app.guild_info(gid).await {
+            Ok(info) => app
+                .level(gid, info.owner, a)
+                .await
+                .is_ok_and(|l| vouches(&l)),
+            Err(_) => false,
+        },
+        _ => false,
+    };
+    let timeout = m.member.communication_disabled_until.map(|t| t.as_secs());
+    // Back in a join quarantine: their sticky roles wait for verification, as a new joiner's do.
+    // A raider the raid already removed is not quarantined for verification.
+    let verifying = (!gone
+        && verify::on_join(app, gid, user.id, suspicious, user.bot, timeout, immune).await)
+        || rejoin == Rejoin::Verifying;
+    let hits = gate(&j, &cfg.joingate, now);
+    let mut renamed = false;
+    if let Some(action) = harshest(&hits) {
+        // Log, Warn, Rename and Timeout keep the member; a timeout holds the main roles itself.
+        renamed = action == Action::Rename;
+        let why = if hits.iter().any(|h| h.0 == Filter::AccountAge) {
+            let min = duration(cfg.joingate.min_age_ms() / 1000);
+            format!("join gate: accounts must be at least {min} old")
+        } else {
+            "join gate".into()
+        };
+        let filters: Vec<&str> = hits.iter().map(|h| h.0.name()).collect();
+        let detail = Detail {
+            filters: &filters,
+            is_bot: user.bot,
+            adder: adder.map(|a| a.get()),
+        };
+        // Already removed by the raid: not punished twice, unless the gate bans and the raid
+        // only kicked. A refused punishment is only logged.
+        let again = raid_removed.is_none_or(|r| r == Action::Kick && action == Action::Ban);
+        match immune {
+            // An outage retries, so the joiner cannot stay through the gate.
+            Some(false) if again => {
+                gone = punish_or_retry(app, &cfg, gid, j.id, action, &why, detail).await
+                    && removes(action);
+            }
+            None if again => hold_back(app, gid, j.id, action, &why).await,
+            _ => {}
+        }
+        // The bot filter also punishes whoever added it.
+        let bot_hit = hits.iter().find(|h| h.0 == Filter::UnauthorizedBot);
+        if let (Some(adder), Some(hit)) = (adder, bot_hit) {
+            // The adder gets the bot filter's own action, not the harshest of the bot's filters.
+            let adder_action = hit.1;
+            let why = "adding a bot without permission";
+            match adder_immune {
+                Some(false) => {
+                    let d = Detail::default();
+                    punish_or_retry(app, &cfg, gid, adder.get(), adder_action, why, d).await;
+                }
+                None => hold_back(app, gid, adder.get(), adder_action, why).await,
+                Some(true) => {}
+            }
+        }
+    }
+    // Gone: the row keeps the old membership's roles for their next join.
+    if gone {
+        return Ok(());
+    }
+    let restored = crate::sticky::on_join(app, m, (held, raided), verifying).await;
+    // After a gate rename the join-time name is stale: dehoisting it would undo the rename.
+    if !held && !raided && !renamed {
+        crate::dehoist::on_join(app, gid, &m.member).await;
+    }
+    restored
+}
+
+/// A quarantined member who rejoined while the bot was down got no `MemberAdd`. At
+/// GuildCreate each member with a quarantine row who joined after the bot last quarantined them is
+/// quarantined again, through the rejoin path (a join quarantine with verification off ends there).
+/// One who joined before is in the same membership, still held or released by hand (Quarantine
+/// Whitelist, Quarantine Hold off), and is left alone. `known`: GuildCreate's members, the whole
+/// list when `complete`; otherwise the member list is paged (its own rate-limit bucket, not the
+/// one punishments use). During a raid or lock the check waits in one job per guild, 5 minutes at
+/// a time and 30 minutes at most from the first wait, then runs anyway (`job`: the job's payload
+/// with `first` and `tries`). A failed run queues the job too, 5 times at most. Runs one at a time per guild: a second run sees the first's
+/// `quarantine` action_log rows and skips those members, so a restart's job and GuildCreate never
+/// quarantine or log one rejoin twice.
+pub async fn requarantine_missed(
+    app: &App,
+    gid: Id<GuildMarker>,
+    known: &[twilight_model::guild::Member],
+    complete: bool,
+    job: Option<&serde_json::Value>,
+) -> Result<()> {
+    let lock = {
+        let mut all = MISSED_LOCKS.lock().unwrap_or_else(|p| p.into_inner());
+        all.retain(|_, l| std::sync::Arc::strong_count(l) > 1);
+        all.entry(gid.get()).or_default().clone()
+    };
+    let _one = lock.lock().await;
+    let defer = lockdown::Deferred::new(app, gid, MISSED_REJOINS, job).await;
+    if defer.waits(app, gid).await {
+        return defer.later(app, gid, false).await;
+    }
+    if let Err(e) = missed(app, gid, known, complete).await {
+        tracing::warn!(
+            ?e,
+            "checking members who rejoined while the bot was down failed, retrying in a job"
+        );
+        return defer.later(app, gid, true).await;
+    }
+    Ok(())
+}
+
+type GuildLocks =
+    std::sync::Mutex<std::collections::HashMap<u64, std::sync::Arc<tokio::sync::Mutex<()>>>>;
+static MISSED_LOCKS: std::sync::LazyLock<GuildLocks> = std::sync::LazyLock::new(Default::default);
+
+async fn missed(
+    app: &App,
+    gid: Id<GuildMarker>,
+    known: &[twilight_model::guild::Member],
+    complete: bool,
+) -> Result<()> {
+    use sqlx::types::chrono::{DateTime, Utc};
+    let rows: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT q.user_id, greatest(q.created_at, a.at) FROM quarantines q
+         LEFT JOIN (SELECT target_id, max(created_at) AS at FROM action_log
+                    WHERE guild_id = $1 AND actor_id = $2 AND action = 'quarantine'
+                    GROUP BY target_id) a ON a.target_id = q.user_id
+         WHERE q.guild_id = $1",
+    )
+    .bind(gid.get() as i64)
+    .bind(app.me.get() as i64)
+    .fetch_all(&app.pool)
+    .await?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let since: std::collections::HashMap<u64, i64> = rows
+        .into_iter()
+        .map(|(u, at)| (u as u64, at.timestamp_micros()))
+        .collect();
+    let mut joined: Vec<(u64, Option<i64>)> = known
+        .iter()
+        .filter(|m| since.contains_key(&m.user.id.get()))
+        .map(|m| (m.user.id.get(), m.joined_at.map(|j| j.as_micros())))
+        .collect();
+    if !complete {
+        joined.clear();
+        let mut after = None;
+        // shortcut: stops after 500 pages (500k members); a bigger server is checked only that far.
+        for _ in 0..500 {
+            let req = app.http.guild_members(gid).limit(1000);
+            let req = match after {
+                Some(a) => req.after(a),
+                None => req,
+            };
+            let page = req.await?.models().await?;
+            joined.extend(
+                page.iter()
+                    .filter(|m| since.contains_key(&m.user.id.get()))
+                    .map(|m| (m.user.id.get(), m.joined_at.map(|j| j.as_micros()))),
+            );
+            match page.last() {
+                Some(m) if page.len() == 1000 && joined.len() < since.len() => {
+                    after = Some(m.user.id)
+                }
+                _ => break,
+            }
+        }
+    }
+    for (user, at) in joined {
+        // The row's times come from the database's clock, the join time from Discord's: a
+        // rejoin counts only past a margin, so a skewed clock never catches a same-membership row.
+        if at.is_none_or(|j| j <= since[&user] + CLOCK_MARGIN_MICROS) {
+            continue;
+        }
+        if let Err(e) = crate::antinuke::requarantine_rejoin(app, gid, Id::new(user)).await {
+            tracing::warn!(
+                ?e,
+                user,
+                "quarantining a member who rejoined while the bot was down failed"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The job that runs [`requarantine_missed`] again once a raid or lock is over.
+pub(crate) const MISSED_REJOINS: &str = "requarantine_missed";
+const CLOCK_MARGIN_MICROS: i64 = 30_000_000;
+
+/// The punishment takes the member out of the server.
+fn removes(action: Action) -> bool {
+    matches!(action, Action::Kick | Action::Ban)
+}
+
+/// The alert when a join raid starts: what happens next and the first flagged accounts.
+pub(crate) fn raid_trigger_log(
+    raid: &RaidCfg,
+    flagged: &[(u64, &str)],
+    code: &str,
+    url: Option<String>,
+) -> Log {
+    let next = format!(
+        "Flagged accounts joining for the next `{}` will be **{}**.",
+        duration(raid.active_ms / 1000),
+        punished(raid.action)
+    );
+    trigger_log(("🕵 Join Raid Trigger!", "join"), &next, flagged, code, url)
+}
+
+/// "timed out", "banned", ...: what a raid action does to a member.
+pub(crate) fn punished(action: Action) -> &'static str {
+    match action {
+        Action::Log => "logged",
+        Action::Rename => "renamed",
+        Action::Warn => "warned",
+        Action::Timeout(_) => "timed out",
+        Action::Kick => "kicked",
+        Action::Ban => "banned",
+    }
+}
+
+/// The roles a raid trigger log pings (join and voice). A stored id that is not a snowflake is
+/// skipped: `Id::new` panics on 0.
+pub(crate) fn warned_roles(raid: &RaidCfg) -> Vec<Id<RoleMarker>> {
+    raid.warned_roles
+        .iter()
+        .filter_map(|r| r.parse().ok().and_then(Id::new_checked))
+        .collect()
+}
+
+/// A raid trigger alert (join or voice): `(title, pattern)`, what happens next, the first flags.
+pub(crate) fn trigger_log(
+    (title, pattern): (&str, &str),
+    next: &str,
+    flagged: &[(u64, &str)],
+    code: &str,
+    url: Option<String>,
+) -> Log {
+    // 40 IDs stay under Discord's 1024-character field limit; the page lists all
+    let flags = (flagged
+        .iter()
+        .take(40)
+        .map(|(u, n)| format!("`{} | {n}`", crate::invites::short_id(*u))))
+    .chain((flagged.len() > 40).then(|| format!("+{} more", flagged.len() - 40)))
+    .collect::<Vec<_>>()
+    .join("\n");
+    let link = url.map_or(String::new(), |url| {
+        format!("{ARROW} [Every caught account]({url})")
+    });
+    Log::new(title, ALERT)
+        .entry("log.join_raid.raid_started")
+        .text(&format!(
+            "{YES} Brim has identified a weird {pattern} pattern."
+        ))
+        .var("pattern", pattern)
+        .text(&format!("{ARROW} {next}"))
+        .var("next", next)
+        .text(&format!(
+            "{ARROW} A full report will be posted once the duration ends."
+        ))
+        .field("Initial Flags:", &flags)
+        .var("flags", &flags)
+        .field("Code:", &format!("`{code}`"))
+        .var("raid_code", code)
+        .fact_text("caught_link", &link)
+}
+
+/// The report when a join raid ends; `code` names the raid when the full report has a link.
+pub(crate) fn raid_report_log(caught: i64, code: Option<&str>) -> Log {
+    report_log(("🕵 Join Raid Report!", "join raid"), caught, code)
+}
+
+/// A raid report (join or voice): `(title, raid)`.
+pub(crate) fn report_log((title, raid): (&str, &str), caught: i64, code: Option<&str>) -> Log {
+    let line = code.map_or(String::new(), |code| format!("{ARROW} `{code}`"));
+    Log::new(title, DONE)
+        .entry("log.join_raid.raid_report")
+        .text(&format!(
+            "{YES} `{caught}` users have been caught by the {raid}."
+        ))
+        .var("count", &caught.to_string())
+        .var("raid", raid)
+        .fact_text("code_line", &line)
+}
+
+/// The link button under a raid report.
+pub(crate) const RAID_REPORT: &str = "Full Raid Report ↗";
+
+/// (the joiner was among the flagged raiders, the raid's kick or ban of them went through).
+/// `listed`: the Raider List already acted on the joiner, who counts but is not punished again
+/// (nor is an earlier listed joiner).
+#[allow(clippy::too_many_arguments)]
+async fn join_raid(
+    app: &std::sync::Arc<App>,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    raid: &RaidCfg,
+    j: &Joiner<'_>,
+    suspicious: bool,
+    now: i64,
+    (listed, joiner_immune, roles): (bool, Option<bool>, &[u64]),
+) -> Result<(bool, bool)> {
+    let (out, started, names, invites, code, skip, known) = {
+        let mut raids = app.raids.lock().unwrap();
+        let d = raids.entry(gid.get()).or_default();
+        let out = d.on_join(j, suspicious, raid, now);
+        d.note(j.id, listed, None);
+        d.set_roles(j.id, Some((roles.to_vec(), j.is_bot)));
+        let known: Vec<_> = out.flagged.iter().map(|id| d.roles_of(*id)).collect();
+        let skip: Vec<u64> = out
+            .flagged
+            .iter()
+            .copied()
+            .filter(|id| d.listed(*id))
+            .collect();
+        if out.triggered || d.code.is_empty() {
+            d.code = crate::invites::raid_code(gid.get());
+        }
+        let names: Vec<String> = out
+            .flagged
+            .iter()
+            .map(|id| d.name_of(*id).unwrap_or_default().to_string())
+            .collect();
+        let invites: Vec<String> = out
+            .flagged
+            .iter()
+            .map(|id| d.invite_of(*id).unwrap_or_default().to_string())
+            .collect();
+        (out, d.started, names, invites, d.code.clone(), skip, known)
+    };
+    if !out.flagged.is_empty() {
+        let ids: Vec<i64> = out.flagged.iter().map(|&id| id as i64).collect();
+        let logged = sqlx::query(
+            "insert into raid_log (guild_id, raid_ms, user_id, name, invite_code, code)
+             select $1, $2, u, n, nullif(i, ''), $6
+             from unnest($3::bigint[], $4::text[], $5::text[]) as t(u, n, i) on conflict do nothing",
+        )
+        .bind(gid.get() as i64)
+        .bind(started)
+        .bind(&ids)
+        .bind(&names)
+        .bind(&invites)
+        .bind(&code)
+        .execute(&app.pool)
+        .await;
+        if let Err(e) = logged {
+            tracing::warn!(?e, "saving the raid log failed");
+        }
+    }
+    if out.triggered {
+        // The report job must not hold back the lock and the punishments below. Its own job, not a
+        // replace: the last raid's report may be due and not yet claimed.
+        if let Err(e) = jobs::enqueue(
+            &app.pool,
+            gid.get() as i64,
+            "raid_end",
+            serde_json::json!({ "until_ms": now + raid.active_ms, "started_ms": started, "code": code }),
+            (now / 1000) + raid.active_ms / 1000,
+        )
+        .await
+        {
+            tracing::warn!(?e, "queueing the raid report failed");
+        }
+    }
+    let hit = out.flagged.contains(&j.id);
+    let flagged_ids = out.flagged.clone();
+    // In its own task, started before the punishments but not awaited: the log, the owner DM
+    // (up to 3 s) and the lock (one Discord call per role or channel) must not hold back the
+    // first wave's punishments or the rest of this join, and the lock must not wait for them.
+    if out.triggered {
+        let (app, gid, raid, code) = (app.clone(), gid, raid.clone(), code.clone());
+        let flagged: Vec<(u64, String)> = flagged_ids.iter().copied().zip(names).collect();
+        let auto_lock = cfg.automod.auto_lockdown.enabled;
+        tokio::spawn(async move {
+            let warned = warned_roles(&raid);
+            let flagged: Vec<(u64, &str)> =
+                flagged.iter().map(|(id, n)| (*id, n.as_str())).collect();
+            let log = raid_trigger_log(&raid, &flagged, &code, crate::invites::raid_url(&code));
+            if let Err(e) = send_log_pinging(&app, gid.get(), LogKind::JoinRaid, log, &warned).await
+            {
+                tracing::warn!(?e, "join raid log failed");
+            }
+            crate::reply::alert_owner(&app, gid, "A join raid started", LogKind::JoinRaid).await;
+            if let Some(kind) = raid.lock.clone().filter(|_| auto_lock) {
+                if let Err(e) = lockdown::lock(&app, gid, kind).await {
+                    tracing::warn!(?e, "join raid lockdown failed");
+                }
+            }
+        });
+    }
+    // One raider who already left (404) or a failed log must not let the rest go. All at once:
+    // with "DM Members" on, each punishment first waits up to 3 s for its DM.
+    let tries = out
+        .flagged
+        .into_iter()
+        .zip(known)
+        .filter(|(id, _)| !skip.contains(id))
+        .map(|(id, known)| async move {
+            // An earlier joiner may have been made staff since: their level is read again, from
+            // the roles of their join (a DB read, no member fetch per join), or with a fetch after
+            // a member update forgot those roles. A failed lookup is no reason to punish possible
+            // staff: the retry job checks immunity again.
+            let immune = match known {
+                _ if id == j.id => {
+                    joiner_immune.ok_or_else(|| anyhow::anyhow!("the joiner's level is unread"))
+                }
+                Some((roles, bot)) => immune_by_roles(app, gid, id, &roles, bot).await,
+                None => app.is_immune(gid, Id::new(id)).await,
+            };
+            match immune {
+                Ok(true) => return false,
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(
+                        ?e,
+                        user = id,
+                        "join raid: immunity check failed, retrying later"
+                    );
+                    queue_retry(app, gid, id, raid.action, "join raid").await;
+                    return false;
+                }
+            }
+            let d = Detail::default();
+            let done = punish_or_retry(app, cfg, gid, id, raid.action, "join raid", d).await;
+            id == j.id && done && removes(raid.action)
+        });
+    let removed = futures_util::future::join_all(tries).await.contains(&true);
+    crate::raiders::raid_flagged(app, gid, &flagged_ids, &code).await;
+    Ok((hit, removed))
+}
+
+/// The cured names, one per line, as `GateCfg::name_matches` reads them.
+pub(crate) fn names(raw: &[Option<&String>]) -> String {
+    raw.iter()
+        .flatten()
+        .map(|n| filters::cure(n))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Re-runs the username filter when a member renames, if the gate asks for it. True when the
+/// filter matched the name, so auto-dehoist leaves it alone: a dehoist nick would read as a new
+/// name and punish again.
+pub async fn on_member_update(app: &App, m: &MemberUpdate) -> Result<bool> {
+    let cfg = app.cfg(m.guild_id.get()).await?;
+    let g = &cfg.joingate;
+    let Some(action) = g
+        .username_filter
+        .get(Filter::UsernameFilter.default_action())
+        .filter(|_| g.enabled && g.username_post_join)
+    else {
+        return Ok(false);
+    };
+    let timed_out = m
+        .communication_disabled_until
+        .is_some_and(|t| t.as_secs() > now_secs());
+    let key = (m.guild_id.get(), m.user.id.get());
+    let global = m.user.global_name.as_ref();
+    let seen_as = post_join_key(g, action, &m.user.name, global, m.nick.as_ref());
+    let skip = {
+        let mut seen = app.punished_names.lock().unwrap();
+        let Some(names) = seen_as else {
+            seen.remove(&key);
+            return Ok(false);
+        };
+        // A timeout fires another update and a role change keeps the name: act once per bad name pair.
+        timed_out || seen.insert(key, names.clone()) == Some(names)
+    };
+    // Owner, Extra Owners and Trusted Admins are immune to every bot action, here too.
+    if skip || app.is_immune(m.guild_id, m.user.id).await? {
+        return Ok(true);
+    }
+    punish(
+        app,
+        &cfg,
+        m.guild_id,
+        m.user.id.get(),
+        action,
+        "username filter",
+        Detail::default(),
+    )
+    .await?;
+    Ok(true)
+}
+
+/// What the post-join check remembers for a member it acts on, None when it has nothing to do.
+/// Rename leaves the nick out: its own nick would otherwise read as a new name and rename again.
+/// A clean nick already hides a bad username, which is all Rename can do.
+fn post_join_key(
+    g: &GateCfg,
+    action: Action,
+    user: &String,
+    global: Option<&String>,
+    nick: Option<&String>,
+) -> Option<String> {
+    let rename = action == Action::Rename;
+    let hidden = rename && nick.is_some_and(|n| !g.name_matches(&names(&[Some(n)])));
+    if hidden || !g.name_matches(&names(&[Some(user), global, nick])) {
+        return None;
+    }
+    let global = global.map_or("", |s| s.as_str());
+    let nick = nick.filter(|_| !rename).map_or("", |s| s.as_str());
+    Some(format!("{user}\0{global}\0{nick}"))
+}
+
+/// Bots added by the owner or an Extra Owner may skip the account filters; Trusted Admins and
+/// other admins do not count, so one taken-over admin account cannot let a bot in.
+fn vouches(level: &Level) -> bool {
+    matches!(level, Level::Owner | Level::ExtraOwner)
+}
+
+/// What the Join Gate log and records add to the reason: the filters that matched and, for a
+/// bot, who added it.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct Detail<'a> {
+    pub filters: &'a [&'a str],
+    pub is_bot: bool,
+    pub adder: Option<u64>,
+}
+
+/// The Invite Used log; `group` is the size of a group match.
+pub(crate) fn invite_log(uid: u64, code: &str, inviter: u64, group: Option<usize>) -> Log {
+    let mut log = Log::new("Invite Used", DONE)
+        .user("Member", uid)
+        .line("Invite", &format!("`{code}`"))
+        .user("Inviter", inviter);
+    let mut n = String::new();
+    if let Some(g) = group {
+        n = format!("Matched together with {g} joins");
+        log = log.line("Group", &n);
+    }
+    log.var("member", &brim_logging::embed::user(uid))
+        .var("code", code)
+        .var("inviter", &brim_logging::embed::user(inviter))
+        .var("group", &n)
+}
+
+/// The Join Gate log of one punishment; `failed` is Discord's refusal.
+pub(crate) fn gate_log(
+    user: u64,
+    action: Action,
+    why: &str,
+    d: Detail,
+    failed: Option<&str>,
+) -> Log {
+    let mut log = Log::new("Join Gate", if failed.is_some() { RED } else { ORANGE })
+        .user("Member", user)
+        .line("Action", &format!("`{action:?}`"))
+        .line("Reason", why)
+        .var("member", &brim_logging::embed::user(user))
+        .var("kind", &format!("{action:?}"))
+        .var("reason", why);
+    let filters = d.filters.join(", ");
+    if !d.filters.is_empty() {
+        log = log.line("Filters", &filters);
+    }
+    let mut bot = String::new();
+    if d.is_bot {
+        let by = d
+            .adder
+            .map_or("an unknown member".into(), |a| format!("<@{a}>"));
+        bot = format!("Yes, added by {by}");
+        log = log.line("Bot", &bot);
+    }
+    if let Some(e) = failed {
+        log = log.text(&format!("{NO} **Failed:** {e}"));
+    }
+    log.var("filters", &filters)
+        .var("bot", &bot)
+        .var("refused", failed.unwrap_or(""))
+}
+
+/// Saves the punishment for the dashboard's Join Gate records; `action` as the `Action` name.
+pub(crate) async fn record(
+    app: &App,
+    gid: Id<GuildMarker>,
+    user: u64,
+    (action, why, d): (&str, &str, Detail<'_>),
+    failed: Option<&str>,
+) {
+    let saved = sqlx::query(
+        "INSERT INTO joingate_actions (guild_id, user_id, is_bot, adder_id, filters, reason, action, ok, error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(gid.get() as i64)
+    .bind(user as i64)
+    .bind(d.is_bot)
+    .bind(d.adder.map(|a| a as i64))
+    .bind(serde_json::json!(d.filters))
+    .bind(why)
+    .bind(action)
+    .bind(failed.is_none())
+    .bind(failed)
+    .execute(&app.pool)
+    .await;
+    if let Err(e) = saved {
+        tracing::warn!(?e, "saving the join gate record failed");
+    }
+}
+
+/// With no log channel at all, the owner hears once that Join Gate acts without a log.
+async fn no_log_channel(app: &App, gid: Id<GuildMarker>) {
+    static TOLD: std::sync::Mutex<std::collections::BTreeSet<u64>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if TOLD.lock().unwrap().insert(gid.get()) {
+        reply::dm_owner(app, gid, "dm.owner_alert", "Brim's Join Gate punished a member, but your server has no log channel, so only the Join Gate Log on the dashboard shows it. Pick a log channel on the dashboard.").await;
+    }
+}
+
+/// The nick Join Gate's Rename action sets.
+const RENAMED: &str = "Moderated Nickname";
+
+/// A punishment Discord refused (role too low, permission missing) is shown to staff, not
+/// only written to the container log.
+pub(crate) async fn punish(
+    app: &App,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    user: u64,
+    action: Action,
+    why: &str,
+    detail: Detail<'_>,
+) -> Result<()> {
+    tell(app, cfg, gid, user, action, why).await;
+    act(app, cfg, gid, user, action, why, detail).await
+}
+
+/// The Join Gate DM of a punishment, if the server sends one. Before the action: a kicked or
+/// banned member cannot be reached afterwards.
+async fn tell(
+    app: &App,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    user: u64,
+    action: Action,
+    why: &str,
+) {
+    let uid = Id::new(user);
+    let punishing = !matches!(
+        action,
+        Action::Log | Action::Rename | Action::Timeout(..=-1)
+    );
+    if punishing && cfg.joingate.dm_punished {
+        let mut text = if cfg.misc.show_reason_on_auto {
+            format!("Automod action: {action:?} ({why})")
+        } else {
+            format!("Automod action: {action:?}")
+        };
+        if cfg.joingate.expose_min_age && why.starts_with("join gate") {
+            let min = duration(cfg.joingate.min_age_ms() / 1000);
+            text.push_str(&format!("\nMinimum account age: `{min}`"));
+        }
+        let note =
+            crate::appeals::note(&cfg.appeals, &cfg.misc.ban_appeal_message, gid).filter(|_| {
+                match action {
+                    Action::Ban => true,
+                    // Short automatic timeouts (5 minutes or less) get no appeal link.
+                    Action::Timeout(0) => cfg.misc.timeout_secs() > 300,
+                    Action::Timeout(ms) => ms > 300_000,
+                    _ => false,
+                }
+            });
+        let text = note.map_or(text.clone(), |n| format!("{text}\n{n}"));
+        reply::dm_msg(app, Some(gid), uid, "dm.join_gate", &[("text", &text)], &[]).await;
+    }
+}
+
+/// [`punish`] without the DM.
+async fn act(
+    app: &App,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    user: u64,
+    action: Action,
+    why: &str,
+    detail: Detail<'_>,
+) -> Result<()> {
+    let uid = Id::new(user);
+    match action {
+        Action::Log => {}
+        Action::Rename => {
+            let Some(m) = crate::http_err::member(&app.http, gid, uid).await? else {
+                return Ok(());
+            };
+            let bot = m.user.bot;
+            let old = m.nick.or(m.user.global_name).unwrap_or(m.user.name);
+            let names = (old.as_str(), RENAMED);
+            let done = crate::dehoist::rename(
+                app,
+                gid,
+                (uid, bot),
+                &m.roles,
+                names,
+                "Join Gate: username filter",
+            )
+            .await;
+            match done {
+                Ok(None) => {}
+                // Recorded and logged like a refusal, so staff see why the name stayed.
+                Ok(Some(skip)) => {
+                    // Past the cap: forget the name so the next update tries again.
+                    if skip == crate::dehoist::CAPPED {
+                        app.punished_names
+                            .lock()
+                            .unwrap()
+                            .remove(&(gid.get(), user));
+                    }
+                    let reason = format!("rename skipped: {skip}");
+                    finish(app, cfg, gid, user, (action, why, detail), Some(&reason)).await;
+                    return Ok(());
+                }
+                Err(e) => {
+                    let reason = crate::http_err::why(&e);
+                    finish(app, cfg, gid, user, (action, why, detail), Some(&reason)).await;
+                    return Err(e);
+                }
+            }
+        }
+        Action::Warn => {
+            cases::create(
+                &app.pool,
+                NewCase {
+                    guild_id: gid.get() as i64,
+                    kind: "warn",
+                    user_id: user as i64,
+                    mod_id: app.me.get() as i64,
+                    reason: Some(why),
+                    points: cfg.misc.warn_base_points,
+                    duration_s: None,
+                    proof: None,
+                    inverse: None,
+                },
+            )
+            .await?;
+            warn_actions(app, cfg, gid, uid).await?;
+        }
+        Action::Timeout(..=-1) => return Ok(()),
+        Action::Timeout(_) | Action::Kick | Action::Ban => {
+            let done = match action {
+                Action::Timeout(ms) => {
+                    let secs = match ms {
+                        0 => cfg.misc.timeout_secs() as i64,
+                        ms => ms / 1000,
+                    };
+                    timeout(&app.http, gid, uid, secs, "Automod").await
+                }
+                Action::Kick => app
+                    .http
+                    .remove_guild_member(gid, uid)
+                    .await
+                    .map(drop)
+                    .map_err(Into::into),
+                // The reason tells a Raider List ban apart when the list lifts its bans.
+                _ => app
+                    .http
+                    .create_ban(gid, uid)
+                    .reason(why)
+                    .await
+                    .map(drop)
+                    .map_err(Into::into),
+            };
+            if let Err(e) = done {
+                // Logged like a success, so a refused kick still shows up in the Join Gate log.
+                let reason = crate::http_err::why(&e);
+                finish(app, cfg, gid, user, (action, why, detail), Some(&reason)).await;
+                return Err(e);
+            }
+            if action == Action::Ban {
+                crate::scheduler::forget_jobs(app, gid, user, crate::scheduler::BANNED, None).await;
+            }
+        }
+    }
+    finish(app, cfg, gid, user, (action, why, detail), None).await;
+    Ok(())
+}
+
+/// A raid punishment: one that failed without a refusal (5xx, timeout) is tried again from a
+/// `raid_punish` job, so an outage during a raid does not let a raider stay. True when it worked.
+pub(crate) async fn punish_or_retry(
+    app: &App,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    user: u64,
+    action: Action,
+    why: &str,
+    detail: Detail<'_>,
+) -> bool {
+    let Err(e) = punish(app, cfg, gid, user, action, why, detail).await else {
+        return true;
+    };
+    tracing::warn!(?e, user, why, "punishing a raider failed");
+    // A warn writes its case before anything can fail, so it is never retried.
+    let retries = matches!(action, Action::Timeout(_) | Action::Kick | Action::Ban);
+    if !retries || crate::http_err::refused(&e) {
+        return false;
+    }
+    queue_retry(app, gid, user, action, why).await;
+    false
+}
+
+/// Owner, EO or TA, from the join's own roles: no member fetch per join in a raid.
+async fn joiner_immune(app: &App, m: &MemberAdd) -> Result<bool> {
+    // A bot is never Owner, EO or TA: no read that could hold back its kick.
+    if m.user.bot {
+        return Ok(false);
+    }
+    let roles: Vec<u64> = m.member.roles.iter().map(|r| r.get()).collect();
+    immune_by_roles(app, m.guild_id, m.user.id.get(), &roles, m.user.bot).await
+}
+
+/// Owner, EO or TA, from roles an event gave: a DB read, no member fetch.
+async fn immune_by_roles(
+    app: &App,
+    gid: Id<GuildMarker>,
+    user: u64,
+    _roles: &[u64],
+    bot: bool,
+) -> Result<bool> {
+    let owner = app.guild_info(gid).await?.owner;
+    let (g, o, u) = (gid.get() as i64, owner.get() as i64, user as i64);
+    let level = brim_core::permits::resolve(&app.pool, g, o, u, bot).await?;
+    Ok(level.immune())
+}
+
+/// A punishment held back because the target's immunity is unread: a kick, ban or timeout waits
+/// for the `raid_punish` job, which reads it again; a lighter one is dropped.
+async fn hold_back(app: &App, gid: Id<GuildMarker>, user: u64, action: Action, why: &str) {
+    if matches!(action, Action::Timeout(_) | Action::Kick | Action::Ban) {
+        queue_retry(app, gid, user, action, why).await;
+    }
+}
+
+/// Queues a `raid_punish` job in 30 s; it checks immunity and the Raider List's Allow again.
+pub(crate) async fn queue_retry(
+    app: &App,
+    gid: Id<GuildMarker>,
+    user: u64,
+    action: Action,
+    why: &str,
+) {
+    let job = serde_json::json!({ "user": user, "action": action, "why": why });
+    let rank = match action {
+        Action::Ban => 3,
+        Action::Kick => 2,
+        _ => 1,
+    };
+    // One pending retry per member, with the harshest action: the join lock, the Raider List, the
+    // raid and the Join Gate can each queue one for the same joiner, and each run punishes.
+    // shortcut: two retries queued at the same instant for one member can both insert; a job
+    // being run (leased) does not count. Both only repeat a punishment Discord treats as done.
+    let queued = sqlx::query(
+        "WITH pending AS (
+           SELECT id, CASE payload->>'action' WHEN 'Ban' THEN 3 WHEN 'Kick' THEN 2 ELSE 1 END AS rank
+           FROM scheduled_jobs
+           WHERE guild_id = $1 AND kind = 'raid_punish' AND payload->>'user' = $2
+             AND (locked_until IS NULL OR locked_until < now())
+           FOR UPDATE),
+         harsher AS (
+           UPDATE scheduled_jobs s SET payload = $3 FROM pending p WHERE s.id = p.id AND p.rank < $4)
+         INSERT INTO scheduled_jobs (guild_id, kind, payload, run_at)
+         SELECT $1, 'raid_punish', $3, to_timestamp($5::float8)
+         WHERE NOT EXISTS (SELECT 1 FROM pending)",
+    )
+    .bind(gid.get() as i64)
+    .bind(user.to_string())
+    .bind(job)
+    .bind(rank)
+    .bind((now_secs() + 30) as f64)
+    .execute(&app.pool)
+    .await;
+    if let Err(e) = queued {
+        tracing::error!(?e, user, "queueing the raid punishment retry failed");
+    }
+}
+
+/// The invite a joiner used, learned after raid detection: kept for the raid log.
+async fn note_invite(app: &App, gid: Id<GuildMarker>, user: u64, invite: &str, code: Option<&str>) {
+    // The detector keeps it for raid rows not written yet (a raid that triggers after this join
+    // gets a new code); rows already written are updated under either code.
+    let now = app.raids.lock().unwrap().get_mut(&gid.get()).map(|d| {
+        d.note(user, false, Some(invite));
+        d.code.clone()
+    });
+    let codes: Vec<&str> = [code, now.as_deref()].into_iter().flatten().collect();
+    let r = sqlx::query(
+        "UPDATE raid_log SET invite_code = $3
+         WHERE guild_id = $1 AND user_id = $2 AND code = ANY($4) AND invite_code IS NULL",
+    )
+    .bind(gid.get() as i64)
+    .bind(user as i64)
+    .bind(invite)
+    .bind(&codes)
+    .execute(&app.pool)
+    .await;
+    if let Err(e) = r {
+        tracing::warn!(?e, "saving the raid log invite failed");
+    }
+}
+
+/// The `raid_punish` job. Someone made staff or let back in since is left alone (staff's unban,
+/// appeal or Allow also drop the job). A refusal is final (the failed punishment is already
+/// logged); anything else fails the job, so the scheduler tries again.
+pub(crate) async fn punish_job(
+    app: &App,
+    gid: Id<GuildMarker>,
+    p: &serde_json::Value,
+) -> Result<()> {
+    use anyhow::Context;
+    let user = crate::scheduler::need(p, "user")?;
+    let action: Action = serde_json::from_value(p["action"].clone())?;
+    let why = p["why"].as_str().context("job payload has no why")?;
+    if app.is_immune(gid, Id::new(user)).await? || crate::raiders::allowed(app, gid, user).await? {
+        return Ok(());
+    }
+    let cfg = app.cfg(gid.get()).await?;
+    // The first try sent the DM already.
+    match act(app, &cfg, gid, user, action, why, Detail::default()).await {
+        Err(e) if !crate::http_err::refused(&e) => Err(e),
+        Err(_) => Ok(()),
+        Ok(()) => {
+            crate::raiders::join::retried(app, gid, user, action, why).await;
+            Ok(())
+        }
+    }
+}
+
+/// Records and logs a punishment, done or `failed`. A failed log is only logged: `punish` fails
+/// only when the action did, so a retry never punishes twice.
+async fn finish(
+    app: &App,
+    cfg: &GuildCfg,
+    gid: Id<GuildMarker>,
+    user: u64,
+    what: (Action, &str, Detail<'_>),
+    failed: Option<&str>,
+) {
+    let (action, why, detail) = what;
+    let name = format!("{action:?}");
+    record(app, gid, user, (&name, why, detail), failed).await;
+    if cfg.logging.target(LogKind::JoinGate, None).is_none() {
+        no_log_channel(app, gid).await;
+    }
+    let log = gate_log(user, action, why, detail, failed);
+    if let Err(e) = send_log(app, gid.get(), LogKind::JoinGate, log).await {
+        tracing::warn!(?e, "join gate log failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_kick_and_ban_remove_the_joiner() {
+        assert!(removes(Action::Kick) && removes(Action::Ban));
+        for a in [
+            Action::Log,
+            Action::Rename,
+            Action::Warn,
+            Action::Timeout(0),
+        ] {
+            assert!(!removes(a), "{a:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_owner_and_extra_owners_vouch_for_bots() {
+        assert!(vouches(&Level::Owner));
+        assert!(vouches(&Level::ExtraOwner));
+        assert!(!vouches(&Level::TrustedAdmin));
+        assert!(!vouches(&Level::None));
+    }
+
+    #[test]
+    fn rename_does_not_loop_on_its_own_nick() {
+        let g = GateCfg {
+            username_terms: vec!["raid".into()],
+            ..Default::default()
+        };
+        let s = |v: &str| v.to_string();
+        let (bad, clean, renamed) = (s("raidbot"), s("bob"), s(RENAMED));
+        let key = |a, nick: Option<&String>| post_join_key(&g, a, &bad, None, nick);
+        // Rename: one key before and after its own nick, and a clean nick needs nothing.
+        assert_eq!(key(Action::Rename, None), Some(s("raidbot\0\0")));
+        assert_eq!(key(Action::Rename, Some(&renamed)), None);
+        let bad_nick = s("raid2");
+        assert_eq!(
+            key(Action::Rename, Some(&bad_nick)),
+            key(Action::Rename, None)
+        );
+        // Other actions keep the nick, so a new bad nick acts again.
+        assert_eq!(
+            key(Action::Kick, Some(&renamed)),
+            Some(format!("raidbot\0\0{RENAMED}"))
+        );
+        // A clean username with a bad nick is renamed; a clean name is left alone.
+        assert!(post_join_key(&g, Action::Rename, &clean, None, Some(&bad_nick)).is_some());
+        assert_eq!(post_join_key(&g, Action::Kick, &clean, None, None), None);
+    }
+
+    #[test]
+    fn gate_log_names_filters_bot_and_failure() {
+        let d = Detail {
+            filters: &["No Avatar", "Suspicious Account"],
+            is_bot: true,
+            adder: Some(5),
+        };
+        let e = gate_log(9, Action::Kick, "join gate", d, Some("Missing Permissions")).build();
+        let text = serde_json::to_string(&e).unwrap();
+        for part in [
+            "No Avatar, Suspicious Account",
+            "added by <@5>",
+            "Missing Permissions",
+            "Kick",
+        ] {
+            assert!(text.contains(part), "{part}: {text}");
+        }
+        assert_eq!(e.color, Some(RED));
+        let human = gate_log(9, Action::Ban, "join raid", Detail::default(), None).build();
+        let text = serde_json::to_string(&human).unwrap();
+        assert!(!text.contains("Filters") && !text.contains("Bot") && !text.contains("Failed"));
+    }
+
+    /// Runs only when DATABASE_URL points at a scratch Postgres.
+    #[tokio::test]
+    async fn records_keep_the_newest_thousand() {
+        let Ok(url) = brim_core::db::test_url() else {
+            return;
+        };
+        let pool = brim_core::db::connect(&url).await.unwrap();
+        let app = App::new(
+            twilight_http::Client::new(String::new()),
+            twilight_http::Client::new(String::new()),
+            pool,
+            brim_automod::discord_api::Api::new(""),
+            Id::new(1),
+        );
+        let gid = Id::new(6_110_000_000 + std::process::id() as u64);
+        let g = gid.get() as i64;
+        // 1000 old-enough rows in one go, then a row older than 30 days.
+        sqlx::query("INSERT INTO joingate_actions (guild_id, user_id, reason, action, ok) SELECT $1, n, 'x', 'Kick', true FROM generate_series(1, 1000) n")
+            .bind(g)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE joingate_actions SET created_at = now() - interval '31 days' WHERE guild_id = $1 AND user_id = 500")
+            .bind(g)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let d = Detail {
+            filters: &["No Avatar"],
+            is_bot: true,
+            adder: Some(7),
+        };
+        record(
+            &app,
+            gid,
+            2000,
+            ("Kick", "join gate", d),
+            Some("Missing Permissions"),
+        )
+        .await;
+        let users: Vec<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM joingate_actions WHERE guild_id = $1 ORDER BY id",
+        )
+        .bind(g)
+        .fetch_all(&app.pool)
+        .await
+        .unwrap();
+        // The oldest row and the 31-day-old one are gone, the new one is in.
+        assert_eq!(users.len(), 999);
+        assert!(!users.contains(&1) && !users.contains(&500) && users.contains(&2000));
+        let (filters, ok, error): (serde_json::Value, bool, Option<String>) = sqlx::query_as(
+            "SELECT filters, ok, error FROM joingate_actions WHERE guild_id = $1 AND user_id = 2000",
+        )
+        .bind(g)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            (filters, ok, error.as_deref()),
+            (
+                serde_json::json!(["No Avatar"]),
+                false,
+                Some("Missing Permissions")
+            )
+        );
+        sqlx::query("DELETE FROM joingate_actions WHERE guild_id = $1")
+            .bind(g)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+    }
+}

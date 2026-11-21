@@ -1,0 +1,5 @@
+[advisories]
+# libsqlite3-sys is only in Cargo.lock (0.30.1) through sqlx's SQLite driver, which Brim never
+# builds (`cargo tree -i libsqlite3-sys --target all` is empty). Drop this once a sqlx release
+# allows the fixed libsqlite3-sys.
+ignore = ["RUSTSEC-2026-0459"]

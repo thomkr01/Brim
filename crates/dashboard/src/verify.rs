@@ -1,0 +1,306 @@
+//! Web verification: a member signs in with Discord, passes Cloudflare Turnstile,
+//! and the bot is told (as a `verify_grant` job) to hand out the roles.
+use crate::{auth::Sess, store, ApiError, AppState};
+use axum::{
+    extract::{Path, State},
+    response::{Html, IntoResponse, Redirect, Response},
+    routing::get,
+    Json, Router,
+};
+use brim_automod::iplist::IpLists;
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::net::IpAddr;
+
+pub fn routes() -> Router<AppState> {
+    Router::new().route("/verify/{guild}", get(page).post(submit))
+}
+
+fn keys() -> Option<(String, String)> {
+    let k = |n| std::env::var(n).ok().filter(|v| !v.is_empty());
+    Some((k("TURNSTILE_SITE_KEY")?, k("TURNSTILE_SECRET_KEY")?))
+}
+
+fn gate(cfg: &Value, have_keys: bool) -> Result<bool, &'static str> {
+    let v = &cfg["verification"];
+    if v["enabled"] != true || v["mode"] != "Web" {
+        return Err("Web verification is not turned on for this server.");
+    }
+    if v["roles"].as_array().is_none_or(|r| r.is_empty()) {
+        return Err("This server has no verification roles set.");
+    }
+    if !have_keys {
+        return Err("The captcha is not configured on this bot. Ask the server staff.");
+    }
+    Ok(have_keys)
+}
+
+fn shell(body: &str) -> Html<String> {
+    Html(format!(
+        r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verify</title><style>body{{background:#1c1c1c;color:#eee;font:16px Poppins,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}}
+main{{background:#212121;padding:2rem;border-radius:1rem;max-width:26rem;text-align:center}}button{{background:#1be725;color:#111;border:0;border-radius:.5rem;padding:.7rem 1.4rem;font:inherit;font-weight:600;cursor:pointer;text-transform:uppercase}}
+#close{{background:#e71b1b;color:#fff}}.tag{{display:inline-block;background:#2f2f2f;border-radius:.4rem;padding:.15rem .6rem;font-size:.8rem;color:#bbb}}h1{{letter-spacing:.15em;margin:.8rem 0 .3rem}}.sub{{color:#bbb;margin:0 0 1.2rem}}.ok{{font-size:3rem;color:#1be725}}</style>
+<main>{body}</main>"#
+    ))
+}
+
+async fn page(
+    State(st): State<AppState>,
+    Path(guild): Path<i64>,
+    sess: Result<Sess, ApiError>,
+) -> Result<Response, ApiError> {
+    let Ok(s) = sess else {
+        return Ok(Redirect::to(&format!("/auth/login?next=/verify/{guild}")).into_response());
+    };
+    let (_, cfg) = store::current(&st.db, guild).await?;
+    let keys = keys();
+    let captcha = match gate(&cfg, keys.is_some()) {
+        Ok(c) => c,
+        Err(m) => return Ok(shell(&format!("<p>{m}</p>")).into_response()),
+    };
+    let widget = match (&keys, captcha) {
+        (Some((site, _)), true) => format!(
+            r#"<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="{site}"></div>"#
+        ),
+        _ => String::new(),
+    };
+    Ok(shell(&format!(
+        r#"<span class="tag">Brim</span><h1>VERIFICATION</h1><p class="sub">You are required to pass the captcha to get access to the server.</p><p>Signed in as {}.</p>{widget}<p><button id="go">&#10003; Verify</button></p><p id="msg" role="alert"></p>
+<script>go.onclick=async()=>{{go.disabled=true;
+const t=document.querySelector('[name=cf-turnstile-response]');
+const r=await fetch(location.pathname,{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':'{}'}},body:JSON.stringify({{token:t?t.value:''}})}});
+const j=await r.json().catch(()=>({{}}));
+if(r.ok){{document.querySelector('main').innerHTML='<div class="ok">&#10003;</div><h1>VERIFIED!</h1><p class="sub">Your roles arrive in a few seconds.</p><button id="close" onclick="window.close()">Close</button>'}}
+else if(r.status===401){{location.href='/auth/login?next='+location.pathname}}else{{msg.textContent=j.error||'Something went wrong.';go.disabled=false;window.turnstile&&turnstile.reset()}}}}</script>"#,
+        s.username.replace('&', "&amp;").replace('<', "&lt;"),
+        s.csrf
+    ))
+    .into_response())
+}
+
+#[derive(Deserialize)]
+struct Body {
+    token: String,
+}
+
+async fn turnstile_ok(st: &AppState, secret: &str, token: &str) -> Result<bool, ApiError> {
+    let r = st
+        .discord
+        .http
+        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
+        .form(&[("secret", secret), ("response", token)])
+        .send()
+        .await;
+    // A failed check service is not a wrong answer, and "internal error" would say neither.
+    match r {
+        Ok(r) => match r.json::<Value>().await {
+            Ok(v) => return Ok(v["success"] == true),
+            Err(e) => tracing::warn!(?e, "turnstile answer was not JSON"),
+        },
+        Err(e) => tracing::warn!(?e, "turnstile check could not be reached"),
+    }
+    Err(ApiError::BadRequest(
+        "The captcha check could not be reached. Try again in a minute.".into(),
+    ))
+}
+
+async fn submit(
+    State(st): State<AppState>,
+    Path(guild): Path<i64>,
+    headers: axum::http::HeaderMap,
+    s: Sess,
+    Json(b): Json<Body>,
+) -> Result<Json<Value>, ApiError> {
+    let (_, cfg) = store::current(&st.db, guild).await?;
+    let keys = keys();
+    let captcha = gate(&cfg, keys.is_some()).map_err(|m| ApiError::BadRequest(m.into()))?;
+    if let (true, Some((_, secret))) = (captcha, &keys) {
+        if !turnstile_ok(&st, secret, &b.token).await? {
+            return Err(ApiError::BadRequest("Captcha failed, try again.".into()));
+        }
+    }
+    let in_guild = crate::auth::user_guilds(&st, &s)
+        .await?
+        .iter()
+        .any(|g| g.id == guild.to_string());
+    if !in_guild {
+        return Err(ApiError::BadRequest("Join the server first.".into()));
+    }
+    // Cloudflare's tunnel sets this; without it (local runs) the alt check is skipped.
+    let ip = headers
+        .get("cf-connecting-ip")
+        .and_then(|v| v.to_str().ok());
+    if let Some(list) = vpn_hit(&st.ips, &cfg, ip).map_err(|m| ApiError::BadRequest(m.into()))? {
+        if first_in_10_min(&st, guild, s.user_id) {
+            brim_core::jobs::enqueue(
+                &st.db,
+                guild,
+                "verify_blocked",
+                json!({ "user": s.user_id, "list": list }),
+                0,
+            )
+            .await?;
+        }
+        return Err(ApiError::BadRequest(
+            "Verification is blocked from VPNs, proxies and hosting networks. Turn yours off and try again."
+                .into(),
+        ));
+    }
+    let same_ip = match ip {
+        Some(ip) => same_ip(&st, guild, s.user_id, ip).await?,
+        None => vec![],
+    };
+    brim_core::jobs::enqueue(
+        &st.db,
+        guild,
+        "verify_grant",
+        json!({ "user": s.user_id, "same_ip": same_ip }),
+        0,
+    )
+    .await?;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// The list that refuses this visitor when the VPN block is on. Err when it is on and the address is missing
+/// (the request did not come through Cloudflare). Lists not loaded yet let everyone through, so a failed
+/// download never stops every server's verification.
+fn vpn_hit(
+    lists: &IpLists,
+    cfg: &Value,
+    ip: Option<&str>,
+) -> Result<Option<&'static str>, &'static str> {
+    let v = &cfg["verification"];
+    if v["block_vpn"] != true {
+        return Ok(None);
+    }
+    let Some(ip) = ip.and_then(|s| s.trim().parse::<IpAddr>().ok()) else {
+        return Err("Your connection could not be checked. Try again later.");
+    };
+    if !lists.loaded() {
+        tracing::warn!("VPN block is on but no IP list is loaded yet; letting the member through");
+        return Ok(None);
+    }
+    Ok(lists.verdict(ip, v["block_hosting"] != false))
+}
+
+/// One refusal log per member per 10 minutes, so pressing Verify in a loop does not flood the log.
+fn first_in_10_min(st: &AppState, guild: i64, user: i64) -> bool {
+    const GAP: i64 = 600_000;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut m = st.vpn_logged.lock().unwrap();
+    if m.len() > 10_000 {
+        m.retain(|_, t| *t > now - GAP);
+        if m.len() > 10_000 {
+            m.clear();
+        }
+    }
+    match m.get(&(guild, user)) {
+        Some(t) if *t > now - GAP => false,
+        _ => {
+            m.insert((guild, user), now);
+            true
+        }
+    }
+}
+
+/// Keyed per server, so the hash says nothing outside it and no raw IP is stored. The key is made on
+/// the first use after start and held only in this process's memory (security review s02:t-pv-iphash-reversal): no secret in
+/// .env, a dump or another container can turn a row back into an address. A restart forgets the last
+/// day's matches; the alt check needs no more than that day.
+fn ip_hash(guild: i64, ip: &str) -> Vec<u8> {
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    static KEY: std::sync::OnceLock<[u8; 32]> = std::sync::OnceLock::new();
+    let key = KEY.get_or_init(rand::random);
+    let mut m = Hmac::<Sha256>::new_from_slice(key).expect("HMAC takes any key length");
+    m.update(format!("{guild}:{ip}").as_bytes());
+    m.finalize().into_bytes().to_vec()
+}
+
+/// Other members who verified from the same IP in the last 24 hours; records this visit.
+async fn same_ip(st: &AppState, guild: i64, user: i64, ip: &str) -> Result<Vec<String>, ApiError> {
+    let hash = ip_hash(guild, ip);
+    sqlx::query("delete from verify_ips where at < now() - interval '1 day'")
+        .execute(&st.db)
+        .await?;
+    let others: Vec<i64> = sqlx::query_scalar(
+        "select user_id from verify_ips where guild_id = $1 and ip_hash = $2 and user_id <> $3 and at > now() - interval '1 day'",
+    )
+    .bind(guild)
+    .bind(&hash)
+    .bind(user)
+    .fetch_all(&st.db)
+    .await?;
+    sqlx::query("insert into verify_ips (guild_id, ip_hash, user_id) values ($1, $2, $3) on conflict (guild_id, ip_hash, user_id) do update set at = now()")
+        .bind(guild)
+        .bind(&hash)
+        .bind(user)
+        .execute(&st.db)
+        .await?;
+    Ok(others.iter().map(i64::to_string).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gate_follows_mode_roles_and_keys() {
+        let cfg = |mode, roles: Value| json!({"verification": {"enabled": true, "mode": mode, "roles": roles}});
+        assert!(gate(&cfg("Web", json!(["1"])), false).is_err());
+        assert_eq!(gate(&cfg("Web", json!(["1"])), true), Ok(true));
+        assert!(gate(&cfg("ThirdParty", json!(["1"])), true).is_err());
+        assert!(gate(&cfg("Captcha", json!(["1"])), true).is_err());
+        assert!(gate(&cfg("Web", json!([])), true).is_err());
+        assert!(gate(&json!({}), true).is_err());
+    }
+
+    #[test]
+    fn vpn_block_refuses_listed_and_unknown_addresses() {
+        let lists = IpLists::from_texts("1.1.1.1\n", "2.2.2.0/24\n", "3.3.0.0/16\n").unwrap();
+        let on =
+            |hosting: Value| json!({"verification": {"block_vpn": true, "block_hosting": hosting}});
+        assert_eq!(
+            vpn_hit(&lists, &json!({}), Some("1.1.1.1")),
+            Ok(None),
+            "off by default"
+        );
+        assert_eq!(vpn_hit(&lists, &json!({}), None), Ok(None));
+        assert_eq!(
+            vpn_hit(&lists, &on(Value::Null), Some("1.1.1.1")),
+            Ok(Some("Tor"))
+        );
+        assert_eq!(
+            vpn_hit(&lists, &on(Value::Null), Some(" 2.2.2.2 ")),
+            Ok(Some("VPN"))
+        );
+        assert_eq!(
+            vpn_hit(&lists, &on(Value::Null), Some("3.3.3.3")),
+            Ok(Some("hosting network")),
+            "hosting on by default"
+        );
+        assert_eq!(
+            vpn_hit(&lists, &on(json!(false)), Some("3.3.3.3")),
+            Ok(None)
+        );
+        assert_eq!(vpn_hit(&lists, &on(Value::Null), Some("8.8.8.8")), Ok(None));
+        assert!(
+            vpn_hit(&lists, &on(Value::Null), None).is_err(),
+            "no address: refused"
+        );
+        assert!(vpn_hit(&lists, &on(Value::Null), Some("garbage")).is_err());
+        assert_eq!(
+            vpn_hit(&IpLists::default(), &on(Value::Null), Some("1.1.1.1")),
+            Ok(None),
+            "not loaded: let through"
+        );
+    }
+
+    #[test]
+    fn ip_hash_is_per_server() {
+        assert_eq!(ip_hash(1, "1.2.3.4"), ip_hash(1, "1.2.3.4"));
+        assert_ne!(ip_hash(1, "1.2.3.4"), ip_hash(2, "1.2.3.4"));
+        assert_ne!(ip_hash(1, "1.2.3.4"), ip_hash(1, "1.2.3.5"));
+    }
+}

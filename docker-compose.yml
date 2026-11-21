@@ -1,0 +1,190 @@
+name: brim
+
+# The Brim names (database brim, roles brim_*, volumes brim_*). A server set up before the rename to
+# Brim ran this project as tommybot: a git pull there would start it on new, empty volumes. BRIM_NAMES
+# in .env (see .env.example) says this server is set up for these names; without it nothing starts.
+x-names: ${BRIM_NAMES:?this compose file uses the Brim names. New install - add BRIM_NAMES=1 to .env. A server set up before the rename (folder ~/tommybot) - run git checkout HEAD@{1} to go back to the compose file it runs on}
+
+# Cap container logs so they cannot fill the disk.
+x-logging: &logging
+  logging:
+    options:
+      max-size: 10m
+      max-file: "3"
+
+# No Linux capabilities and no privilege gain, so a bug in a service has less to work with (threat
+# model Q14, owner decision 2026-11-18): every service but the updater (see there); Postgres adds back only
+# what its entrypoint needs. Not read_only: compose refuses a secret from .env in a read-only container.
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    # The entrypoint makes the data folder its own and switches to the postgres user: only that.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    # Small-server settings. shared_buffers 128 MB (default) -> 32 MB saves ~23 MB of RAM; the whole database
+    # is small, so it stays cached. max_connections 100 -> 40 must cover the worst case: bot pool 10 + 2
+    # listeners, dashboard pool 10 + 2 listeners, MCP 3, updater, dumps and an admin shell ~6 (about 33).
+    # Raise it with any new service or pool. Applies after `docker compose up -d` (Postgres restarts once).
+    command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=40"]
+    environment:
+      POSTGRES_USER: brim
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: brim
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U brim -d brim"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    image: ghcr.io/thomkr01/brim-bot:${BRIM_TAG:-${TOMMYBOT_TAG:-latest}}
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    secrets: [discord_token]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The bot token comes as a file (secrets below), not in the environment.
+      DATABASE_URL: postgres://brim:${POSTGRES_PASSWORD}@postgres:5432/brim
+      RUST_LOG: ${RUST_LOG:-info}
+      # Also log to files here, read by the MCP server.
+      LOG_DIR: /logs
+      # Lets the MCP server's read-only database role log in (migration 2700).
+      MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:-}
+      # Lets the dashboard's own database role log in (not a superuser; DEPLOY.md "Dashboard database role").
+      DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-}
+      # Links in the welcome message.
+      DASHBOARD_URL: ${DASHBOARD_URL:-}
+      SUPPORT_URL: ${SUPPORT_URL:-}
+      # Domain lists of the phishing and NSFW link filters. Unset: the bot's default list; set but
+      # empty: that list is off. (`-`, not `:-`, keeps an empty value empty.)
+      PHISHING_LIST_URL: ${PHISHING_LIST_URL-https://raw.githubusercontent.com/blocklistproject/Lists/master/alt-version/phishing-nl.txt}
+      NSFW_LIST_URL: ${NSFW_LIST_URL-https://raw.githubusercontent.com/blocklistproject/Lists/master/alt-version/porn-nl.txt}
+      # CPU threads the NSFW image scan may use (1-8).
+      NSFW_THREADS: ${NSFW_THREADS:-1}
+    volumes:
+      - logs:/logs
+
+  dashboard:
+    image: ghcr.io/thomkr01/brim-dashboard:${BRIM_TAG:-${TOMMYBOT_TAG:-latest}}
+    build:
+      context: .
+      target: dashboard
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    secrets: [discord_token]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # The bot runs the migrations and sets this role's password; the dashboard waits for both.
+      bot:
+        condition: service_started
+    ports:
+      # Localhost only: Docker's port rules bypass ufw. Reach it from outside via the tunnel or a proxy.
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: postgres://brim_dashboard:${DASHBOARD_DB_PASSWORD:?set DASHBOARD_DB_PASSWORD in .env, see DEPLOY.md "Dashboard database role"}@postgres:5432/brim
+      DASHBOARD_URL: ${DASHBOARD_URL:?set DASHBOARD_URL in .env}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID in .env}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?set DISCORD_CLIENT_SECRET in .env}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      SUPPORT_URL: ${SUPPORT_URL:-}
+      RUST_LOG: ${RUST_LOG:-info}
+      LOG_DIR: /logs
+    volumes:
+      - logs:/logs
+
+  # Runs updates started from the dashboard (bot owner only). It alone holds the Docker socket, has no
+  # open port, and only ever pulls this project's images and recreates bot and dashboard.
+  updater:
+    image: ghcr.io/thomkr01/brim-updater:${BRIM_TAG:-${TOMMYBOT_TAG:-latest}}
+    build:
+      context: .
+      target: updater
+    restart: unless-stopped
+    <<: *logging
+    # Not cap_drop: the Docker socket is root on the host anyway, and the dump into ./pre-update
+    # must keep working whoever owns that folder.
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://brim:${POSTGRES_PASSWORD}@postgres:5432/brim
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The compose file and .env, so it recreates the containers exactly as configured.
+      - .:/project:ro
+      # A database dump before each update (the newest three), see DEPLOY.md "Restoring for real".
+      - ./pre-update:/backups
+
+  # Read-only AI connector (MCP) server (status, logs, config, cases). Off unless COMPOSE_PROFILES includes
+  # mcp; see DEPLOY.md. No Discord token and no Docker socket: it reads views as brim_mcp and the log files.
+  mcp:
+    image: ghcr.io/thomkr01/brim-mcp:${BRIM_TAG:-${TOMMYBOT_TAG:-latest}}
+    build:
+      context: .
+      target: mcp
+    profiles: [mcp]
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    depends_on:
+      # The bot runs the migration and sets the role's password.
+      bot:
+        condition: service_started
+    environment:
+      # OAuth login through Discord (the dashboard's app); off until all are set. See DEPLOY.md.
+      MCP_OAUTH_SECRET: ${MCP_OAUTH_SECRET:-}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-}
+      MCP_OWNER_ID: ${MCP_OWNER_ID:-}
+      # Exact https callbacks of the AI clients, comma-separated. Empty: only localhost clients can log in.
+      MCP_OAUTH_REDIRECTS: ${MCP_OAUTH_REDIRECTS:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      # Callers use tokens from the dashboard's MCP tokens page; changes go through the dashboard. See DEPLOY.md 6.4.
+      DASHBOARD_INTERNAL_URL: http://dashboard:8080
+      MCP_DATABASE_URL: postgres://brim_mcp:${MCP_DB_PASSWORD:-}@postgres:5432/brim
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - logs:/logs:ro
+
+  # Cloudflare Tunnel to the dashboard. Off unless COMPOSE_PROFILES=tunnel; see DEPLOY.md.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.0 # pinned: :latest changed the tunnel without a commit
+    profiles: [tunnel]
+    restart: unless-stopped
+    <<: [*logging, *hardening]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+
+  # rclone for scripts/backup.sh (`docker compose run`; never started by `up`). Pinned by digest, not
+  # only by tag: it reads the encrypted dumps and holds the backup remote's credential, so a moved tag
+  # must not run here. Dependabot (docker-compose) proposes new versions with their digest.
+  rclone:
+    image: rclone/rclone:1.76.0@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466
+    profiles: [backup]
+    <<: *logging
+    # Not cap_drop: root in the container must read the dumps and the config, which another user owns.
+    security_opt: ["no-new-privileges:true"]
+
+# DISCORD_TOKEN from .env, mounted at /run/secrets/discord_token in the bot and the dashboard.
+secrets:
+  discord_token:
+    environment: DISCORD_TOKEN
+
+volumes:
+  pgdata:
+  logs:
