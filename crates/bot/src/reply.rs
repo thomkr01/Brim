@@ -645,6 +645,9 @@ pub struct Said {
     /// The server saved its own edited version: it is sent as it is. Without one, a command's
     /// reply still goes through that command's `cmd.<command>` frame, like the code-built text.
     pub edited: bool,
+    /// A security text (group Security): never framed by `cmd.<command>`, which is not a security
+    /// text, so a Trusted Admin could hide its facts in a spoiler there.
+    pub security: bool,
 }
 
 /// The one way to send a short reply: the server's edited version of entry `key` or its default,
@@ -668,7 +671,7 @@ pub async fn say_wide_line(app: &App, key: &str, vars: &[(&str, &str)]) -> Strin
     text
 }
 
-fn said_from(key: &str, stored: Option<Value>, vars: &[(&str, &str)]) -> Said {
+pub(crate) fn said_from(key: &str, stored: Option<Value>, vars: &[(&str, &str)]) -> Said {
     let m = botmsg::render(key, stored.as_ref(), vars);
     // A security text whose edit lost a fact sends the default: then it is not an edit.
     let edited = stored.as_ref().is_some_and(|s| botmsg::uses_stored(key, s))
@@ -678,6 +681,7 @@ fn said_from(key: &str, stored: Option<Value>, vars: &[(&str, &str)]) -> Said {
         text,
         embeds,
         edited,
+        security: botmsg::find(key).is_some_and(|d| d.security),
     }
 }
 
@@ -688,6 +692,7 @@ impl From<String> for Said {
             text,
             embeds: vec![],
             edited: false,
+            security: false,
         }
     }
 }

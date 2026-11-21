@@ -1374,7 +1374,7 @@ mod tests {
         };
         let run = |l: Level, c| {
             let app = &t.app;
-            async move { backup_cmd(app, g, (user, &l), c).await.unwrap() }
+            async move { backup_cmd(app, g, (user, &l), c).await.unwrap().text }
         };
         assert!(run(custom.clone(), clear())
             .await

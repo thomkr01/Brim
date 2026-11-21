@@ -17,21 +17,24 @@ async fn is_bot(app: &App, id: i64) -> Result<bool> {
     Ok(app.http.user(id).await?.model().await?.bot)
 }
 
-/// None when every id is a user, else the refusal. A failed lookup refuses too.
-pub(crate) async fn refuse(app: &App, ids: &[i64], what: &str) -> Option<String> {
+/// None when every id is a user, else the refusal (entry `key`, a security text with `{target}`).
+/// A failed lookup refuses too.
+pub(crate) async fn refuse(
+    app: &App,
+    gid: Id<GuildMarker>,
+    ids: &[i64],
+    key: &str,
+) -> Option<String> {
     for &id in ids {
+        let target = format!("<@{id}>");
+        let vars = [("target", target.as_str())];
         match is_bot(app, id).await {
             Ok(false) => {}
-            Ok(true) => {
-                return Some(format!(
-                    "<@{id}> is a bot, and only users can be {what}. Add the bot as a member of a permit instead: it gets exactly the whitelist flags you pick."
-                ))
-            }
+            Ok(true) => return Some(crate::reply::say_line(app, gid, key, &vars).await),
             Err(e) => {
                 tracing::warn!(?e, id, "bot check failed");
-                return Some(format!(
-                    "Could not check that <@{id}> is a user and not a bot, so nothing was changed. Try again."
-                ));
+                let failed = "reply.settings.bot_check_failed";
+                return Some(crate::reply::say_line(app, gid, failed, &vars).await);
             }
         }
     }
@@ -194,11 +197,12 @@ mod tests {
         let Some(t) = T::new(943).await else { return };
         let bot = t.base * 10 + 2;
         t.set(|m| m.bots.push(bot));
-        let r = refuse(&t.app, &[bot as i64], "on the quarantine whitelist").await;
+        let key = "reply.whitelist.bot_quarantine";
+        let r = refuse(&t.app, t.g(0), &[bot as i64], key).await;
         assert!(r
             .unwrap()
             .contains("only users can be on the quarantine whitelist"));
-        assert_eq!(refuse(&t.app, &[bot as i64 + 1], "x").await, None);
+        assert_eq!(refuse(&t.app, t.g(0), &[bot as i64 + 1], key).await, None);
     }
 
     /// GuildCreate: bots on the three lists are removed as one config version, logged and DMed;

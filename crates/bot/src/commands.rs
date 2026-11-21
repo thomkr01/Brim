@@ -1074,9 +1074,15 @@ pub(crate) async fn say_embeds(
 /// Sends a short reply (see [`reply::say`]): an edited version as it is, the default through the
 /// command's frame.
 pub(crate) async fn say_said(app: &App, msg: &MessageCreate, said: &reply::Said) -> Result<()> {
-    send_reply(app, msg, &said.text, &said.embeds, !said.edited)
-        .await
-        .map(drop)
+    send_reply(
+        app,
+        msg,
+        &said.text,
+        &said.embeds,
+        !said.edited && !said.security,
+    )
+    .await
+    .map(drop)
 }
 
 /// Sends the short reply entry `key` with `vars` filled.
@@ -1171,8 +1177,8 @@ async fn backup_prefix(
             return say_key(app, msg, gid, "reply.error.usage", &line).await;
         }
     };
-    let text = backup_cmd(app, gid, (msg.author.id, &actor), cmd).await?;
-    say(app, msg, &text).await
+    let said = backup_cmd(app, gid, (msg.author.id, &actor), cmd).await?;
+    say_said(app, msg, &said).await
 }
 
 /// `/backups create|list|load|delete|purge` and `t!backups ID|take|load|delete|clear`. `load`
@@ -1182,13 +1188,16 @@ pub async fn backup_cmd(
     gid: Id<GuildMarker>,
     (actor_id, actor): (Id<UserMarker>, &permits::Level),
     cmd: BackupCmd,
-) -> Result<String> {
+) -> Result<reply::Said> {
     if !actor.has("backups") {
-        return Ok("Cannot manage backups: you lack the backups permit".into());
+        return Ok(String::from("Cannot manage backups: you lack the backups permit").into());
     }
     if let Some(msg) = gated(app, gid, actor_id, actor, "backups").await? {
-        return Ok(msg);
+        return Ok(msg.into());
     }
+    // The refusals that guard anti-nuke's restore source are security texts, never framed by
+    // `cmd.backups` (a Trusted Admin may edit that frame).
+    let no = |key: &'static str| reply::say(app, gid, key, &[]);
     // Loading deletes whatever the backup lacks, and clearing or deleting (ten deletes are a clear)
     // removes anti-nuke's restore source: owner level plus a fresh 2FA, as the dashboard asks
     // (S-h3 2). The load preview only reads.
@@ -1197,28 +1206,31 @@ pub async fn backup_cmd(
         BackupCmd::Clear | BackupCmd::Delete { .. } | BackupCmd::Load { confirm: true, .. }
     ) {
         if !matches!(actor, permits::Level::Owner | permits::Level::ExtraOwner) {
-            return Ok("Only the owner and Extra Owners can load or delete backups".into());
+            return Ok(no("reply.backups.owners_load").await);
         }
         if !crate::settings::fresh_2fa(app, actor_id.get(), gid.get()).await? {
-            return Ok(crate::settings::needs_2fa_text(gid));
+            return Ok(crate::settings::needs_2fa(app, gid).await);
         }
     }
     // A nuke under way should not lose its restore source to a hijacked owner account.
     if matches!(cmd, BackupCmd::Clear | BackupCmd::Delete { .. })
         && backup::locked_or_panic(app, gid).await?
     {
-        return Ok(
-            "Cannot delete backups while the server is locked or in panic mode. End it first."
-                .into(),
-        );
+        return Ok(no("reply.backups.locked").await);
+    }
+    // `backup::load` refuses this too (for its other callers); here it is the security entry.
+    if matches!(cmd, BackupCmd::Load { confirm: true, .. })
+        && backup::locked_or_panic(app, gid).await?
+    {
+        return Ok(no("reply.backups.locked_load").await);
     }
     // The newest backup is anti-nuke's restore source (owner decision 11-16): owner level, no 2FA.
     if matches!(cmd, BackupCmd::Create)
         && !matches!(actor, permits::Level::Owner | permits::Level::ExtraOwner)
     {
-        return Ok("Only the owner and Extra Owners can create backups".into());
+        return Ok(no("reply.backups.owners_create").await);
     }
-    Ok(match cmd {
+    let text: String = match cmd {
         BackupCmd::Create => match backup::save(app, gid, Some(actor_id.get())).await {
             Ok(code) => format!("Saved backup `{code}`"),
             Err(e) => e.to_string(),
@@ -1249,7 +1261,8 @@ pub async fn backup_cmd(
             backup::delete(app, gid, None).await?;
             "Deleted all backups".into()
         }
-    })
+    };
+    Ok(text.into())
 }
 
 /// `/revert`: undo what `target` did in the last `since_s` seconds.
@@ -1260,24 +1273,27 @@ pub async fn revert_cmd(
     target: Id<UserMarker>,
     since_s: i64,
     owners: bool,
-) -> Result<String> {
+) -> Result<reply::Said> {
     if !actor.has("revert") {
-        return Ok("Cannot revert: you lack the revert permit".into());
+        return Ok(String::from("Cannot revert: you lack the revert permit").into());
     }
     // Owner, Extra Owner and TA actions are undone only when an Owner or Extra Owner asks for it.
     // So are Brim's own (automatic bans; its quarantines are never lifted here).
     let owner = app.guild_info(gid).await?.owner;
     if target == app.me || app.level(gid, owner, target).await?.immune() {
         let may = matches!(actor, permits::Level::Owner | permits::Level::ExtraOwner);
+        // Security texts: never framed by `cmd.revert` (see `reply::Said::security`).
+        let who = [("target", format!("<@{target}>"))];
+        let who: Vec<(&str, &str)> = who.iter().map(|(k, v)| (*k, v.as_str())).collect();
         if !may {
-            return Ok(format!("Cannot revert <@{target}>: only an Owner or Extra Owner can undo what an Owner, Extra Owner, Trusted Admin or Brim did"));
+            return Ok(reply::say(app, gid, "reply.revert.owners_only", &who).await);
         }
         if !owners {
-            return Ok(format!("<@{target}> is an Owner, Extra Owner, Trusted Admin or Brim. Nothing was reverted: run it again with `include_owners: True` to undo their actions too."));
+            return Ok(reply::say(app, gid, "reply.revert.include_owners", &who).await);
         }
     }
     if let Some(msg) = gated(app, gid, actor_id, actor, "revert").await? {
-        return Ok(msg);
+        return Ok(msg.into());
     }
     let r = antinuke::revert_actor(app, gid, target, now_secs() - since_s, None).await?;
     let reinvite = antinuke::capped(r.reinvite.iter().map(|u| format!("<@{u}>")));
@@ -1291,7 +1307,8 @@ pub async fn revert_cmd(
         } else {
             reinvite.join(" ")
         }
-    ))
+    )
+    .into())
 }
 
 #[cfg(test)]

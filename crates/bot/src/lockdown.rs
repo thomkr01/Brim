@@ -452,7 +452,7 @@ pub async fn unlocked_channels(
     Ok(())
 }
 
-/// A startup check that waits out a raid or lock: `kind` is one job per guild.
+/// A startup check that waits out a raid or lock (D58): `kind` is one job per guild.
 pub struct Deferred {
     pub kind: &'static str,
     /// When the first wait began (unix secs), from the job or the pending one.
@@ -841,6 +841,7 @@ pub async fn update(
             text: why,
             embeds: vec![],
             edited: false,
+            security: false,
         });
     }
     let locks = store::locks(&app.pool, gid.get()).await?;

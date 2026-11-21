@@ -357,7 +357,9 @@ pub(crate) async fn edit_trusted_admins(
         return Ok(crate::reply::say(app, gid, "reply.settings.ta_no_user", &[]).await);
     }
     if !matches!(op, Op::Remove(..)) {
-        if let Some(no) = crate::users_only::refuse(app, &ids, "a Trusted Admin").await {
+        if let Some(no) =
+            crate::users_only::refuse(app, gid, &ids, "reply.settings.bot_trusted_admin").await
+        {
             return Ok(no.into());
         }
     }
@@ -485,12 +487,6 @@ pub(crate) async fn needs_2fa(app: &App, gid: Id<GuildMarker>) -> Said {
 pub(crate) async fn needs_2fa_line(app: &App, gid: Id<GuildMarker>) -> String {
     let dashboard = dashboard_link(gid.get());
     crate::reply::say_line(app, gid, NEEDS_2FA, &[("dashboard", &dashboard)]).await
-}
-
-/// [`needs_2fa`] as the code wrote it, for a reply that goes through a command frame a Trusted
-/// Admin may edit (the backups command): an edited security text never goes through one.
-pub(crate) fn needs_2fa_text(gid: Id<GuildMarker>) -> String {
-    Refusal::of(NEEDS_2FA, &[("dashboard", &dashboard_link(gid.get()))]).text()
 }
 
 const NEEDS_2FA: &str = "reply.settings.needs_2fa";

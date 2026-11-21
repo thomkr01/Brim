@@ -485,10 +485,23 @@ fn settings_errors_keep_what_went_wrong() {
         ("reply.settings.nothing_found", s("Nothing found for `abc`")),
         ("reply.settings.ambiguous", s("`abc` is ambiguous, use a mention or id")),
         ("reply.settings.not_your_panel", s("Only the person who opened this panel can use it.")),
+        ("reply.settings.bot_trusted_admin", s("<@&5> is a bot, and only users can be a Trusted Admin. Add the bot as a member of a permit instead: it gets exactly the whitelist flags you pick.")),
+        ("reply.whitelist.bot_quarantine", s("<@&5> is a bot, and only users can be on the quarantine whitelist. Add the bot as a member of a permit instead: it gets exactly the whitelist flags you pick.")),
+        ("reply.settings.bot_check_failed", s("Could not check that <@&5> is a user and not a bot, so nothing was changed. Try again.")),
+        ("reply.backups.owners_load", s("Only the owner and Extra Owners can load or delete backups")),
+        ("reply.backups.owners_create", s("Only the owner and Extra Owners can create backups")),
+        ("reply.backups.locked_load", s("Cannot load a backup while the server is locked or in panic mode. End it first.")),
+        ("reply.backups.locked", s("Cannot delete backups while the server is locked or in panic mode. End it first.")),
+        ("reply.revert.owners_only", s("Cannot revert <@&5>: only an Owner or Extra Owner can undo what an Owner, Extra Owner, Trusted Admin or Brim did")),
+        ("reply.revert.include_owners", s("<@&5> is an Owner, Extra Owner, Trusted Admin or Brim. Nothing was reverted: run it again with `include_owners: True` to undo their actions too.")),
     ];
     for (key, want) in old {
         assert_eq!(text(key), json!(want), "{key}");
     }
+    // A security text is never laid in a `cmd.<command>` frame (prefix `say_said`, slash `run`).
+    let said = crate::reply::said_from("reply.backups.owners_load", None, &[]);
+    assert!(said.security && !said.edited);
+    assert!(!crate::reply::said_from("reply.settings.not_saved", None, &vars).security);
     fn s(t: &str) -> String {
         t.to_string()
     }

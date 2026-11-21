@@ -479,10 +479,11 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<()> {
         .await?;
     let mut confirm = None;
     let mut embeds = vec![];
+    let mut frame = true;
     // The server's own settings for this command first (review), then the command.
     let answer = match crate::cmdcfg::slash(app, i, data).await {
         Ok(Some(refused)) => Ok(refused),
-        Ok(None) => run(app, i, data, &mut confirm, &mut embeds).await,
+        Ok(None) => run(app, i, data, &mut confirm, &mut embeds, &mut frame).await,
         Err(e) => Err(e),
     };
     let text = match answer {
@@ -493,7 +494,9 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<()> {
         }
     };
     let framed = match (i.guild_id, reply::command_key(&data.name, true)) {
-        (Some(gid), Some(key)) => reply::framed_reply(app, gid, &key, &text, &embeds).await,
+        (Some(gid), Some(key)) if frame => {
+            reply::framed_reply(app, gid, &key, &text, &embeds).await
+        }
         _ => None,
     };
     let (text, embeds) = framed.as_ref().map_or((&text, &embeds), |f| (&f.0, &f.1));
@@ -508,12 +511,25 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<()> {
 }
 
 /// `confirm` receives the Confirm / Cancel row when the reply is a question instead of a result.
+/// A short reply entry's answer for `run`: its embeds go to `out`; a security text or an edited
+/// version is sent as it is, without the command's frame (as `commands::say_said`).
+fn unframed(
+    said: reply::Said,
+    out: &mut Vec<twilight_model::channel::message::Embed>,
+    frame: &mut bool,
+) -> String {
+    *frame = !said.edited && !said.security;
+    *out = said.embeds;
+    said.text
+}
+
 async fn run(
     app: &App,
     i: &Interaction,
     data: &twilight_model::application::interaction::application_command::CommandData,
     confirm: &mut Option<Component>,
     out: &mut Vec<twilight_model::channel::message::Embed>,
+    frame: &mut bool,
 ) -> Result<String> {
     if data.name == "mydata" {
         return crate::datareq::command(app, i, data).await;
@@ -663,8 +679,15 @@ async fn run(
             target,
             since_s,
             owners,
-        } => commands::revert_cmd(app, gid, (actor_id, &actor), target, since_s, owners).await,
-        Cmd::Backup(b) => commands::backup_cmd(app, gid, (actor_id, &actor), b).await,
+        } => {
+            let said =
+                commands::revert_cmd(app, gid, (actor_id, &actor), target, since_s, owners).await?;
+            Ok(unframed(said, out, frame))
+        }
+        Cmd::Backup(b) => {
+            let said = commands::backup_cmd(app, gid, (actor_id, &actor), b).await?;
+            Ok(unframed(said, out, frame))
+        }
         Cmd::Ext(mut c, reason) => {
             // A /purge counts from before the command, not what was posted before Yes.
             if data.kind == CommandType::ChatInput {

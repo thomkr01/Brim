@@ -362,8 +362,8 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             let quarantine = ok[3] && picked.get(3) == Some(&true);
             let no = match quarantine {
                 true => {
-                    let what = "on the quarantine whitelist";
-                    crate::users_only::refuse(app, &[id as i64], what).await
+                    let key = "reply.whitelist.bot_quarantine";
+                    crate::users_only::refuse(app, gid, &[id as i64], key).await
                 }
                 false => None,
             };
