@@ -919,6 +919,7 @@ fn is_facts(key: &str) -> bool {
     FACTS.contains(&key)
         || ANSWERS.contains(&key)
         || WHITELIST_ANSWERS.contains(&key)
+        || CHANGED.contains(&key)
         || panel(key).is_some()
         || SECURITY_LOGS.iter().any(|l| l.0 == key)
         || key
@@ -936,6 +937,9 @@ fn is_facts(key: &str) -> bool {
 
 /// The variables of the [`FACTS`] entries: (name, editor name, example).
 const FACT_VARS: &[(&str, &str, &str)] = &[
+    ("row", "Number of the setting, as its panel shows it", "[7B]"),
+    ("setting", "Name of the setting", "Regular Strike Duration"),
+    ("value", "New value of the setting", "1 hour"),
     ("case", "Case number", "12"),
     ("kind", "Kind of case or command", "ban"),
     (
@@ -3232,6 +3236,331 @@ pub const PANELS: &[(&str, &str, &str, &str, &[PanelRow])] = &[
     ),
 ];
 
+/// The other settings panels (`t!statics`, `t!heat`, `t!hfilters`, `t!joingate`,
+/// `t!verification`, `t!misc`, `t!raiderlist`), as [`PANELS`] but in group Settings panels: a
+/// Trusted Admin with Dashboard Edit may edit them. `t!hfilters` keeps its pages: the bot cuts the
+/// filled entry into pages of 4 cards.
+#[allow(clippy::type_complexity)]
+pub const SETTINGS_PANELS: &[(&str, &str, &str, &str, &[PanelRow])] = &[
+    (
+        "reply.panel.statics",
+        "statics",
+        "Statics Panel:",
+        "",
+        &[
+            ("2", "Quarantine Role", "quarantine_role", "raw"),
+            ("5", "Main Roles", "main_roles", "raw"),
+            ("6", "Logging Channel", "logging_channel", "raw"),
+            ("7", "Mod-Logging Channel", "mod_logging_channel", "raw"),
+            ("8", "Partnering Channels", "partnering_channels", "raw"),
+            ("10", "Trusted Admins", "trusted_admins", "raw"),
+            ("11", "Extra Owners", "extra_owners", "raw"),
+            ("12", "Verification Channel", "verification_channel", "raw"),
+        ],
+    ),
+    (
+        "reply.panel.heat",
+        "heat",
+        "Heat System Panel:",
+        "Advanced Settings: Heat System Filters: t!hfilters",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Spam Filters", "spam_filters", ""),
+            ("3", "Max Heat Percentage", "max_heat_percentage", ""),
+            ("4", "Heat Degradation", "heat_degradation", ""),
+            ("5", "Strikes CAP", "strikes_cap", ""),
+            ("6", "Webhook Coverage", "webhook_coverage", ""),
+            ("7", "Auto Timeouts", "", ""),
+            ("7a", "Status", "auto_timeouts.status", ""),
+            (
+                "7b",
+                "Regular Strike Duration",
+                "auto_timeouts.regular_strike_duration",
+                "",
+            ),
+            (
+                "7c",
+                "CAP Strike Duration",
+                "auto_timeouts.cap_strike_duration",
+                "",
+            ),
+            (
+                "7d",
+                "Multiplier Status",
+                "auto_timeouts.multiplier_status",
+                "",
+            ),
+            (
+                "7e",
+                "Multiplier Percentage",
+                "auto_timeouts.multiplier_percentage",
+                "",
+            ),
+            ("8", "Reset Heat On Timeout", "reset_heat_on_timeout", ""),
+            ("9", "Heat Panic Mode", "", ""),
+            ("9a", "Status", "heat_panic_mode.status", ""),
+            ("9b", "Trigger", "heat_panic_mode.trigger", ""),
+            ("9c", "Panic Duration", "heat_panic_mode.panic_duration", ""),
+            ("10", "Auto Server Lockdown", "", ""),
+            ("10a", "Status", "auto_server_lockdown.status", ""),
+            ("10b", "Mentions", "auto_server_lockdown.mentions", ""),
+            ("10c", "Under", "auto_server_lockdown.under", ""),
+            ("11", "Auto Slowmode", "", ""),
+            ("11a", "Status", "auto_slowmode.status", ""),
+            ("11b", "Trigger", "auto_slowmode.trigger", ""),
+            ("11c", "Slowmode", "auto_slowmode.slowmode", ""),
+            (
+                "11d",
+                "Minimum Time On",
+                "auto_slowmode.minimum_time_on",
+                "",
+            ),
+            ("11e", "Calm Time", "auto_slowmode.calm_time", ""),
+        ],
+    ),
+    (
+        "reply.panel.hfilters",
+        "hfilters",
+        "Heat System Filters Panel:",
+        "",
+        &[
+            ("1", "Normal Message Heat", "", ""),
+            ("1a", "Status", "normal_message_heat.status", ""),
+            ("1b", "Action", "normal_message_heat.action", ""),
+            ("1c", "Heat", "normal_message_heat.heat", ""),
+            ("2", "Similar Message Repetition Heat", "", ""),
+            ("2a", "Status", "similar_message_repetition_heat.status", ""),
+            ("2b", "Action", "similar_message_repetition_heat.action", ""),
+            ("2c", "Heat", "similar_message_repetition_heat.heat", ""),
+            ("3", "Mentions Heat", "", ""),
+            ("3a", "Status", "mentions_heat.status", ""),
+            ("3b", "Action", "mentions_heat.action", ""),
+            ("3c", "Heat", "mentions_heat.heat", ""),
+            ("4", "Attachments Heat", "", ""),
+            ("4a", "Status", "attachments_heat.status", ""),
+            ("4b", "Action", "attachments_heat.action", ""),
+            ("4c", "Heat", "attachments_heat.heat", ""),
+            ("5", "Advertisement Heat", "", ""),
+            ("5a", "Status", "advertisement_heat.status", ""),
+            ("5b", "Action", "advertisement_heat.action", ""),
+            ("5c", "Heat", "advertisement_heat.heat", ""),
+            ("6", "Malicious Websites Heat", "", ""),
+            ("6a", "Status", "malicious_websites_heat.status", ""),
+            ("6b", "Action", "malicious_websites_heat.action", ""),
+            ("6c", "Heat", "malicious_websites_heat.heat", ""),
+            ("6d", "Anti-Scam", "malicious_websites_heat.anti_scam", ""),
+            ("7", "Emojis Heat", "", ""),
+            ("7a", "Status", "emojis_heat.status", ""),
+            ("7b", "Action", "emojis_heat.action", ""),
+            ("7c", "Heat", "emojis_heat.heat", ""),
+            ("8", "Message Characters Heat", "", ""),
+            ("8a", "Status", "message_characters_heat.status", ""),
+            ("8b", "Action", "message_characters_heat.action", ""),
+            ("8c", "LC Heat", "message_characters_heat.lc_heat", ""),
+            ("8d", "UC Heat", "message_characters_heat.uc_heat", ""),
+            ("9", "New Line Heat", "", ""),
+            ("9a", "Status", "new_line_heat.status", ""),
+            ("9b", "Action", "new_line_heat.action", ""),
+            ("9c", "Heat", "new_line_heat.heat", ""),
+            ("10", "Lowercase Characters Heat", "", ""),
+            ("10a", "Status", "lowercase_characters_heat.status", ""),
+            ("10b", "Action", "lowercase_characters_heat.action", ""),
+            ("10c", "Heat", "lowercase_characters_heat.heat", ""),
+            ("11", "Inactive Channel Heat", "", ""),
+            ("11a", "Status", "inactive_channel_heat.status", ""),
+            ("11b", "Action", "inactive_channel_heat.action", ""),
+            ("11c", "Heat", "inactive_channel_heat.heat", ""),
+            ("12", "NSFW Websites Heat", "", ""),
+            ("12a", "Status", "nsfw_websites_heat.status", ""),
+            ("12b", "Action", "nsfw_websites_heat.action", ""),
+            ("12c", "Heat", "nsfw_websites_heat.heat", ""),
+            ("12d", "NSFW Images", "nsfw_websites_heat.nsfw_images", ""),
+            (
+                "12e",
+                "NSFW Images Action",
+                "nsfw_websites_heat.nsfw_images_action",
+                "",
+            ),
+            (
+                "12f",
+                "NSFW Image Score",
+                "nsfw_websites_heat.nsfw_image_score",
+                "",
+            ),
+            ("13", "Words Blacklist Heat", "", ""),
+            ("13a", "Status", "words_blacklist_heat.status", ""),
+            ("13b", "Action", "words_blacklist_heat.action", ""),
+            ("13c", "Heat", "words_blacklist_heat.heat", ""),
+            ("14", "Suspicious Account Heat", "", ""),
+            ("14a", "Status", "suspicious_account_heat.status", ""),
+            ("14b", "Action", "suspicious_account_heat.action", ""),
+            ("14c", "Heat", "suspicious_account_heat.heat", ""),
+        ],
+    ),
+    (
+        "reply.panel.joingate",
+        "joingate",
+        "JoinGate Panel:",
+        "Username words: Dashboard",
+        &[
+            ("1", "General", "", ""),
+            ("1a", "Status", "general.status", ""),
+            ("1b", "DM Members", "general.dm_members", ""),
+            ("1c", "Exclude Owner Bots", "general.exclude_owner_bots", ""),
+            ("2", "No PfP Filter", "", ""),
+            ("2a", "Status", "no_pfp_filter.status", ""),
+            ("2b", "Action", "no_pfp_filter.action", ""),
+            ("3", "Account Age Filter", "", ""),
+            ("3a", "Status", "account_age_filter.status", ""),
+            ("3b", "Action", "account_age_filter.action", ""),
+            ("3c", "Minimum Age", "account_age_filter.minimum_age", ""),
+            (
+                "3d",
+                "Expose Minimum Age",
+                "account_age_filter.expose_minimum_age",
+                "",
+            ),
+            ("4", "Bot Addition Filter", "", ""),
+            ("4a", "Status", "bot_addition_filter.status", ""),
+            ("4b", "Action", "bot_addition_filter.action", ""),
+            ("5", "Advertising Names", "", ""),
+            ("5a", "Status", "advertising_names.status", ""),
+            ("5b", "Action", "advertising_names.action", ""),
+            ("6", "Unverified Bots", "", ""),
+            ("6a", "Status", "unverified_bots.status", ""),
+            ("6b", "Action", "unverified_bots.action", ""),
+            ("7", "Suspicious Accounts", "", ""),
+            ("7a", "Status", "suspicious_accounts.status", ""),
+            ("7b", "Action", "suspicious_accounts.action", ""),
+            ("8", "Username Filter", "", ""),
+            ("8a", "Status", "username_filter.status", ""),
+            ("8b", "Action", "username_filter.action", ""),
+            ("9", "Spam Flag Filter", "", ""),
+            ("9a", "Status", "spam_flag_filter.status", ""),
+            ("9b", "Action", "spam_flag_filter.action", ""),
+        ],
+    ),
+    (
+        "reply.panel.verification",
+        "verification",
+        "Verification Panel:",
+        "Captcha Customization: Dashboard",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Action", "action", ""),
+            ("3", "Target", "target", ""),
+            ("4", "Verified Roles", "verified_roles", "raw"),
+            ("5", "Duration", "duration", ""),
+            ("6", "Mode", "mode", ""),
+            ("12", "Regeneration", "regeneration", ""),
+            ("12a", "Regeneration Status", ".regeneration_status", ""),
+            ("13", "Notes", "notes", ""),
+            ("14", "Audit Log Reason", "audit_log_reason", ""),
+            ("15", "Block VPN", "block_vpn", ""),
+            ("16", "Block Hosting Networks", "block_hosting_networks", ""),
+        ],
+    ),
+    (
+        "reply.panel.misc",
+        "misc",
+        "Miscellaneous Panel:",
+        "",
+        &[
+            ("1", "Prefix", "prefix", ""),
+            ("2", "Moderation", "", ""),
+            ("2a", "Confirm Actions", "moderation.confirm_actions", ""),
+            (
+                "2b",
+                "Days Purged On Bans",
+                "moderation.days_purged_on_bans",
+                "",
+            ),
+            (
+                "2c",
+                "Default Timeout Duration",
+                "moderation.default_timeout_duration",
+                "",
+            ),
+            ("2d", "Anonymous Mod", "moderation.anonymous_mod", ""),
+            ("2e", "DM Targets", "moderation.dm_targets", ""),
+            (
+                "2f",
+                "Display Reason On Auto Timeout",
+                "moderation.display_reason_on_auto_timeout",
+                "",
+            ),
+            (
+                "2g",
+                "Purge On Auto Timeout",
+                "moderation.purge_on_auto_timeout",
+                "",
+            ),
+            (
+                "2h",
+                "Auto Delete Mod Cmd",
+                "moderation.auto_delete_mod_cmd",
+                "",
+            ),
+            (
+                "2i",
+                "Remove Main Roles On TO",
+                "moderation.remove_main_roles_on_to",
+                "",
+            ),
+            ("3", "Warn Settings", "", ""),
+            ("3a", "Status", "warn_settings.status", ""),
+            ("3b", "Warn Action", "warn_settings.warn_action", ""),
+            ("3c", "Max Warns", "warn_settings.max_warns", ""),
+            ("4", "Compact Outputs", "compact_outputs", ""),
+            ("5", "Informing Messages", "informing_messages", ""),
+            (
+                "6",
+                "Enforce Quarantine Perms",
+                "enforce_quarantine_perms",
+                "",
+            ),
+            (
+                "7",
+                "Ignore Permit 1 Commands",
+                "ignore_permit_1_commands",
+                "",
+            ),
+            ("8", "Enforce Permits", "enforce_permits", ""),
+            ("9", "Ban Appeal Message", "ban_appeal_message", ""),
+            ("10", "Sticky Roles", "sticky_roles", ""),
+            ("11", "Never Sticky Roles", "never_sticky_roles", "raw"),
+            ("12", "Auto Dehoist", "auto_dehoist", ""),
+        ],
+    ),
+    (
+        "reply.panel.raiderlist",
+        "raiderlist",
+        "Raider List Panel:",
+        "Change the Raider List on the dashboard · Look someone up: t!raider check @user",
+        &[
+            ("1", "Status", "status", "toggle"),
+            ("2", "Action", "action", ""),
+            ("3", "Categories", "categories", "raw"),
+            (
+                "4",
+                "Alert For Members Already Here",
+                "alert_for_members_already_here",
+                "",
+            ),
+            (
+                "5",
+                "Lift When Removed From The List",
+                "lift_when_removed_from_the_list",
+                "",
+            ),
+            ("6", "Do Not Send Detections", "do_not_send_detections", ""),
+        ],
+    ),
+];
+
+/// The group of the settings panels that are not security texts.
+const SETTINGS: &str = "Settings panels";
+
 /// The whitelist command's own answers (the menu's target, the saved result), entries of facts.
 pub const WHITELIST_ANSWERS: &[&str] = &["reply.whitelist.prompt", "reply.whitelist.saved"];
 
@@ -3239,17 +3568,27 @@ pub const WHITELIST_ANSWERS: &[&str] = &["reply.whitelist.prompt", "reply.whitel
 const GREY: u32 = 0x2B2D31;
 
 fn panel(key: &str) -> Option<&'static [PanelRow]> {
-    PANELS.iter().find(|p| p.0 == key).map(|p| p.4)
+    PANELS
+        .iter()
+        .chain(SETTINGS_PANELS)
+        .find(|p| p.0 == key)
+        .map(|p| p.4)
 }
 
-/// The security command answers: each panel and the whitelist answers are entries of facts in
-/// group Security (Owner and Extra Owners, 2FA, audited), every value and row number required,
-/// and no `{text}` (a frame around it would skip every fact rule). Each default reads exactly as
-/// the code built it (`crates/bot/src/panel_texts_tests.rs`).
+/// The settings command answers: each panel, the whitelist answers and the reply after a setting
+/// changed are entries of facts, every value and row number required, and no `{text}` (a frame
+/// around it would skip every fact rule). The security ones are in group Security (Owner and
+/// Extra Owners, 2FA, audited). Each default reads exactly as the code built it
+/// (`crates/bot/src/panel_texts_tests.rs`).
 fn security_answers(out: &mut Vec<Def>) {
     use crate::embed::ARROW;
     use crate::emoji::{MODERATOR, TARGET};
-    for (key, word, title, footer, rows) in PANELS {
+    for (p, group) in PANELS
+        .iter()
+        .map(|p| (p, SECURITY))
+        .chain(SETTINGS_PANELS.iter().map(|p| (p, SETTINGS)))
+    {
+        let (key, word, title, footer, rows) = p;
         let mut fields: Vec<(String, String)> = Vec::new();
         let (mut vars, mut required): (Vec<&'static str>, Vec<&'static str>) = (vec![], vec![]);
         for (code, name, var, how) in rows.iter() {
@@ -3298,7 +3637,7 @@ fn security_answers(out: &mut Vec<Def>) {
         }
         set(
             out,
-            (key, &format!("Answer: {word} panel"), SECURITY),
+            (key, &format!("Answer: {word} panel"), group),
             json!({"content": "", "embeds": [e]}),
             (
                 &vars,
@@ -3327,7 +3666,24 @@ fn security_answers(out: &mut Vec<Def>) {
             "which whitelists the target is on, who changed it and the target",
         ),
     );
+    // The reply after a setting changed. A security panel's setting (join raid) and the Trusted
+    // Admins list answer in the Security copy, so only the Owner and Extra Owners can reword it.
+    for (key, group) in CHANGED.iter().zip([SETTINGS, SECURITY]) {
+        set(
+            out,
+            (key, "Answer: setting changed", group),
+            json!({"content": format!("{} {{row}} {{setting}}: {{value}}", crate::emoji::YES), "embeds": []}),
+            (
+                &["row", "setting", "value"],
+                &["row", "value"],
+                "the number of the setting that changed and its new value",
+            ),
+        );
+    }
 }
+
+/// The reply after a setting changed: the settings panels' copy, then the security one.
+pub const CHANGED: &[&str] = &["reply.settings.changed", "reply.settings.changed_security"];
 
 /// The D6 entries: the answers of `info`, `roleinfo`, `serverinfo`, `about`, `ping` and
 /// `invites`. A line whose placeholders are all empty goes, so one entry holds every variant of
@@ -5277,9 +5633,10 @@ pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
     if let Some(rows) = panel(key) {
         if let Some(r) = rows.iter().find(|r| r.0 == name) {
             // As the panel shows it: `[3]`, or `[A]` for a lettered row.
-            const SHOWN: [&str; 17] = [
+            const SHOWN: [&str; 25] = [
                 "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]", "[10]", "[11]",
-                "[12]", "[A]", "[B]", "[C]", "[D]", "[E]",
+                "[12]", "[13]", "[14]", "[15]", "[16]", "[A]", "[B]", "[C]", "[D]", "[E]", "[F]",
+                "[G]", "[H]", "[I]",
             ];
             let tail = r.0.trim_start_matches(|c: char| c.is_ascii_digit());
             let want = if tail.is_empty() { r.0 } else { tail }.to_uppercase();
@@ -6342,10 +6699,14 @@ mod tests {
                 || WHITELIST_ANSWERS.contains(&d.key.as_str())
                 || panel(&d.key).is_some();
             assert_eq!(d.required == ["text"], notice || line, "{}", d.key);
-            // The whitelist command is a security command, so its replies are security texts.
+            // The whitelist command is a security command, so its replies are security texts, as
+            // the security panels and their setting changed reply.
+            let security_panel = PANELS.iter().any(|p| p.0 == d.key);
             assert_eq!(
                 d.security,
-                d.key.starts_with("reply.whitelist.") || d.key.starts_with("reply.panel."),
+                d.key.starts_with("reply.whitelist.")
+                    || security_panel
+                    || d.key == "reply.settings.changed_security",
                 "{}",
                 d.key
             );

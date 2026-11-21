@@ -1,6 +1,8 @@
-//! The security command answers: the settings panels of `antinuke`, `ancaps`, `anpanic`,
-//! `antinukerestore` and `joinraid`, and the whitelist menu and result, read exactly as the code
-//! built them until a server edits the entry, and an edit keeps every value and row number.
+//! The settings command answers: every settings panel (the security ones of `antinuke`, `ancaps`,
+//! `anpanic`, `antinukerestore` and `joinraid`, and `statics`, `heat`, `hfilters`, `joingate`,
+//! `verification`, `misc` and `raiderlist`), the whitelist menu and result and the reply after a
+//! setting changed, read exactly as the code built them until a server edits the entry, and an
+//! edit keeps every value and row number.
 use brim_logging::{
     botmsg,
     embed::{self, Log, GREEN, NO, ORANGE, YES},
@@ -24,13 +26,29 @@ fn cfgs() -> Vec<GuildCfg> {
             "panic": {"executors": 0, "warned_roles": ["7", "8"]},
             "backups": {"restore": true},
             "joinraid": {"enabled": true, "flag_younger_than_ms": 86400000},
+            "automod": {"enabled": true, "strike": {"enabled": true}},
+            "joingate": {"enabled": true},
+            "verification": {"enabled": true, "roles": ["9"], "regen_ms": 12000},
+            "raider_list": {"enabled": true},
+            "lockdown": {"main_roles": ["3"]},
+            "logging": {"fallback": "4"},
         })),
     ]
 }
 
 #[test]
-fn every_security_panel_reads_as_the_code_built_it() {
-    for (key, word, _, _, rows) in botmsg::PANELS {
+fn every_panel_reads_as_the_code_built_it() {
+    let all = botmsg::PANELS.iter().chain(botmsg::SETTINGS_PANELS);
+    let words: Vec<&str> = all.clone().map(|p| p.1).collect();
+    let modules: Vec<&str> = settings::words()
+        .filter(|w| settings::module(w).is_some_and(|m| m.names[0] == *w))
+        .collect();
+    let mut sorted = words.clone();
+    sorted.sort_unstable();
+    let mut modules = modules;
+    modules.sort_unstable();
+    assert_eq!(sorted, modules, "every panel has an entry");
+    for (key, word, _, _, rows) in all {
         let m = settings::module(word).unwrap();
         let ours: Vec<(&str, &str)> = m.rows.iter().map(|r| (r.code, r.name)).collect();
         let theirs: Vec<(&str, &str)> = rows.iter().map(|r| (r.0, r.1)).collect();
@@ -44,17 +62,85 @@ fn every_security_panel_reads_as_the_code_built_it() {
                     assert_eq!(botmsg::var_info(key, name).1, value, "{key} {name}");
                 }
             }
-            let (old, pages) = settings::panel(m, &cfg, 1, 0);
-            assert_eq!(pages, 1, "{key}");
-            let new = settings::with_prefix(answer_from(key, None, &vars), &cfg.misc.prefix);
-            assert_eq!(json_of(&new), json_of(&old), "{key}");
+            let filled = settings::with_prefix(answer_from(key, None, &vars), &cfg.misc.prefix);
+            let (_, pages) = settings::panel(m, &cfg, 1, 0);
+            for page in 0..pages + 1 {
+                let (old, n) = settings::panel(m, &cfg, 1, page);
+                let (new, k) = settings::page_of(filled.clone(), m.per_page, page);
+                assert_eq!(n, k, "{key}");
+                assert_eq!(json_of(&new), json_of(&old), "{key} page {page}");
+            }
         }
     }
-    // The other panels stay built in code.
-    for word in ["heat", "statics", "joingate", "misc"] {
-        let m = settings::module(word).unwrap();
-        assert!(settings::panel_vars(m, &cfgs()[0], 1).is_none(), "{word}");
+}
+
+/// A server's prefix shows in a footer that names a command, as the code wrote it.
+#[test]
+fn a_footer_names_the_servers_prefix() {
+    let cfg = &cfgs()[1];
+    let m = settings::module("heat").unwrap();
+    let (key, vars) = settings::panel_vars(m, cfg, 1).unwrap();
+    let e = settings::with_prefix(answer_from(key, None, &vars), &cfg.misc.prefix);
+    assert_eq!(
+        e.footer.unwrap().text,
+        "Advanced Settings: Heat System Filters: ?hfilters"
+    );
+}
+
+/// The heat filters panel keeps its pages of 4 cards, also when an edit renames the cards.
+#[test]
+fn an_edited_heat_filters_panel_keeps_its_pages() {
+    let key = "reply.panel.hfilters";
+    let d = botmsg::find(key).unwrap();
+    let edit: Value = serde_json::from_str(
+        &d.template
+            .to_string()
+            .replace("Normal Message Heat", "Every message"),
+    )
+    .unwrap();
+    assert_eq!(botmsg::missing_text(key, &edit), None);
+    let m = settings::module("hfilters").unwrap();
+    let (_, vars) = settings::panel_vars(m, &cfgs()[0], 1).unwrap();
+    let filled = answer_from(key, Some(&edit), &vars);
+    let (first, pages) = settings::page_of(filled.clone(), m.per_page, 0);
+    assert_eq!(pages, 4);
+    assert_eq!(first.fields.len(), 4);
+    assert!(first.fields[0].name.starts_with("[1] Every message"));
+    assert_eq!(first.footer.unwrap().text, "Page: 1/4");
+    let (last, _) = settings::page_of(filled, m.per_page, 9);
+    assert_eq!(last.footer.unwrap().text, "Page: 4/4");
+}
+
+/// The code's former reply after a setting changed.
+fn old_changed(code: &str, name: &str, value: &str) -> String {
+    format!("{YES} [{}] {name}: {value}", code.to_uppercase())
+}
+
+#[test]
+fn the_setting_changed_reply_reads_as_the_code_built_it() {
+    for key in botmsg::CHANGED {
+        let vars = [
+            ("row", "[7B]"),
+            ("setting", "Regular Strike Duration"),
+            ("value", "1 hour"),
+        ];
+        let got = botmsg::render(key, None, &vars);
+        assert_eq!(
+            got["content"],
+            old_changed("7b", "Regular Strike Duration", "1 hour"),
+            "{key}"
+        );
+        assert_eq!(got["embeds"], json!([]), "{key}");
     }
+    let d = botmsg::find("reply.settings.changed").unwrap();
+    assert!(!d.security && d.strict());
+    assert_eq!(d.required, ["row", "value"]);
+    // Only the Owner and Extra Owners reword the reply for join raid and Trusted Admins.
+    assert!(
+        botmsg::find("reply.settings.changed_security")
+            .unwrap()
+            .security
+    );
 }
 
 /// The code's former whitelist builders.
@@ -110,19 +196,36 @@ fn keys() -> Vec<&'static str> {
     assert_eq!(ours, panels);
     let mut k = panels.to_vec();
     k.extend(botmsg::WHITELIST_ANSWERS);
+    k.push("reply.settings.changed_security");
+    k
+}
+
+fn settings_keys() -> Vec<&'static str> {
+    let panels = [
+        "reply.panel.statics",
+        "reply.panel.heat",
+        "reply.panel.hfilters",
+        "reply.panel.joingate",
+        "reply.panel.verification",
+        "reply.panel.misc",
+        "reply.panel.raiderlist",
+    ];
+    let ours: Vec<&str> = botmsg::SETTINGS_PANELS.iter().map(|p| p.0).collect();
+    assert_eq!(ours, panels);
+    let mut k = panels.to_vec();
+    k.push("reply.settings.changed");
     k
 }
 
 /// Each is a security text of facts: no `{text}`, every value and row number required as plain
 /// text, and the default passes its own save check.
 #[test]
-fn every_security_answer_guards_its_facts() {
-    for key in keys() {
+fn every_settings_answer_guards_its_facts() {
+    let security = keys();
+    for key in security.iter().chain(&settings_keys()) {
         let d = botmsg::find(key).unwrap();
-        assert!(
-            d.security && d.strict() && d.details() && !d.locked,
-            "{key}"
-        );
+        assert_eq!(d.security, security.contains(key), "{key}");
+        assert!(d.strict() && d.details() && !d.locked, "{key}");
         assert!(!d.vars.contains(&"text"), "{key}");
         assert!(botmsg::missing_text(key, &d.template).is_none(), "{key}");
         assert!(botmsg::unknown_vars(key, &d.template).is_empty(), "{key}");
@@ -190,13 +293,15 @@ fn a_panel_can_be_reworded_and_put_in_one_list() {
     );
 }
 
-/// No `{prefix}`: a server's prefix such as `||` could wrap a fact in a spoiler after the save
-/// check. A copy too long for Discord loses fields, so the default goes out instead.
+/// No `{prefix}` in a security text: a server's prefix such as `||` could wrap a fact in a
+/// spoiler after the save check. Only the misc panel has it, as the value of its Prefix setting.
+/// A copy too long for Discord loses fields, so the default goes out instead.
 #[test]
 fn no_prefix_placeholder_and_no_message_over_discords_limit() {
-    for key in keys() {
-        assert!(
-            !botmsg::find(key).unwrap().vars.contains(&"prefix"),
+    for key in keys().into_iter().chain(settings_keys()) {
+        assert_eq!(
+            botmsg::find(key).unwrap().vars.contains(&"prefix"),
+            key == "reply.panel.misc",
             "{key}"
         );
     }
@@ -213,4 +318,19 @@ fn no_prefix_placeholder_and_no_message_over_discords_limit() {
     let (_, vars) = settings::panel_vars(m, &cfgs()[0], 1).unwrap();
     let sent = json_of(&answer_from(key, Some(&edit), &vars));
     assert_eq!(sent["title"], "Anti Nuke Panel:", "the default is sent");
+}
+
+/// A Trusted Admin cannot reword the answer to a change only the Owner and Extra Owners may make.
+#[test]
+fn a_security_or_owner_only_change_answers_in_the_security_copy() {
+    let key = |word: &str, code: &str| {
+        let m = settings::module(word).unwrap();
+        let row = m.rows.iter().find(|r| r.code == code).unwrap();
+        settings::changed_key(m, row)
+    };
+    assert_eq!(key("joinraid", "1"), "reply.settings.changed_security");
+    assert_eq!(key("misc", "8"), "reply.settings.changed_security");
+    assert_eq!(key("statics", "5"), "reply.settings.changed_security");
+    assert_eq!(key("heat", "1"), "reply.settings.changed");
+    assert_eq!(key("verification", "1"), "reply.settings.changed");
 }

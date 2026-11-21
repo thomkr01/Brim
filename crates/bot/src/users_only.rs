@@ -163,7 +163,8 @@ mod tests {
         let add = |v: u64| Op::Add("10".into(), format!("<@{v}>"));
         let r = edit_trusted_admins(&t.app, t.g(0), (actor, &Level::Owner), &add(bot))
             .await
-            .unwrap();
+            .unwrap()
+            .text;
         assert!(
             r.contains("is a bot") && r.contains("member of a permit"),
             "{r}"
@@ -171,7 +172,8 @@ mod tests {
         t.set(|m| m.fail_user = true);
         let r = edit_trusted_admins(&t.app, t.g(0), (actor, &Level::Owner), &add(user))
             .await
-            .unwrap();
+            .unwrap()
+            .text;
         assert!(r.contains("Could not check"), "fails closed: {r}");
         assert_eq!(
             t.count("SELECT count(*) FROM trusted_admins WHERE guild_id = $1")
@@ -181,7 +183,8 @@ mod tests {
         t.set(|m| m.fail_user = false);
         let r = edit_trusted_admins(&t.app, t.g(0), (actor, &Level::Owner), &add(user))
             .await
-            .unwrap();
+            .unwrap()
+            .text;
         assert!(r.contains(&format!("<@{user}>")), "a user is added: {r}");
         t.cleanup().await;
     }

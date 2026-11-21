@@ -5,7 +5,6 @@ use anyhow::Result;
 use brim_automod::join::RaidCfg;
 use brim_core::{duration, permits::Level};
 use brim_logging::embed::{self, ARROW};
-use brim_logging::emoji::YES;
 use brim_logging::emoji::{Emoji, CLOSE, OFF, ON, PAGE_FIRST, PAGE_LAST, PAGE_NEXT, PAGE_PREV};
 use serde_json::{json, Value};
 use twilight_model::{
@@ -19,8 +18,11 @@ use twilight_model::{
     id::{marker::GuildMarker, Id},
 };
 
+use brim_logging::botmsg::CHANGED;
+
 use crate::{
     app::{App, GuildCfg},
+    reply::Said,
     targets::{pick, Pick},
 };
 
@@ -289,25 +291,29 @@ pub(crate) async fn edit_trusted_admins(
     gid: Id<GuildMarker>,
     (level_user, level): (u64, &Level),
     op: &Op,
-) -> Result<String> {
+) -> Result<Said> {
     let (Op::Set(_, v) | Op::Add(_, v) | Op::Remove(_, v)) = op else {
-        return Ok("[10] Trusted Admins: use `USER ?add 10` or `USER ?remove 10`".into());
+        return Ok(
+            String::from("[10] Trusted Admins: use `USER ?add 10` or `USER ?remove 10`").into(),
+        );
     };
     if !matches!(level, Level::Owner | Level::ExtraOwner) {
-        return Ok("Only the owner and Extra Owners can change Trusted Admins".into());
+        return Ok(
+            String::from("Only the owner and Extra Owners can change Trusted Admins").into(),
+        );
     }
     // Trusted Admins bypass every system, so adding one needs a fresh 2FA like every protected
     // change. Removing does not: it is how a hacked TA is cut off fast.
     if !matches!(op, Op::Remove(..)) && !fresh_2fa(app, level_user, gid.get()).await? {
-        return Ok(needs_2fa(gid.get()));
+        return Ok(needs_2fa(gid.get()).into());
     }
     let ids = user_ids(v);
     if ids.is_empty() {
-        return Ok("Give at least one user mention or ID".into());
+        return Ok(String::from("Give at least one user mention or ID").into());
     }
     if !matches!(op, Op::Remove(..)) {
         if let Some(no) = crate::users_only::refuse(app, &ids, "a Trusted Admin").await {
-            return Ok(no);
+            return Ok(no.into());
         }
     }
     let sql = if matches!(op, Op::Remove(..)) {
@@ -330,14 +336,18 @@ pub(crate) async fn edit_trusted_admins(
     .fetch_all(&app.pool)
     .await?;
     let list: Vec<_> = now.iter().map(|u| format!("<@{u}>")).collect();
-    Ok(format!(
-        "{YES} [10] Trusted Admins: {}",
-        if list.is_empty() {
-            "none".into()
-        } else {
-            list.join(" ")
-        }
-    ))
+    let value = if list.is_empty() {
+        "none".into()
+    } else {
+        list.join(" ")
+    };
+    // The Trusted Admins list is a security setting: its reply is the Security copy.
+    let vars = [
+        ("row", "[10]"),
+        ("setting", "Trusted Admins"),
+        ("value", &value),
+    ];
+    Ok(crate::reply::say(app, gid, CHANGED[1], &vars).await)
 }
 
 fn id_of(v: &Value) -> Option<u64> {
@@ -503,8 +513,8 @@ pub fn panel(m: &Module, cfg: &GuildCfg, gid: u64, page: usize) -> (Embed, usize
     (e.build(), pages)
 }
 
-/// The values of a security panel's entry (`botmsg::PANELS`): each row's number as shown
-/// (`[3]`, `[A]`), its value and the on or off sign, as [`entries`] shows them.
+/// The values of a panel's entry (`botmsg::PANELS`, `botmsg::SETTINGS_PANELS`): each row's number
+/// as shown (`[3]`, `[A]`), its value and the on or off sign, as [`entries`] shows them.
 pub(crate) fn panel_vars(
     m: &Module,
     cfg: &GuildCfg,
@@ -512,6 +522,7 @@ pub(crate) fn panel_vars(
 ) -> Option<(&'static str, Vec<(&'static str, String)>)> {
     let (key, .., rows) = brim_logging::botmsg::PANELS
         .iter()
+        .chain(brim_logging::botmsg::SETTINGS_PANELS)
         .find(|p| p.1 == m.names[0])?;
     let dash = dashboard_link(gid);
     let mut vars: Vec<(&'static str, String)> = vec![];
@@ -543,8 +554,8 @@ pub(crate) fn with_prefix(mut e: Embed, prefix: &str) -> Embed {
     e
 }
 
-/// A module's first page as the server's edited version shows it: a security panel is its own
-/// entry of facts, the other panels are built here.
+/// One page of a module's panel as the server's edited version shows it: every panel is its own
+/// entry of facts.
 async fn shown_panel(
     app: &App,
     m: &Module,
@@ -552,14 +563,46 @@ async fn shown_panel(
     gid: Id<GuildMarker>,
     page: usize,
 ) -> (Embed, usize) {
-    let (embed, pages) = panel(m, cfg, gid.get(), page);
-    match panel_vars(m, cfg, gid.get()) {
-        Some((key, vars)) if pages == 1 => {
-            let e = crate::reply::answer(app, gid, key, &vars).await;
-            (with_prefix(e, &cfg.misc.prefix), 1)
-        }
-        _ => (embed, pages),
+    let Some((key, vars)) = panel_vars(m, cfg, gid.get()) else {
+        return panel(m, cfg, gid.get(), page);
+    };
+    let e = crate::reply::answer(app, gid, key, &vars).await;
+    page_of(with_prefix(e, &cfg.misc.prefix), m.per_page, page)
+}
+
+/// Page `page` of a filled panel entry: `per` cards a page (0 is one page), the page number in
+/// the footer as [`panel`] writes it. The pages follow the entry's own cards, so an edit that
+/// moves rows keeps every card.
+pub(crate) fn page_of(mut e: Embed, per: usize, page: usize) -> (Embed, usize) {
+    if per == 0 || e.fields.len() <= per {
+        return (e, 1);
     }
+    let pages = e.fields.len().div_ceil(per);
+    let page = page.min(pages - 1);
+    e.fields = e.fields.drain(..).skip(page * per).take(per).collect();
+    let f = e.footer.as_ref().map_or("", |f| f.text.as_str());
+    let text = match f {
+        "" => format!("Page: {}/{pages}", page + 1),
+        f => format!("{f} · Page: {}/{pages}", page + 1),
+    };
+    e.footer = Some(twilight_model::channel::message::embed::EmbedFooter {
+        icon_url: e.footer.as_ref().and_then(|f| f.icon_url.clone()),
+        proxy_icon_url: None,
+        text,
+    });
+    (e, pages)
+}
+
+/// The reply entry after `row` of `m` changed: the Security copy for a security panel's setting
+/// and for a setting only the Owner and Extra Owners may change (misc, the main roles), so a
+/// Trusted Admin cannot reword the answer to it.
+pub(crate) fn changed_key(m: &Module, row: &Row) -> &'static str {
+    let panel = brim_logging::botmsg::PANELS
+        .iter()
+        .any(|p| p.1 == m.names[0]);
+    let section = row.path.split('.').next().unwrap_or_default();
+    let owners_only = !may_edit(&Level::TrustedAdmin, section) || row.path == "lockdown.main_roles";
+    CHANGED[usize::from(panel || owners_only)]
 }
 
 const PAGE: &str = "pg:";
@@ -784,8 +827,30 @@ pub(crate) async fn send(
     embed: Option<Embed>,
     rows: Vec<Component>,
 ) -> Result<()> {
-    let embeds: Vec<Embed> = embed.into_iter().collect();
-    let framed = crate::reply::command_reply(app, false, text, &embeds).await;
+    send_framed(app, msg, text, embed.into_iter().collect(), rows, true).await
+}
+
+/// A short reply entry (see [`crate::reply::say`]): an edited version as it is, the default
+/// through the command's frame. A Security copy never goes through a frame: `cmd.statics` is
+/// not a security text, so a Trusted Admin could put the facts in a spoiler there.
+async fn send_said(app: &App, msg: &MessageCreate, said: Said, security: bool) -> Result<()> {
+    let frame = !said.edited && !security;
+    send_framed(app, msg, &said.text, said.embeds, vec![], frame).await
+}
+
+async fn send_framed(
+    app: &App,
+    msg: &MessageCreate,
+    text: &str,
+    embeds: Vec<Embed>,
+    rows: Vec<Component>,
+    frame: bool,
+) -> Result<()> {
+    let framed = if frame {
+        crate::reply::command_reply(app, false, text, &embeds).await
+    } else {
+        None
+    };
     let (text, embeds) = framed.as_ref().map_or((text, &embeds), |f| (&f.0, &f.1));
     let mut post = app.http.create_message(msg.channel_id).content(text);
     if let Some(to) = crate::cmdcfg::reply_to(msg.channel_id) {
@@ -888,8 +953,9 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
         return Ok(true);
     };
     if matches!(row.kind, Kind::Users) {
-        let text = edit_trusted_admins(app, gid, (msg.author.id.get(), &level), &op).await?;
-        send(app, msg, &text, None, vec![]).await?;
+        let said = edit_trusted_admins(app, gid, (msg.author.id.get(), &level), &op).await?;
+        // The Trusted Admins list is a security setting: never framed (see `send_said`).
+        send_said(app, msg, said, true).await?;
         return Ok(true);
     }
     let section = row.path.split('.').next().unwrap_or_default();
@@ -962,19 +1028,21 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
         apply(doc, row.path, e);
         Ok(())
     });
-    let text = match saved.await? {
+    let key = changed_key(m, row);
+    let said = match saved.await? {
         Ok(doc) => {
             let cfg = GuildCfg::parse(&doc);
-            format!(
-                "{YES} [{}] {}: {}",
-                row.code.to_uppercase(),
-                row.name,
-                (row.get)(&cfg)
-            )
+            let (code, value) = (format!("[{}]", row.code.to_uppercase()), (row.get)(&cfg));
+            let vars = [
+                ("row", code.as_str()),
+                ("setting", row.name),
+                ("value", &value),
+            ];
+            crate::reply::say(app, gid, key, &vars).await
         }
-        Err(e) => e,
+        Err(e) => e.into(),
     };
-    send(app, msg, &text, None, vec![]).await?;
+    send_said(app, msg, said, key == CHANGED[1]).await?;
     Ok(true)
 }
 
@@ -1024,7 +1092,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
     let page: usize = it.next().and_then(|p| p.parse().ok()).unwrap_or(0);
     let cfg = app.cfg(gid.get()).await?;
     let (embed, pages) = match module(kind) {
-        Some(m) => panel(m, &cfg, gid.get(), page),
+        Some(m) => shown_panel(app, m, &cfg, gid, page).await,
         None if kind == "cmds" => {
             let owner = app.guild_info(gid).await?.owner;
             let level = app.level(gid, owner, Id::new(invoker.unwrap_or(1))).await?;
@@ -1068,6 +1136,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brim_logging::emoji::YES;
 
     #[test]
     fn every_page_turn_finds_its_command_frame() {
@@ -1122,7 +1191,8 @@ mod tests {
         let op = Op::Remove("10".into(), "<@55>".into());
         let r = edit_trusted_admins(&app, gid, (7, &Level::Owner), &op)
             .await
-            .unwrap();
+            .unwrap()
+            .text;
         assert!(r.starts_with(&YES.to_string()), "{r}");
         let (v, by, c): (i32, i64, Value) = sqlx::query_as(
             "select version, changed_by, config from guild_config where guild_id = $1 order by version desc limit 1",
