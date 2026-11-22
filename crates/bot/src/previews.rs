@@ -48,7 +48,7 @@ fn tickets() -> Vec<(&'static str, Value)> {
         )
         .unwrap()
     };
-    let (member, staff) = (user(MEMBER, "member"), user(YOU, "you"));
+    let (member, staff) = (user(MEMBER, "Mika"), user(YOU, "Sam"));
     let s = tickets::Server {
         id: Id::new(1),
         name: SERVER.into(),
@@ -240,12 +240,12 @@ fn messages() -> Value {
         ))
     };
     let mut all = json!({
-        "names": {"users": {MEMBER.to_string(): "member", YOU.to_string(): "you", ROGUE.to_string(): "rogue-admin"}, "channels": {GENERAL.to_string(): "general"}, "roles": {"3001": "Member"}},
+        "names": {"users": {MEMBER.to_string(): "Mika", YOU.to_string(): "Sam", ROGUE.to_string(): "rogue-admin"}, "channels": {GENERAL.to_string(): "general"}, "roles": {"3001": "Member"}},
         "ban_result": json!({"embeds": reply::result_embeds("ban", &[full], (Flags::default(), None), Some("toxic"), YOU)}),
         "ban_compact": {"content": reply::summary("ban", true, &[compact], Some("toxic"), YOU)},
-        "automod_warn": log(automod::filter_log("member", FilterAction::Warn, "Use of blacklisted words", (GENERAL, "you all suck"), MEMBER)),
-        "automod_kick": log(automod::filter_log("member", FilterAction::Kick, "Posting an invite link", (GENERAL, "Join my server everyone discord.gg/example"), MEMBER)),
-        "automod_timeout": log(automod::timeout_log("member", "Spamming the same message", (MEMBER, GENERAL), act.timeout_ms, act.strike)),
+        "automod_warn": log(automod::filter_log("Mika", FilterAction::Warn, "Use of blacklisted words", (GENERAL, "you all suck"), MEMBER)),
+        "automod_kick": log(automod::filter_log("Mika", FilterAction::Kick, "Posting an invite link", (GENERAL, "Join my server everyone discord.gg/example"), MEMBER)),
+        "automod_timeout": log(automod::timeout_log("Mika", "Spamming the same message", (MEMBER, GENERAL), act.timeout_ms, act.strike)),
         "mod_log": log(commands::mod_log_embed((4151, "ban"), (YOU, MEMBER), None, Some("DM ads"))),
         "raider_alert": {
             "embeds": [crate::raiders::alert_log(MEMBER, "raid", "Joined 40 servers with alt accounts").time().build()],
@@ -253,7 +253,7 @@ fn messages() -> Value {
         },
         "raider_action": log(crate::raiders::action_log(MEMBER, "nuke", "Quarantine", None)),
         "raider_removal": log(crate::raiders::lift_log(MEMBER, "Unbanned.")),
-        "raider_listed_dm": {"content": crate::raiders::listed_text(MEMBER, Some(("member", false)), 3, &[
+        "raider_listed_dm": {"content": crate::raiders::listed_text(MEMBER, Some(("Mika", false)), 3, &[
             ("Your Server".into(), Some(1200), (1_234_567_890, "auto_nuke".into(), "n7Kd2x".into(), json!({"case": 4152, "count": 5, "filter": "anti-nuke"}), 1_762_000_000)),
             ("Another Server".into(), Some(340), (1_234_567_891, "auto_raid".into(), "ab12cd34ef_1234567891".into(), json!({"count": 12, "filter": "join raid"}), 1_762_000_100)),
             ("Third Server".into(), None, (1_234_567_892, "auto_spam".into(), "1300000000000000000".into(), json!({"count": 4, "filter": "coordinated spam"}), 1_762_000_200)),

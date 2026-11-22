@@ -9,10 +9,12 @@ enum Item {
     E(&'static str),
     P(&'static str, &'static [&'static str]),
     N(&'static str),
+    /// A line a member types, as it appears in Discord.
+    C(&'static str),
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{E, N, P, T};
+use Item::{C, E, N, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -22,16 +24,22 @@ const SECTIONS: [(&str, &[Scene]); 7] = [
     ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", "break", &[E("raid"), E("raid_report")]), ("Newcomers wait in quarantine", "diag", &[E("raid_report")]), ("Known raiders are flagged on arrival", "side", &[E("raider_alert"), E("raid")])]),
     ("Anti-nuke.", &[("Mass bans and deletes are stopped", "tall", &[E("nuke_quarantined"), E("panic_report_loaded")]), ("Rogue bots are kicked", "break", &[E("nuke_bot_kicked")]), ("A panic report shows what was restored", "diag", &[E("panic_report_loaded"), E("nuke_quarantined"), E("nuke_bot_kicked")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "side", &[P("Blocked words", &["Filter on", "Action: Warn", "Strikes on"]), E("automod_warn")]),
-        ("Kick for invite links", "tall", &[P("Invite links", &["Filter on", "Action: Kick", "Allow list"]), E("automod_kick")]),
-        ("Time out spammers", "break", &[P("Spam", &["Filter on", "Action: Timeout", "Strikes on"]), E("automod_timeout")])]),
-    ("Moderation.", &[("Ban with a reason", "diag", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", "side", &[E("ban_result"), E("ban_compact")]), ("Cases your whole team can see", "tall", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
+        ("Warn for blocked words", "side", &[P("Blocked words", &["Filter", "Strikes", "Delete message"]), E("automod_warn")]),
+        ("Kick for invite links", "tall", &[P("Invite links", &["Filter", "Strikes", "Delete message"]), E("automod_kick")]),
+        ("Time out spammers", "break", &[P("Spam", &["Filter", "Strikes", "Delete message"]), E("automod_timeout")])]),
+    ("Moderation.", &[("Ban with a reason", "diag", &[C("/ban @Mika DM ads"), E("ban_result")]), ("Short or full replies, your choice", "side", &[E("ban_result"), E("ban_compact")]), ("Cases your whole team can see", "tall", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
-        ("Monitor every action on your server", "break", &[P("Log channels", &["# mod-log", "# message-log", "# member-log", "# server-log"]), E("mod_log")]),
+        ("Monitor every action on your server", "break", &[P("Log channels", &["mod-logs", "automod-logs", "antinuke-logs", "verification-logs", "brim-logs"]), E("mod_log")]),
         ("Make use of 62 log types", "diag", &[N("62"), P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("automod_warn")]),
         ("Ignore users, roles or channels", "side", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
     ("Tickets.", &[("Members open a private ticket", "tall", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", "break", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]), ("Replies reach the member", "diag", &[E("ticket_reply"), E("ticket_intro")])]),
 ];
+
+/// The accent colour of the first bot message in a scene, as a CSS variable for its glow.
+fn glow(items: &[Item]) -> String {
+    let c = items.iter().find_map(|i| match i { E(k) => crate::discord::sample(k)["embeds"][0]["color"].as_u64(), _ => None });
+    format!("--glow:#{:06x}", c.unwrap_or(0xf07f22))
+}
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
 
@@ -143,11 +151,12 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot" aria-live="polite">
-                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i>
+                            <div class="feat-shot" aria-live="polite" style=move || glow(tabs[on.get()].2)>
+                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i>
                                 {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show(key)}</div> }.into_any(),
-                                    P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| view! { <span class:on=(r == 0)>{*row}</span> }).collect_view()}</div> }.into_any(),
+                                    P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=(r < 2) disabled=true aria-label=*row /></div> }).collect_view()}</div> }.into_any(),
+                                    C(text) => view! { <div class="win">{crate::discord::chat("Mika", view! { <span class="md">{text}</span> }.into_any())}</div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td><span class="chip">{*b}</span></td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                     N(n) => view! { <div class="badge" aria-hidden="true">{n}</div> }.into_any(),
                                 }).collect_view()}</div> }}
