@@ -1052,7 +1052,7 @@ fn App() -> impl IntoView {
                                 ("permits", _) => view! { <Permits guild=g.clone() /> }.into_any(),
                                 ("logging", _) => view! { <Logging guild=g.clone() tab=rest.first().cloned().unwrap_or_default() sub=rest.get(1).cloned().unwrap_or_default() /> }.into_any(),
                                 ("embeds", _) => view! { <Embeds guild=g.clone() open_id=rest.first().cloned().unwrap_or_default() /> }.into_any(),
-                                ("bot_messages", _) => view! { <botmsgs::BotMessages guild=g.clone() open_key=rest.first().cloned().unwrap_or_default() /> }.into_any(),
+                                ("bot_messages", _) => view! { <botmsgs::BotMessages guild=g.clone() open_key=rest.first().cloned().unwrap_or_default() from_tickets=rest.get(1).is_some_and(|r| r == "from-tickets") /> }.into_any(),
                                 ("feeds", _) => view! { <feeds::Feeds guild=g.clone() /> }.into_any(),
                                 ("history", _) => view! { <History guild=g.clone() /> }.into_any(),
                                 ("overview", _) => view! { <Score guild=g.clone() /> }.into_any(),

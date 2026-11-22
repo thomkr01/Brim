@@ -10,7 +10,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use brim_core::sections::{panel_message, TicketPanel, TicketsCfg};
+use brim_core::sections::{panel_message, TicketPanel, TicketsCfg, DEFAULT_GREETING};
 use reqwest::Method;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -70,7 +70,7 @@ pub(crate) async fn publish(
     .bind(guild)
     .fetch_optional(&st.db)
     .await?;
-    let body = panel_message(&picked, b.menu, look.as_ref());
+    let body = panel_message(&picked, b.menu, look.as_ref(), &t.types, t.button_per_type);
     let posted = embeds::discord(
         &st,
         Method::POST,
@@ -123,6 +123,78 @@ pub(crate) async fn publish(
     )
     .await;
     Ok(Json(json!({"message": message.to_string()})))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Preview {
+    #[serde(default)]
+    panels: Vec<TicketPanel>,
+    /// Missing (never saved) means the defaults, as the bot reads the config.
+    types: Option<Vec<String>>,
+    #[serde(default)]
+    button_per_type: bool,
+    greeting: Option<String>,
+}
+
+/// The ticket messages as members see them, from the settings on the page that are not saved yet:
+/// the panel message (`panel_message`, the function the bot posts with, with the default panel
+/// when there are none) and the greeting of a new ticket (`ticket.greeting`, with sample tags).
+/// The page draws these and keeps no copy of the logic.
+pub(crate) async fn preview(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Json(b): Json<Preview>,
+) -> Res {
+    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    let types = b.types.unwrap_or_else(|| TicketsCfg::default().types);
+    let greeting = b.greeting.unwrap_or_else(|| DEFAULT_GREETING.into());
+    if b.panels.len() > brim_core::sections::MAX_PANELS
+        || types.len() > brim_core::sections::MAX_TICKET_TYPES
+    {
+        return Err(ApiError::BadRequest(
+            "too many panels or ticket types".into(),
+        ));
+    }
+    // The server's edited version of an entry, else none (the default).
+    let look = async |key: &str| {
+        sqlx::query_scalar::<_, Value>(
+            "select message from bot_messages where guild_id = $1 and key = $2",
+        )
+        .bind(guild)
+        .bind(key)
+        .fetch_optional(&st.db)
+        .await
+    };
+    let fallback: Vec<TicketPanel> = if b.panels.is_empty() {
+        serde_json::from_value(brim_core::sections::default_panels()).unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let picked: Vec<&TicketPanel> = b
+        .panels
+        .iter()
+        .chain(&fallback)
+        .filter(|p| p.enabled)
+        .collect();
+    let panel = panel_message(
+        &picked,
+        false,
+        look("ticket.panel").await?.as_ref(),
+        &types,
+        b.button_per_type,
+    );
+    let kind = types.first().map_or("", String::as_str);
+    let text = greeting
+        .replace("{username}", "member")
+        .replace("{userid}", "1001")
+        .replace("{usermention}", "@member")
+        .replace("{ticket_type}", kind);
+    let stored = look("ticket.greeting").await?;
+    let greeting = (!greeting.is_empty()).then(|| {
+        brim_logging::overlay::bot_embed("ticket.greeting", stored.as_ref(), &[("text", &text)])
+    });
+    Ok(Json(json!({"panel": panel, "greeting": greeting})))
 }
 
 /// The panel messages posted in this server, so staff can take old ones down.
@@ -401,18 +473,74 @@ pub(crate) mod tests {
         cleanup(&st, g).await;
     }
 
+    #[tokio::test]
+    async fn the_preview_is_what_publish_posts() {
+        let Some((mut st, s, g)) = setup(9_925_000_000).await else {
+            return;
+        };
+        let (api, seen) = mock(g).await;
+        // The preview needs no Discord; publish does.
+        let plain = st.clone();
+        st.discord.api = api;
+        let panels = json!([{"id": "help", "name": "Create ticket", "emoji": "🎫"},
+            {"id": "rep", "name": "Report", "kind": "Report"}]);
+        let types = json!(["Report", "Issue", "Other"]);
+        let config = json!({"tickets": {"enabled": true, "panels": panels,
+            "types": types, "button_per_type": true}});
+        sqlx::query("insert into guild_config (guild_id, version, config) values ($1, 1, $2)")
+            .bind(g)
+            .bind(&config)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let ask = json!({"panels": panels, "types": types, "button_per_type": true,
+            "greeting": "Hi {usermention}, a {ticket_type} ticket"});
+        let Json(shown) = preview(
+            State(plain.clone()),
+            s.clone(),
+            Path(g),
+            Json(serde_json::from_value(ask).unwrap()),
+        )
+        .await
+        .unwrap();
+        let _ = publish(
+            State(st.clone()),
+            s.clone(),
+            Path(g),
+            body(json!({"expected_version": 1, "channel": "801", "panels": ["help", "rep"], "menu": false})),
+        )
+        .await
+        .unwrap();
+        let sent = seen.lock().unwrap()["POST 801"].clone();
+        assert_eq!(shown["panel"], sent);
+        // Three buttons for the open panel, one for the preset one.
+        assert_eq!(
+            sent["components"][0]["components"]
+                .as_array()
+                .unwrap()
+                .len(),
+            4
+        );
+        let d = shown["greeting"]["description"].as_str().unwrap();
+        assert!(
+            d.contains("@member") && d.contains("a Report ticket"),
+            "{d}"
+        );
+        cleanup(&st, g).await;
+    }
+
     #[test]
     fn the_menu_has_one_option_per_panel() {
         let p: TicketPanel =
             serde_json::from_value(json!({"id": "a", "name": "A", "description": "d".repeat(100)}))
                 .unwrap();
-        let m = panel_message(&[&p, &p], true, None);
+        let m = panel_message(&[&p, &p], true, None, &[], false);
         let select = &m["components"][0]["components"][0];
         assert_eq!(select["custom_id"], "tk2:menu");
         assert_eq!(select["options"].as_array().unwrap().len(), 2);
         assert_eq!(select["options"][0]["value"], "a");
         // Six buttons need two rows of at most five.
-        let m = panel_message(&[&p; 6], false, None);
+        let m = panel_message(&[&p; 6], false, None, &[], false);
         assert_eq!(m["components"].as_array().unwrap().len(), 2);
     }
 

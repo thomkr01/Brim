@@ -2,40 +2,6 @@ use crate::common::*;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
-/// The panel message as #open-a-ticket shows it: the dashboard's copy of `panel_message` in
-/// `core/src/sections.rs` (`look`, the server's `ticket.panel` entry or its default, with a line
-/// per panel with a description as `{text}`, a button per enabled panel, `fallback` when there are
-/// none). `{e:name}` tags are drawn by `md`.
-fn panel_preview(panels: &Value, look: &Value, fallback: &Value) -> Value {
-    let none = vec![];
-    let list = panels
-        .as_array()
-        .filter(|a| !a.is_empty())
-        .or(fallback.as_array())
-        .unwrap_or(&none);
-    let on: Vec<&Value> = list.iter().filter(|p| p["enabled"] != false).collect();
-    let s = |p: &Value, k: &str| p[k].as_str().unwrap_or("").to_string();
-    let lines: Vec<String> = on
-        .iter()
-        .filter(|p| !s(p, "description").is_empty())
-        .map(|p| format!("**{}**\n{}", s(p, "name"), s(p, "description")))
-        .collect();
-    let rows: Vec<Value> = on.chunks(5).map(|row| json!({"components": row.iter().map(|p| {
-        let style = match p["style"].as_str() { Some("secondary") => 2, Some("success") => 3, Some("danger") => 4, _ => 1 };
-        let mut b = json!({"style": style, "label": s(p, "name")});
-        if !s(p, "emoji").is_empty() { b["emoji"] = json!({"name": s(p, "emoji")}) }
-        b
-    }).collect::<Vec<_>>()})).collect();
-    let mut m = look.clone();
-    for e in m["embeds"].as_array_mut().into_iter().flatten() {
-        if let Some(d) = e["description"].as_str() {
-            e["description"] = json!(d.replace("{text}", &lines.join("\n\n")).trim_end());
-        }
-    }
-    m["components"] = json!(rows);
-    m
-}
-
 /// A number segment indexes an array (`custom.0.roles`).
 fn get_path(v: &Value, p: &str) -> Value {
     p.split('.')
@@ -661,19 +627,8 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             };
             // The default panels come from the schema (core `default_panels`).
             let fallback = StoredValue::new(f["panel_default"].clone());
-            // The message's look is the `ticket.panel` entry on Default messages: the server's
-            // edited version, else the default.
             let guild = crate::hash().first().cloned().unwrap_or_default();
             let entry = format!("#/{guild}/bot_messages/ticket.panel");
-            let look = RwSignal::new(Value::Null);
-            spawn_local(async move {
-                if let Ok(v) = api("GET", &format!("/api/guilds/{guild}/bot-messages"), None).await {
-                    if let Some(r) = v.as_array().into_iter().flatten().find(|r| r["key"] == "ticket.panel") {
-                        let m = if r["message"].is_object() { &r["message"] } else { &r["default"] };
-                        look.try_set(m.clone());
-                    }
-                }
-            });
             // The default panels, less a ticket type the server removed (the save would refuse it).
             let types_path = StoredValue::new(match p.get_value().rsplit_once('.') {
                 Some((head, _)) => format!("{head}.types"),
@@ -695,7 +650,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                 let mut cur = get().as_array().cloned().unwrap_or_default();
                 let id = (1..).map(|n| format!("panel-{n}")).find(|id| !cur.iter().any(|p| p["id"] == id.as_str())).unwrap_or_default();
                 // Each new button is posted in #open-a-ticket: a label members understand, no category (the ticket category).
-                cur.push(json!({"id": id, "name": "Open a ticket", "emoji": "{e:ticket}", "enabled": true, "style": "primary", "per_member": 1}));
+                cur.push(json!({"id": id, "name": fallback.with_value(|f| f[0]["name"].clone()), "emoji": "{e:ticket}", "enabled": true, "style": "primary", "per_member": 1}));
                 set(json!(cur))
             };
             view! { <div class="fullrow">
@@ -716,8 +671,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                             {first("style", "choice", "Button color", "", json!({"default": "primary", "options": ["primary", "secondary", "success", "danger"]}))}
                         }.into_any()
                     }}
-                    <p class="muted">"Preview:"</p>
-                    {move || look.with(|l| (!l.is_null()).then(|| crate::discord::bot(&panel_preview(&get(), l, &fallback.get_value()))))}
+                    <TicketPreview guild=guild.clone() val greeting=false />
                 </div>
                 <details class="card"><summary>"More buttons and forms"</summary>
                 <p class="muted">"Each extra panel adds a button, with its own form, greeting, category and pings."</p>
@@ -739,7 +693,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                         {sub("description", "text", "Description", "Shown under the name in the menu and the panel message, up to 100 characters.", json!({"default": ""}))}
                         {sub("category", "category", "Ticket category", "Where this panel's tickets go. None: the ticket category of the General card.", Value::Null)}
                         {sub("per_member", "int", "Open tickets per member", "", json!({"default": 1, "min": 1, "max": 5}))}
-                        {sub("greeting", "text", "Greeting", "Posted in the new ticket, up to 2000 characters. Empty: the server's greeting message is posted. Tags: {username} {userid} {usermention}", json!({"default": ""}))}
+                        {sub("greeting", "text", "Greeting", "Posted in the new ticket, up to 2000 characters. Empty: the server's greeting message is posted. Tags: {username} {userid} {usermention} {ticket_type}", json!({"default": ""}))}
                         {sub("ping_roles", "roles", "Roles pinged on a new ticket", "At most 10.", Value::Null)}
                         {sub("kind", "text", "Ticket type", "Its tickets start with this type, one from Ticket types. Empty: the member picks one, or staff at claim.", json!({"default": ""}))}
                         {sub("fields", "form", "Form questions", "Asked before the ticket opens, at most 5, with labels of 1-45 characters and a length of at most 1024. The answers go only to the ticket channel.", json!({"limit": "panel_fields", "choices": false}))}
@@ -988,8 +942,69 @@ fn CaptchaPreview(guild: String, val: RwSignal<Value>) -> impl IntoView {
             std::time::Duration::from_millis(400),
         );
     });
-    let mode = Signal::derive(move || val.with(|v| v["verification"]["mode"].as_str().unwrap_or("Captcha").to_string()));
+    let mode = Signal::derive(move || {
+        val.with(|v| {
+            v["verification"]["mode"]
+                .as_str()
+                .unwrap_or("Captcha")
+                .to_string()
+        })
+    });
     view! { <div class="capprev"><p class="muted">"Preview"</p><crate::discord::VerifyPreview mode captcha=png /></div> }
+}
+
+/// The ticket messages as members see them, drawn by the server from the settings on the page
+/// (saved or not; `POST .../tickets/preview` runs the code the bot posts with), asked 400 ms after
+/// the last change. `greeting`: the greeting of a new ticket, else the panel message.
+#[component]
+pub fn TicketPreview(guild: String, val: RwSignal<Value>, greeting: bool) -> impl IntoView {
+    let shown = RwSignal::new(Value::Null);
+    let seq = StoredValue::new(0u32);
+    Effect::new(move |_| {
+        let t = val.with(|v| v["tickets"].clone());
+        seq.update_value(|n| *n += 1);
+        let (mine, guild) = (seq.get_value(), guild.clone());
+        set_timeout(
+            move || {
+                if seq.is_disposed() || seq.get_value() != mine {
+                    return;
+                }
+                let body = json!({"panels": if t["panels"].is_array() { t["panels"].clone() } else { json!([]) },
+                    "types": t["types"], "button_per_type": t["button_per_type"] == true, "greeting": t["greeting"]});
+                spawn_local(async move {
+                    let r = api(
+                        "POST",
+                        &format!("/api/guilds/{guild}/tickets/preview"),
+                        Some(body),
+                    )
+                    .await;
+                    if !shown.is_disposed() && seq.get_value() == mine {
+                        shown.set(r.unwrap_or_else(|e| json!({"error": e})));
+                    }
+                });
+            },
+            std::time::Duration::from_millis(400),
+        );
+    });
+    move || {
+        let v = shown.get();
+        if v.is_null() {
+            return view! { <p class="loading"><Working /></p> }.into_any();
+        }
+        if let Some(e) = v["error"].as_str() {
+            return view! { <p class="err">{e.to_string()}</p> }.into_any();
+        }
+        let m = if greeting {
+            json!({"embeds": [v["greeting"].clone()]})
+        } else {
+            v["panel"].clone()
+        };
+        if greeting && v["greeting"].is_null() {
+            return view! { <p class="muted">"The greeting is empty: no message is sent."</p> }
+                .into_any();
+        }
+        view! { <p class="muted">"Preview:"</p>{crate::discord::bot(&m)} }.into_any()
+    }
 }
 
 /// The note under a number box whose typed text is not a number: the stored value did not change.
@@ -1399,7 +1414,7 @@ pub fn Section(
                     let id = |g: &str| format!("grp-{}", g.to_lowercase().replace(' ', "-"));
                     let cards = groups.into_iter().map(|(g, fs)| {
                         // Rows of the card (title and padding count as two, the captcha preview as six), to balance the columns.
-                        let weight = fs.len() + 2 + if sec == "verification" && g == "Captcha" { 6 } else { 0 };
+                        let weight = fs.len() + 2 + if sec == "verification" && g == "Captcha" { 6 } else if sec == "tickets" && g == "Messages" { 5 } else { 0 };
                         let gid = id(&g);
                         let plain = fs.iter().any(|f| f["path"] == switch.as_str());
                         // A card whose `used` condition fails (e.g. captcha look in website mode) rings red too.
@@ -1410,7 +1425,8 @@ pub fn Section(
                         let text = move || if !plain && off.get() { note.clone() } else { "Your current choices do not use this card, so its settings have no effect.".into() };
                         let fields = fs.into_iter().map(|f| { let only = f["only"].clone(); view! { <Show when=move || val.with(|v| holds(v, &only))><Field f=f.clone() val dc /></Show> } }).collect_view();
                         let captcha = (sec == "verification" && g == "Captcha").then(|| view! { <CaptchaPreview guild=gs.get_value() val /> });
-                        (weight, view! { <div class="card" id=gid class:off=ring><h2>{g}</h2>{fields}{captcha}<Show when=move || ring.get()><p class="offnote"><crate::common::Tip text=Signal::derive(text.clone()) />"Not in use right now"</p></Show></div> }.into_any())
+                        let look = (sec == "tickets" && g == "Messages").then(|| view! { <p class="muted">"The greeting's title and color are on Default messages."</p><a class="btn ghost" href=format!("#/{}/bot_messages/ticket.greeting/from-tickets", gs.get_value())>"Edit the look"</a><TicketPreview guild=gs.get_value() val greeting=true /> });
+                        (weight, view! { <div class="card" id=gid class:off=ring><h2>{g}</h2>{fields}{captcha}{look}<Show when=move || ring.get()><p class="offnote"><crate::common::Tip text=Signal::derive(text.clone()) />"Not in use right now"</p></Show></div> }.into_any())
                     }).collect::<Vec<_>>();
                     view! { <crate::common::Cards cards /> }
                 }}
@@ -1461,38 +1477,5 @@ mod raid_tests {
         );
         let c = serde_json::json!({"joinraid": {"count": 5, "span_ms": 600_000, "action": "Kick", "active_ms": 86_400_000}});
         assert_eq!(super::raid_summary(&c), "If 5 flagged accounts join within 10 minute(s), Brim will start kicking flagged accounts for 1 day(s).");
-    }
-}
-
-#[cfg(test)]
-mod panel_preview_tests {
-    use super::*;
-
-    #[test]
-    fn shows_enabled_panels_and_the_default_when_there_are_none() {
-        let m = panel_preview(
-            &json!([]),
-            &json!({"embeds": [{"title": "T", "description": "Hi\n\n{text}"}]}),
-            &json!([{"name": "Get help"}, {"name": "Report a member"}]),
-        );
-        assert_eq!(
-            m["components"][0]["components"][1]["label"],
-            "Report a member"
-        );
-        let m = panel_preview(
-            &json!([
-                {"name": "Help", "emoji": "🎫", "style": "success", "description": "Ask us"},
-                {"name": "Off", "enabled": false}
-            ]),
-            &json!({"embeds": [{"title": "T", "description": "Hi\n\n{text}"}]}),
-            &json!({}),
-        );
-        let b = &m["components"][0]["components"];
-        assert_eq!(b.as_array().map(Vec::len), Some(1));
-        assert_eq!(
-            (b[0]["style"].clone(), b[0]["emoji"]["name"].clone()),
-            (json!(3), json!("🎫"))
-        );
-        assert_eq!(m["embeds"][0]["description"], "Hi\n\n**Help**\nAsk us");
     }
 }

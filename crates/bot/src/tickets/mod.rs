@@ -121,17 +121,26 @@ pub(super) async fn live_roles(app: &App, gid: Id<GuildMarker>, roles: Vec<u64>)
 }
 
 /// The message variables `tags` fills in, listed on the dashboard's Commands page.
-pub const TAGS: [(&str, &str); 3] = [
+pub const TAGS: [(&str, &str); 4] = [
     ("{username}", "The member's username"),
     ("{userid}", "The member's user id"),
     ("{usermention}", "A mention of the member"),
+    (
+        "{ticket_type}",
+        "The ticket's type (empty when it has none)",
+    ),
 ];
 /// Where `tags` runs.
 pub const TAGS_IN: &str = "Ticket greeting and closing messages and snippets";
 
-/// Fills `TAGS` in greeting, closing and snippet texts.
-fn tags(text: &str, u: &User) -> String {
-    let values = [u.name.clone(), u.id.to_string(), format!("<@{}>", u.id)];
+/// Fills `TAGS` in greeting, closing and snippet texts; `kind` is the ticket's type or "".
+fn tags(text: &str, u: &User, kind: &str) -> String {
+    let values = [
+        u.name.clone(),
+        u.id.to_string(),
+        format!("<@{}>", u.id),
+        kind.to_string(),
+    ];
     let text = TAGS
         .iter()
         .zip(values)
@@ -993,19 +1002,23 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
 /// Seconds after a close starts until `close_check` looks at it.
 const CLOSE_CHECK_SECS: i64 = 15 * 60;
 
-/// "New Ticket" in the ticket log; `panel` names the panel it was opened from.
-pub(crate) fn new_ticket_log(user: &User, panel: Option<&str>) -> Log {
+/// "New Ticket" in the ticket log; `panel` names the panel it was opened from, `kind` is the
+/// ticket's type if it has one.
+pub(crate) fn new_ticket_log(user: &User, panel: Option<&str>, kind: Option<&str>) -> Log {
     let footer = match panel {
         Some(p) => format!("{} | {} | {p}", user.name, user.id),
         None => format!("{} | {}", user.name, user.id),
     };
-    Log::new("New Ticket", GREEN)
-        .user("User", user.id.get())
-        .footer(&footer)
+    let mut e = Log::new("New Ticket", GREEN).user("User", user.id.get());
+    if let Some(k) = kind.filter(|k| !k.is_empty()) {
+        e = e.line("Type", k);
+    }
+    e.footer(&footer)
         .var("member", &brim_logging::embed::user(user.id.get()))
         .var("member.username", &user.name)
         .var("member.id", &user.id.to_string())
         .var("panel", panel.unwrap_or_default())
+        .var("ticket_type", kind.unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -1033,7 +1046,8 @@ mod tests {
         )
         .unwrap();
         let all: String = TAGS.iter().map(|(k, _)| *k).collect();
-        assert_eq!(tags(&all, &u), "tom5<@5>");
+        assert_eq!(tags(&all, &u, "Report"), "tom5<@5>Report");
+        assert_eq!(tags("[{ticket_type}]", &u, ""), "[]");
     }
 
     #[test]

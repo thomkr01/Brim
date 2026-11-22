@@ -3,7 +3,7 @@
 //! The staff buttons on the ticket's first message (Claim and Close; after a claim Change
 //! Priority, Add Note and Close Ticket) are handled here too.
 use super::*;
-use brim_core::sections::TicketPanel;
+use brim_core::sections::{button_types, type_hash, TicketPanel};
 use twilight_model::{
     application::interaction::modal::{ModalInteractionComponent, ModalInteractionData},
     channel::message::{
@@ -51,7 +51,7 @@ async fn posted(app: &App, gid: Id<GuildMarker>, msg: u64, panel: &str) -> Resul
 }
 
 #[allow(deprecated)]
-fn modal(p: &TicketPanel, msg: u64) -> InteractionResponse {
+fn modal(p: &TicketPanel, msg: u64, type_hash: Option<&str>) -> InteractionResponse {
     let rows = p
         .fields
         .iter()
@@ -83,7 +83,10 @@ fn modal(p: &TicketPanel, msg: u64) -> InteractionResponse {
     InteractionResponse {
         kind: InteractionResponseType::Modal,
         data: Some(InteractionResponseData {
-            custom_id: Some(format!("tk2:form:{}:{msg}:{}", p.id, form_hash(p))),
+            custom_id: Some(match type_hash {
+                Some(h) => format!("tk2:form:{}:{msg}:{}:{h}", p.id, form_hash(p)),
+                None => format!("tk2:form:{}:{msg}:{}", p.id, form_hash(p)),
+            }),
             title: Some(clip(&p.name, 45)),
             components: Some(rows),
             ..Default::default()
@@ -134,14 +137,21 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
     let client = app.http.interaction(app.me.cast());
     let parts: Vec<&str> = rest.split(':').collect();
     // The panel and the message it was pressed on; the form carries the message id itself.
-    let (panel_id, msg) = match (parts.as_slice(), i.message.as_ref()) {
-        (["open", p], Some(m)) => (p.to_string(), m.id.get()),
-        (["menu"], Some(m)) => match values.first() {
-            Some(v) => (v.clone(), m.id.get()),
+    // A button per type adds the type's hash (`brim_core::sections::type_hash`).
+    let (panel_id, msg, th) = match (parts.as_slice(), i.message.as_ref()) {
+        (["open", p], Some(m)) => (p.to_string(), m.id.get(), None),
+        (["open", p, h], Some(m)) => (p.to_string(), m.id.get(), Some(h.to_string())),
+        (["menu"], Some(m)) => match values.first().map(|v| v.split_once(':')) {
+            Some(Some((p, h))) => (p.to_string(), m.id.get(), Some(h.to_string())),
+            Some(None) => (values[0].clone(), m.id.get(), None),
             None => return Ok(true),
         },
         (["form", p, m, _], _) => match m.parse() {
-            Ok(m) => (p.to_string(), m),
+            Ok(m) => (p.to_string(), m, None),
+            Err(_) => return Ok(true),
+        },
+        (["form", p, m, _, h], _) => match m.parse() {
+            Ok(m) => (p.to_string(), m, Some(h.to_string())),
             Err(_) => return Ok(true),
         },
         (
@@ -184,6 +194,23 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         client.create_response(i.id, &i.token, &r).await?;
         return Ok(true);
     }
+    // The type: the one the pressed button names (the list may have changed since the message
+    // was posted), else the panel's preset one.
+    let types = &cfg.tickets.types;
+    let kind = match &th {
+        Some(h) => match types.iter().find(|t| &type_hash(t) == h) {
+            Some(t) if button_types(&panel, types, cfg.tickets.button_per_type).len() > 1 => {
+                t.as_str()
+            }
+            _ => {
+                let r = reply(said("reply.ticket.form_changed", &[]).await);
+                client.create_response(i.id, &i.token, &r).await?;
+                return Ok(true);
+            }
+        },
+        None if types.contains(&panel.kind) => panel.kind.as_str(),
+        None => "",
+    };
     let submitted = match &i.data {
         Some(InteractionData::ModalSubmit(m)) => {
             if parts.get(3) != Some(&form_hash(&panel).as_str()) {
@@ -204,7 +231,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             return Ok(true);
         }
         client
-            .create_response(i.id, &i.token, &modal(&panel, msg))
+            .create_response(i.id, &i.token, &modal(&panel, msg, th.as_deref()))
             .await?;
         return Ok(true);
     }
@@ -217,7 +244,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
     };
     client.create_response(i.id, &i.token, &defer).await?;
     let answers = submitted.unwrap_or_default();
-    let told = match open(app, gid, &cfg, &panel, user, member, &answers).await {
+    let told = match open(app, gid, &cfg, &panel, kind, user, member, &answers).await {
         Ok(Ok(ch)) => said("reply.ticket.opened", &[("channel", &format!("<#{ch}>"))]).await,
         Ok(Err(why)) => said(why, &[]).await,
         Err(e) => {
@@ -279,6 +306,7 @@ async fn open(
     gid: Id<GuildMarker>,
     cfg: &crate::app::GuildCfg,
     p: &TicketPanel,
+    kind: &str,
     user: &User,
     member: &PartialMember,
     answers: &[String],
@@ -320,15 +348,7 @@ async fn open(
         .http
         .create_guild_channel(
             gid,
-            &kind_name(
-                &format!("{}-{number:04}", p.id),
-                None,
-                if t.types.contains(&p.kind) {
-                    &p.kind
-                } else {
-                    ""
-                },
-            ),
+            &kind_name(&format!("{}-{number:04}", p.id), None, kind),
         )
         .kind(ChannelType::GuildText)
         .parent_id(category)
@@ -358,11 +378,7 @@ async fn open(
     .bind(number)
     .bind(ch.get() as i64)
     .bind(user.id.get() as i64)
-    .bind(if t.types.contains(&p.kind) {
-        p.kind.as_str()
-    } else {
-        ""
-    })
+    .bind(kind)
     .execute(&app.pool)
     .await?
     .rows_affected();
@@ -370,10 +386,10 @@ async fn open(
         best_effort(app.http.delete_channel(ch).await, "unbound ticket channel");
         return Ok(Err("reply.ticket.open_failed_panel"));
     }
-    let details = json!({"source": "panel", "panel": p.id, "fields": answers.len()});
+    let details = json!({"source": "panel", "panel": p.id, "fields": answers.len(), "type": kind});
     event(app, gid, number, Some(user.id), "opened", details).await;
     if let Some(log) = t.log_channel {
-        let e = super::new_ticket_log(user, Some(&p.name));
+        let e = super::new_ticket_log(user, Some(&p.name), Some(kind));
         if let Err(e) = crate::events::send_private(app, gid, log, e, None).await {
             tracing::warn!(?e, "ticket log failed");
         }
@@ -417,7 +433,7 @@ async fn open(
         .create_message(ch)
         .content(&content)
         .embeds(&[e])
-        .components(&intro(false, pick(&t.types, &p.kind)))
+        .components(&intro(false, pick(&t.types, kind)))
         .allowed_mentions(Some(&am))
         .await
     {
@@ -437,7 +453,7 @@ async fn open(
         &p.greeting
     };
     if !greeting.is_empty() {
-        let text = tags(greeting, user);
+        let text = tags(greeting, user, kind);
         let e = crate::reply::bot_embed_for(app, gid, "ticket.greeting", &[("text", &text)]).await;
         if let Err(e) = say(app, ch, e).await {
             tracing::warn!(?e, %ch, "panel ticket greeting failed");
@@ -830,7 +846,7 @@ mod tests {
         assert_ne!(before, form_hash(&p));
         // The form's custom_id stays under Discord's 100 characters at the longest id.
         p.id = "a".repeat(32);
-        let r = modal(&p, u64::MAX);
+        let r = modal(&p, u64::MAX, None);
         assert!(r.data.unwrap().custom_id.unwrap().len() <= 100);
     }
 
@@ -946,6 +962,18 @@ mod tests {
         // The real button shows the form.
         let _ = handle(&t.app, &press(t.g(0).get(), post, "tk2:open:help")).await;
         assert_eq!(t.calls("tk2:form:help:"), 1);
+        // A button per type works only while the switch is on and the type is listed.
+        let typed = format!("tk2:open:help:{}", type_hash("Report"));
+        let _ = handle(&t.app, &press(t.g(0).get(), post, &typed)).await;
+        assert_eq!(t.calls("form was changed"), 1);
+        let on = json!({"tickets": {"enabled": true, "panels": panels, "button_per_type": true}});
+        t.server_config(3, t.owner(), on).await;
+        t.exec("INSERT INTO ticket_panel_posts (message_id, guild_id, channel_id, panels, posted_by) VALUES ($1 + 3, $1 + 3, 1, '{help}', 1)").await;
+        let _ = handle(&t.app, &press(t.g(3).get(), post + 3, &typed)).await;
+        assert_eq!(t.calls(&format!(":{}\"", type_hash("Report"))), 1);
+        let gone = format!("tk2:open:help:{}", type_hash("Nope"));
+        let _ = handle(&t.app, &press(t.g(3).get(), post + 3, &gone)).await;
+        assert_eq!(t.calls("form was changed"), 2);
         // A saved message's "Open a ticket" button: only on a copy recorded for this server whose
         // button names that panel.
         t.exec("WITH e AS (INSERT INTO embeds (guild_id, name, message, updated_by) VALUES ($1, 'Rules', '{}', 1) RETURNING id)
@@ -956,7 +984,7 @@ mod tests {
         let _ = handle(&t.app, &press(t.g(1).get(), post + 50, "tk2:open:help")).await;
         assert_eq!(t.calls("no longer in use"), before + 2);
         let _ = handle(&t.app, &press(t.g(0).get(), post + 50, "tk2:open:help")).await;
-        assert_eq!(t.calls("tk2:form:help:"), 2);
+        assert_eq!(t.calls("tk2:form:help:"), 3);
         t.exec("DELETE FROM embeds WHERE guild_id = $1").await;
         t.exec("DELETE FROM ticket_panel_posts WHERE guild_id = $1")
             .await;

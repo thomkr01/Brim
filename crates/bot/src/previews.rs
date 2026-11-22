@@ -78,11 +78,11 @@ fn tickets() -> Vec<(&'static str, Value)> {
         ("ticket_intro_cmd", intro(true)),
         (
             "ticket_greeting",
-            embed(tickets::notice(&s, false, "{text}", &member)),
+            embed(tickets::notice(&s, false, "{text}", &member, "")),
         ),
         (
             "ticket_closing",
-            embed(tickets::notice(&s, true, "{text}", &member)),
+            embed(tickets::notice(&s, true, "{text}", &member, "")),
         ),
         (
             "ticket_closed",

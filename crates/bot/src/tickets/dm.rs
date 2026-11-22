@@ -453,7 +453,7 @@ async fn create(
     )
     .await;
     if let Some(log) = t.log_channel {
-        let e = super::new_ticket_log(user, None);
+        let e = super::new_ticket_log(user, None, None);
         if let Err(e) = crate::events::send_private(app, gid, log, e, None).await {
             tracing::warn!(?e, "ticket log failed");
         }
@@ -501,7 +501,7 @@ async fn create(
         }
     }
     if !t.greeting.is_empty() {
-        say(app, dm, notice(s, false, &t.greeting, user)).await?;
+        say(app, dm, notice(s, false, &t.greeting, user, "")).await?;
     }
     if !t.types.is_empty() {
         // The member may skip it: staff pick the type at claim then.

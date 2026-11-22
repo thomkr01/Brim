@@ -346,6 +346,8 @@ fn ticket_preview(c: &Value, dc: &Value) -> AnyView {
             .replace("{username}", "member")
             .replace("{userid}", "1001")
             .replace("{usermention}", "@member")
+            // A DM ticket asks for the type after it opens.
+            .replace("{ticket_type}", "")
     };
     let (greeting, closing) = (tagged("greeting"), tagged("closing"));
     let mut pings: Vec<String> = strs(&t["ping_roles"])
@@ -374,6 +376,8 @@ fn ticket_preview(c: &Value, dc: &Value) -> AnyView {
         intro["content"] = Value::String(pings.join(" "));
     }
     view! {
+        <p class="muted">"The button in #open-a-ticket:"</p>
+        <crate::form::TicketPreview guild=crate::hash().first().cloned().unwrap_or_default() val=RwSignal::new(serde_json::json!({"tickets": t.clone()})) greeting=false />
         <p class="muted">"In the member's DMs:"</p>
         {chat("member", text("Hi, someone in the server keeps sending me scam links."))}
         {show("ticket_confirm")}{show("ticket_sent")}
@@ -394,6 +398,8 @@ pub const TICKETS: &[Card] = &[Card {
         ("tickets.category", ""),
         ("tickets.log_channel", ""),
         ("tickets.public_channel", ""),
+        ("tickets.types", ""),
+        ("tickets.button_per_type", ""),
         ("tickets.ping_roles", ""),
         ("tickets.ping_here", ""),
         ("tickets.greeting", ""),

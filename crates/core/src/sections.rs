@@ -639,6 +639,9 @@ pub struct TicketsCfg {
     /// The channel Brim made for `public_channel`. Only the bot writes it; a dashboard save
     /// keeps the stored value.
     pub public_channel_id: Option<Id<ChannelMarker>>,
+    /// A panel with no preset type shows one button per type in `types`; the member picks the
+    /// type by pressing it. Off: one button per panel.
+    pub button_per_type: bool,
 }
 
 /// Most panels a server can have, and most answers a panel's form asks (one Discord modal).
@@ -739,51 +742,85 @@ pub fn tickets_cap_hit(new: &Value, old: &Value) -> Option<(&'static str, usize,
     None
 }
 
-/// Why the ticket types cannot be saved, or `None`: 1-100 characters each, no repeats, and a
-/// panel's preset type must be one of them.
-pub fn types_problem(types: &[String], panels: &[TicketPanel]) -> Option<String> {
+/// Most buttons on one panel message (Discord: 5 rows of 5) and options in one menu.
+pub const MAX_PANEL_BUTTONS: usize = 25;
+
+/// Why the ticket types cannot be saved, or `None`: 1-100 characters each (80 with `per_type`,
+/// the button label limit), no repeats, a panel's preset type must be one of them, and with
+/// `per_type` the buttons of the enabled panels must fit one panel message.
+pub fn types_problem(types: &[String], panels: &[TicketPanel], per_type: bool) -> Option<String> {
     if types.len() > MAX_TICKET_TYPES {
         return Some(format!("at most {MAX_TICKET_TYPES} ticket types"));
     }
+    let max = if per_type { 80 } else { 100 };
     let mut seen = std::collections::HashSet::new();
     for t in types {
-        if !(1..=100).contains(&t.trim().chars().count()) || t.trim() != t {
-            return Some("a ticket type needs 1-100 characters, without spaces at the ends".into());
+        if !(1..=max).contains(&t.trim().chars().count()) || t.trim() != t {
+            return Some(format!(
+                "a ticket type needs 1-{max} characters, without spaces at the ends"
+            ));
         }
         if !seen.insert(t.to_lowercase()) {
             return Some(format!("ticket type \"{t}\" is listed twice"));
         }
     }
-    panels
+    if let Some(p) = panels
         .iter()
         .find(|p| !p.kind.is_empty() && !types.contains(&p.kind))
-        .map(|p| {
-            format!(
-                "panel \"{}\": its ticket type \"{}\" is not in the list",
-                p.name, p.kind
-            )
-        })
+    {
+        return Some(format!(
+            "panel \"{}\": its ticket type \"{}\" is not in the list",
+            p.name, p.kind
+        ));
+    }
+    let buttons: usize = if per_type {
+        panels
+            .iter()
+            .filter(|p| p.enabled)
+            .map(|p| button_types(p, types, true).len())
+            .sum()
+    } else {
+        0
+    };
+    (buttons > MAX_PANEL_BUTTONS).then(|| {
+        format!(
+            "the panel message would have {buttons} buttons, the most is {MAX_PANEL_BUTTONS}: remove {} ticket types or panels",
+            buttons - MAX_PANEL_BUTTONS
+        )
+    })
 }
 
-/// The panels Brim adds when the public ticket channel needs them and the server has none
-/// (owner decision 2026-11-18): Get help (the member picks the type), Report a member and Appeal a
-/// punishment. A ticket type the server no longer lists is left off its panel. The first keeps
-/// the id `support`, so buttons posted before still open tickets.
-pub fn default_panels(types: &[String]) -> Value {
-    let mut panels = serde_json::json!([
-        {"id": "support", "name": "Get help", "enabled": true, "style": "primary", "emoji": "{e:support}"},
-        {"id": "report", "name": "Report a member", "enabled": true, "style": "danger", "emoji": "{e:report}", "kind": "Report"},
-        {"id": "appeal", "name": "Appeal a punishment", "enabled": true, "style": "secondary", "emoji": "{e:appeal}", "kind": "Appeal"},
-    ]);
-    for p in panels.as_array_mut().into_iter().flatten() {
-        if p["kind"]
-            .as_str()
-            .is_some_and(|k| !types.iter().any(|t| t == k))
-        {
-            p.as_object_mut().map(|o| o.remove("kind"));
-        }
+/// The label of the one default button (owner decision 2026-11-22), also the name of the default
+/// panel and of a new panel.
+pub const DEFAULT_BUTTON: &str = "Create ticket";
+
+/// A stable short hash of a ticket type name for a button id (`tk2:open:<panel>:<hash>`), so a
+/// button posted before the type list changed is refused.
+pub fn type_hash(kind: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in kind.bytes() {
+        h = (h ^ u32::from(b)).wrapping_mul(0x0100_0193);
     }
-    panels
+    format!("{h:08x}")
+}
+
+/// The buttons `p` shows: one per type when `per_type` is on, the panel has no preset type and
+/// the server lists two or more types; else one with no type (`""`).
+pub fn button_types<'a>(p: &TicketPanel, types: &'a [String], per_type: bool) -> Vec<&'a str> {
+    if per_type && p.kind.is_empty() && types.len() >= 2 {
+        types.iter().map(String::as_str).collect()
+    } else {
+        vec![""]
+    }
+}
+
+/// The panel Brim adds when the public ticket channel needs one and the server has none (owner
+/// decision 2026-11-22): one `DEFAULT_BUTTON`. It keeps the id `support`, so buttons posted before
+/// still open tickets.
+pub fn default_panels() -> Value {
+    serde_json::json!([
+        {"id": "support", "name": DEFAULT_BUTTON, "enabled": true, "style": "primary", "emoji": "{e:ticket}"},
+    ])
 }
 
 /// The panel message text the Tickets tab wrote with the default panel until 4055 moved the
@@ -800,8 +837,16 @@ pub const DEFAULT_GREETING: &str = "Hi {usermention}, thanks for reaching out. T
 
 /// The panel message: the `ticket.panel` entry (`look`, the server's edited version, else the
 /// default) with a line per panel that has a description as `{text}`, and a button per panel or
-/// one menu. The custom ids are the ones `bot/src/tickets/panel.rs` reads.
-pub fn panel_message(panels: &[&TicketPanel], menu: bool, look: Option<&Value>) -> Value {
+/// one menu. With `per_type` (the switch on) a panel with no preset type shows a button or menu
+/// option per entry of `types` (`button_types`). The custom ids are the ones
+/// `bot/src/tickets/panel.rs` reads.
+pub fn panel_message(
+    panels: &[&TicketPanel],
+    menu: bool,
+    look: Option<&Value>,
+    types: &[String],
+    per_type: bool,
+) -> Value {
     use brim_logging::emoji;
     use serde_json::json;
     let text: Vec<String> = panels
@@ -827,11 +872,28 @@ pub fn panel_message(panels: &[&TicketPanel], menu: bool, look: Option<&Value>) 
             }
         }
     }
+    // (panel, type or "") per button; the type is part of the id and the label.
+    let items: Vec<(&TicketPanel, &str)> = panels
+        .iter()
+        .flat_map(|p| {
+            button_types(p, types, per_type)
+                .into_iter()
+                .map(move |k| (*p, k))
+        })
+        .collect();
+    let id_of = |p: &TicketPanel, k: &str| {
+        if k.is_empty() {
+            p.id.clone()
+        } else {
+            format!("{}:{}", p.id, type_hash(k))
+        }
+    };
     let rows: Vec<Value> = if menu {
-        let options: Vec<Value> = panels
+        let options: Vec<Value> = items
             .iter()
-            .map(|p| {
-                let mut o = json!({"label": p.name, "value": p.id});
+            .map(|(p, k)| {
+                let name = if k.is_empty() { &p.name } else { *k };
+                let mut o = json!({"label": name, "value": id_of(p, k)});
                 if !p.description.is_empty() {
                     o["description"] = json!(p.description.chars().take(100).collect::<String>());
                 }
@@ -842,20 +904,21 @@ pub fn panel_message(panels: &[&TicketPanel], menu: bool, look: Option<&Value>) 
             {"type": 3, "custom_id": "tk2:menu", "options": options}
         ]})]
     } else {
-        panels
+        items
             .chunks(5)
             .map(|row| {
                 let buttons: Vec<Value> = row
                     .iter()
-                    .map(|p| {
+                    .map(|(p, k)| {
                         let style = match p.style.as_str() {
                             "secondary" => 2,
                             "success" => 3,
                             "danger" => 4,
                             _ => 1,
                         };
-                        let mut b = json!({"type": 2, "style": style, "label": p.name,
-                            "custom_id": format!("tk2:open:{}", p.id)});
+                        let name = if k.is_empty() { &p.name } else { *k };
+                        let mut b = json!({"type": 2, "style": style, "label": name,
+                            "custom_id": format!("tk2:open:{}", id_of(p, k))});
                         // A Brim emoji that is not uploaded leaves the button without one.
                         match emoji::tag_name(&p.emoji) {
                             Some(n) => {
@@ -987,6 +1050,7 @@ impl Default for TicketsCfg {
                 .to_vec(),
             public_channel: true,
             public_channel_id: None,
+            button_per_type: false,
         }
     }
 }
@@ -1608,22 +1672,22 @@ mod tests {
     #[test]
     fn ticket_types_are_checked() {
         let ok: Vec<String> = TicketsCfg::default().types;
-        assert_eq!(types_problem(&ok, &[]), None);
+        assert_eq!(types_problem(&ok, &[], false), None);
         assert!(
-            types_problem(&["A".into(), "a".into()], &[]).is_some(),
+            types_problem(&["A".into(), "a".into()], &[], false).is_some(),
             "repeats"
         );
         assert!(
-            types_problem(&[" A".into()], &[]).is_some(),
+            types_problem(&[" A".into()], &[], false).is_some(),
             "spaces at the ends"
         );
         let many: Vec<String> = (0..26).map(|i| i.to_string()).collect();
-        assert!(types_problem(&many, &[]).is_some(), "at most 25");
+        assert!(types_problem(&many, &[], false).is_some(), "at most 25");
         let p: TicketPanel =
             serde_json::from_value(serde_json::json!({"id": "a", "name": "A", "kind": "Bug"}))
                 .unwrap();
         assert!(
-            types_problem(&ok, &[p]).is_some(),
+            types_problem(&ok, &[p], false).is_some(),
             "a preset must be listed"
         );
     }
@@ -1938,13 +2002,63 @@ mod tests {
     }
 
     #[test]
-    fn the_default_panel_message_is_the_text_and_three_buttons() {
+    fn a_button_per_type_only_for_a_panel_without_a_preset_type() {
+        let types: Vec<String> = ["Report", "Appeal", "Other"].map(String::from).to_vec();
+        let any: TicketPanel =
+            serde_json::from_value(json!({"id": "help", "name": "Create ticket"})).unwrap();
+        let set: TicketPanel =
+            serde_json::from_value(json!({"id": "rep", "name": "Report", "kind": "Report"}))
+                .unwrap();
+        let ids = |m: &Value| -> Vec<String> {
+            m["components"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|r| r["components"].as_array().unwrap().clone())
+                .map(|b| b["custom_id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let m = panel_message(&[&any, &set], false, None, &types, true);
+        let h = type_hash("Appeal");
+        assert_eq!(
+            ids(&m),
+            [
+                format!("tk2:open:help:{}", type_hash("Report")),
+                format!("tk2:open:help:{h}"),
+                format!("tk2:open:help:{}", type_hash("Other")),
+                "tk2:open:rep".to_string()
+            ]
+        );
+        assert_eq!(m["components"][0]["components"][1]["label"], "Appeal");
+        // Switch off, or fewer than two types: the panel's own button.
+        let off = panel_message(&[&any], false, None, &types, false);
+        assert_eq!(ids(&off), ["tk2:open:help"]);
+        let one = panel_message(&[&any], false, None, &types[..1], true);
+        assert_eq!(ids(&one), ["tk2:open:help"]);
+        // The menu lists the same, as `<panel>:<hash>`.
+        let menu = panel_message(&[&any], true, None, &types, true);
+        assert_eq!(
+            menu["components"][0]["components"][0]["options"][1]["value"],
+            format!("help:{h}")
+        );
+        // 24 types and a second panel: 25 buttons fit, 26 do not; 80-character labels only.
+        let many: Vec<String> = (0..24).map(|i| format!("T{i}")).collect();
+        let two = [any.clone(), set.clone()];
+        assert_eq!(types_problem(&many, &two[..1], true), None);
+        assert!(types_problem(&many, &[any.clone(), any.clone()], true).is_some());
+        let long = vec!["x".repeat(81), "y".into()];
+        assert!(types_problem(&long, &[], true).is_some());
+        assert!(types_problem(&long, &[], false).is_none());
+    }
+
+    #[test]
+    fn the_default_panel_message_is_the_text_and_one_button() {
         let types = TicketsCfg::default().types;
-        let ps: Vec<TicketPanel> = serde_json::from_value(default_panels(&types)).unwrap();
+        let ps: Vec<TicketPanel> = serde_json::from_value(default_panels()).unwrap();
         assert!(panels_problem(&ps).is_none());
-        assert!(types_problem(&types, &ps).is_none());
+        assert!(types_problem(&types, &ps, true).is_none());
         let refs: Vec<&TicketPanel> = ps.iter().collect();
-        let m = panel_message(&refs, false, None);
+        let m = panel_message(&refs, false, None, &types, false);
         // No description: no line for the panel under the default text.
         let d = m["embeds"][0]["description"].as_str().unwrap();
         assert!(d.starts_with("Need a hand") && !d.contains("{text}") && !d.contains("{e:"));
@@ -1955,10 +2069,7 @@ mod tests {
             .iter()
             .map(|b| &b["label"])
             .collect();
-        assert_eq!(
-            labels,
-            ["Get help", "Report a member", "Appeal a punishment"]
-        );
+        assert_eq!(labels, [DEFAULT_BUTTON]);
         assert_eq!(ps[0].id, "support");
         // The Brim emoji is not uploaded in tests: the button has none.
         assert!(m["components"][0]["components"][0]["emoji"].is_null());
@@ -1967,14 +2078,10 @@ mod tests {
         with[0].description = "Questions {e:ticket}".into();
         let refs: Vec<&TicketPanel> = with.iter().collect();
         let own = json!({"embeds": [{"title": "Help", "description": "{text}"}]});
-        let m = panel_message(&refs, false, Some(&own));
+        let m = panel_message(&refs, false, Some(&own), &types, false);
         assert_eq!(m["embeds"][0]["title"], "Help");
         let d = m["embeds"][0]["description"].as_str().unwrap();
-        assert!(d.starts_with("**Get help**\nQuestions") && !d.contains("{e:"));
-        // A type the server removed is left off its panel.
-        let few: Vec<TicketPanel> =
-            serde_json::from_value(default_panels(&["Report".into()])).unwrap();
-        assert_eq!((few[1].kind.as_str(), few[2].kind.as_str()), ("Report", ""));
+        assert!(d.starts_with("**Create ticket**\nQuestions") && !d.contains("{e:"));
         // Migration 4033 wrote the same text (with the old name) and panels; 4049 moves that
         // untouched text to this one.
         let old = DEFAULT_PANEL_TEXT.replace("Brim", "TommyBot");
@@ -1983,7 +2090,6 @@ mod tests {
         let rename = include_str!("../migrations/4051_panel_text_brim.sql");
         assert!(rename.contains(&format!("to_jsonb('{DEFAULT_PANEL_TEXT}'::text)")));
         assert!(rename.contains(&format!("= '{old}';")));
-        assert!(sql.contains(&default_panels(&types).to_string()));
         // 4055 recognises both untouched texts and writes the default greeting.
         let moved = include_str!("../migrations/4055_ticket_embed_defaults.sql");
         assert!(

@@ -24,7 +24,8 @@ pub(super) async fn relay(
         return Ok(());
     };
     let text = if snippet {
-        tags(text, &member.user)
+        let kind = workflow::kind_of(app, gid, ch).await?.unwrap_or_default();
+        tags(text, &member.user, &kind)
     } else {
         text.to_string()
     };
@@ -330,7 +331,19 @@ pub(super) async fn close(
         .await?
         .id;
     if !t.closing.is_empty() {
-        let e = notice(&s, true, &t.closing, &member.user);
+        let kind: Option<String> =
+            sqlx::query_scalar("SELECT kind FROM tickets WHERE guild_id = $1 AND number = $2")
+                .bind(gid.get() as i64)
+                .bind(number)
+                .fetch_one(&app.pool)
+                .await?;
+        let e = notice(
+            &s,
+            true,
+            &t.closing,
+            &member.user,
+            &kind.unwrap_or_default(),
+        );
         best_effort(
             app.http.create_message(dm).embeds(&[e]).await,
             "ticket closing message",

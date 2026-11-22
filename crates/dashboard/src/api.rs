@@ -1518,7 +1518,9 @@ pub(crate) fn validate(section: &str, v: &Value, old: &Value) -> Result<(), ApiE
             Some(t) => serde_json::from_value(t.clone()).unwrap_or_default(),
             None => brim_core::sections::TicketsCfg::default().types,
         };
-        if let Some(e) = brim_core::sections::types_problem(&types, &panels) {
+        if let Some(e) =
+            brim_core::sections::types_problem(&types, &panels, v["button_per_type"] == json!(true))
+        {
             return Err(ApiError::BadRequest(e));
         }
         if v["auto_close_hours"].as_u64().is_some_and(|h| h > 24 * 30) {

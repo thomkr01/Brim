@@ -46,6 +46,10 @@ pub fn routes() -> Router<AppState> {
             post(crate::tickets::publish),
         )
         .route(
+            "/api/guilds/{guild}/tickets/preview",
+            post(crate::tickets::preview).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
+        .route(
             "/api/guilds/{guild}/tickets/panels/posts",
             get(crate::tickets::posts),
         )

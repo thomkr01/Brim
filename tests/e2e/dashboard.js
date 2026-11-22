@@ -514,7 +514,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('summary:text-is("More buttons and forms")', { timeout: 5000 }).catch(() => failed.push('tickets: no More buttons and forms section'));
   await page.click('button.add:has-text("Add panel")', { timeout: 5000 }).catch(() => failed.push('tickets: no Add panel button'));
   // The first panel Add makes is the #open-a-ticket button: a label members understand, not "New panel".
-  if (!(await page.locator('details summary', { hasText: 'Open a ticket' }).count())) failed.push('tickets: Add panel made no panel');
+  if (!(await page.locator('details summary', { hasText: 'Create ticket' }).count())) failed.push('tickets: Add panel made no panel');
   // The message keeps the look of the ticket.panel entry (Default messages), so it is never a bare title.
   if (!(await page.locator('.dmsg', { hasText: 'Need a hand from the staff' }).count())) failed.push('tickets: Add panel left the message without text');
   if (!(await page.locator('a', { hasText: 'Edit embed' }).count())) failed.push('tickets: no Edit embed link to Default messages');

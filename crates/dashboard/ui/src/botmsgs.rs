@@ -163,6 +163,9 @@ pub fn BotMessages(
     /// An entry key from the link (the Tickets tab's Edit embed): opened once the list loads.
     #[prop(optional)]
     open_key: String,
+    /// Opened from the Tickets tab (`.../from-tickets` in the link): a Back button returns there.
+    #[prop(optional)]
+    from_tickets: bool,
 ) -> impl IntoView {
     let g = StoredValue::new(guild);
     let pending = StoredValue::new(open_key);
@@ -250,20 +253,24 @@ pub fn BotMessages(
             show(r);
         }
     });
-    let close = move || {
+    // `to`: a page to go to after the entry closes (the Tickets tab), else the list.
+    let close = move |to: Option<String>| {
         crate::msgparts::set_bot_vars(&[]);
         open.set(None);
+        if let Some(to) = to {
+            let _ = web_sys::window().unwrap().location().set_hash(&to);
+        }
     };
-    let back = move || {
+    let back = move |to: Option<String>| {
         if !dirty.get_untracked() {
-            return close();
+            return close(to);
         }
         ask(
             Ask::new("Leave without saving?")
                 .text("The changes since the last save are lost.")
                 .yes("Leave")
                 .danger(),
-            move |_| close(),
+            move |_| close(to.clone()),
         )
     };
     // A security text's save, revert, undo or import asks for a 2FA code; after it the request goes again.
@@ -640,7 +647,8 @@ pub fn BotMessages(
         let edited = r["message"].is_object() && !locked;
         view! {
             <div class="mbhead">
-                <button class="ghost back" on:click=move |_| back()>"← Default messages"</button>
+                <button class="ghost back" on:click=move |_| back(None)>"← Default messages"</button>
+                {from_tickets.then(|| view! { <button class="ghost back" on:click=move |_| back(Some(format!("/{}/tickets", g.get_value())))>"← Back to Tickets"</button> })}
                 <b class="name">{r["name"].as_str().unwrap_or("").to_string()}</b>
                 <span class="states">{badge(&r)}</span>
                 <span class="sp"></span>

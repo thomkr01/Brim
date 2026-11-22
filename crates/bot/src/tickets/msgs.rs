@@ -86,13 +86,13 @@ pub(crate) fn intro(
 }
 
 /// The greeting or closing message the server set, sent to the member.
-pub(crate) fn notice(s: &Server, closing: bool, text: &str, u: &User) -> Embed {
+pub(crate) fn notice(s: &Server, closing: bool, text: &str, u: &User, kind: &str) -> Embed {
     let key = if closing {
         "ticket.closing"
     } else {
         "ticket.greeting"
     };
-    stamp(s.tpl(key, &[("text", &tags(text, u))])).build()
+    stamp(s.tpl(key, &[("text", &tags(text, u, kind))])).build()
 }
 
 /// The DM telling the member their ticket was closed.

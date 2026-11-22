@@ -1352,7 +1352,7 @@ pub fn schema() -> Vec<Value> {
         ),
         hp(
             ti(dv(fg("Messages", "greeting", "text"), brim_core::sections::DEFAULT_GREETING), "Greeting message"),
-            "Sent to the member when a ticket opens, also in a panel ticket whose panel has no greeting of its own. Empty sends none. Tags: {username} {userid} {usermention}",
+            "Sent to the member when a ticket opens, also in a panel ticket whose panel has no greeting of its own. Empty sends none. Tags: {username} {userid} {usermention} {ticket_type}",
         ),
         ti(dv(fg("Messages", "closing", "text"), ""), "Closing message"),
         ti(fg("Replies", "anonymous", "bool"), "Anonymous replies by default"),
@@ -1386,13 +1386,15 @@ pub fn schema() -> Vec<Value> {
             ),
             "The member picks one when the ticket opens; if they skip it, staff pick at claim. Staff can change it any time, and every change goes to the ticket log. At most 25.",
         ),
+        hp(
+            ti(fg("General", "button_per_type", "bool"), "One button per ticket type"),
+            "On: a panel with no ticket type of its own shows one button for each type above (two types or more), and the member picks the type by pressing it. Off: one button per panel. A type name is the button label, so at most 80 characters. Save, and Brim edits the posted message.",
+        ),
         {
             let mut v = ti(fg("Panels", "panels", "panels"), "Ticket panels");
             // The button card's defaults, so the UI keeps no copy of them.
             // With every default ticket type; the page leaves off one the server removed.
-            v["panel_default"] = brim_core::sections::default_panels(
-                &brim_core::sections::TicketsCfg::default().types,
-            );
+            v["panel_default"] = brim_core::sections::default_panels();
             hp(v,
             "Each panel is a button that opens a private ticket channel for the member and staff. The first one is the button in #open-a-ticket. To post the panels in another channel too, save, then use Publish.",
             )
@@ -1403,7 +1405,7 @@ pub fn schema() -> Vec<Value> {
                 v["cap"] = json!(brim_core::sections::MAX_SNIPPETS);
                 v
             },
-            "Sent with the snippet command in a ticket. Tags: {username} {userid} {usermention}",
+            "Sent with the snippet command in a ticket. Tags: {username} {userid} {usermention} {ticket_type}",
         ),
     ];
     let appeals = vec![

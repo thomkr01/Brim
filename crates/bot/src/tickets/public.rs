@@ -152,24 +152,12 @@ async fn save_id(
         }
         doc["tickets"]["public_channel_id"] = json!(id.map(|i| i.to_string()));
         if default {
-            let types: Vec<String> = match doc["tickets"]["types"].as_array() {
-                Some(t) => t
-                    .iter()
-                    .filter_map(|t| t.as_str().map(String::from))
-                    .collect(),
-                None => TicketsCfg::default().types,
-            };
             let panels = &mut doc["tickets"]["panels"];
             if !panels.is_array() {
                 *panels = json!([]);
             }
             if let Some(p) = panels.as_array_mut().filter(|p| p.is_empty()) {
-                p.extend(
-                    default_panels(&types)
-                        .as_array()
-                        .cloned()
-                        .unwrap_or_default(),
-                );
+                p.extend(default_panels().as_array().cloned().unwrap_or_default());
             }
         }
         Ok(())
@@ -227,7 +215,7 @@ pub async fn ensure(app: &App, gid: Id<GuildMarker>) -> Result<Option<Id<Channel
     let mut ows = overwrites(gid, app.me.get(), &verified, v.enabled, &staff);
     // No panel yet: the default one, which staff edit on the Tickets tab.
     let default = t.panels.is_empty();
-    let fallback: Vec<TicketPanel> = serde_json::from_value(default_panels(&t.types))?;
+    let fallback: Vec<TicketPanel> = serde_json::from_value(default_panels())?;
     let mut panels: Vec<&TicketPanel> = t.panels.iter().filter(|p| p.enabled).collect();
     if default {
         panels.extend(&fallback);
@@ -260,7 +248,15 @@ pub async fn ensure(app: &App, gid: Id<GuildMarker>) -> Result<Option<Id<Channel
                 .permission_overwrites(&ows)
                 .await?;
         }
-        sync_post(app, gid, ch.id, &panels, look.as_ref()).await?;
+        sync_post(
+            app,
+            gid,
+            ch.id,
+            &panels,
+            look.as_ref(),
+            (&t.types, t.button_per_type),
+        )
+        .await?;
         return Ok(None);
     }
     if let Some(old) = t.public_channel_id {
@@ -283,7 +279,15 @@ pub async fn ensure(app: &App, gid: Id<GuildMarker>) -> Result<Option<Id<Channel
     }
     if !panels.is_empty() {
         // A failed post is tried again on the next save (`sync_post`).
-        post(app, gid, ch, &panels, look.as_ref()).await?;
+        post(
+            app,
+            gid,
+            ch,
+            &panels,
+            look.as_ref(),
+            (&t.types, t.button_per_type),
+        )
+        .await?;
     }
     Ok(Some(ch))
 }
@@ -352,8 +356,12 @@ static SENT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<u64,
 
 /// The embed and buttons of the panel message, and the JSON they come from. `look`: the
 /// server's edited `ticket.panel` entry.
-fn body(panels: &[&TicketPanel], look: Option<&Value>) -> Result<(Embed, Vec<Component>, String)> {
-    let m = panel_message(panels, false, look);
+fn body(
+    panels: &[&TicketPanel],
+    look: Option<&Value>,
+    (types, per_type): (&[String], bool),
+) -> Result<(Embed, Vec<Component>, String)> {
+    let m = panel_message(panels, false, look, types, per_type);
     let components: Vec<Component> = serde_json::from_value(m["components"].clone())?;
     let mut e = m["embeds"][0].clone();
     e["type"] = json!("rich");
@@ -370,6 +378,7 @@ async fn sync_post(
     ch: Id<ChannelMarker>,
     panels: &[&TicketPanel],
     look: Option<&Value>,
+    kinds: (&[String], bool),
 ) -> Result<()> {
     let posted: Vec<i64> = sqlx::query_scalar(
         "select message_id from ticket_panel_posts
@@ -400,7 +409,7 @@ async fn sync_post(
         }
         return Ok(());
     }
-    let (embed, components, sent) = body(panels, look)?;
+    let (embed, components, sent) = body(panels, look, kinds)?;
     let ids: Vec<String> = panels.iter().map(|p| p.id.clone()).collect();
     let mut live = false;
     for m in posted {
@@ -440,7 +449,7 @@ async fn sync_post(
     if live {
         return Ok(());
     }
-    post(app, gid, ch, panels, look).await
+    post(app, gid, ch, panels, look, kinds).await
 }
 
 async fn post(
@@ -449,8 +458,9 @@ async fn post(
     ch: Id<ChannelMarker>,
     panels: &[&TicketPanel],
     look: Option<&Value>,
+    kinds: (&[String], bool),
 ) -> Result<()> {
-    let (embed, components, sent) = body(panels, look)?;
+    let (embed, components, sent) = body(panels, look, kinds)?;
     let msg = app
         .http
         .create_message(ch)
@@ -514,17 +524,16 @@ mod tests {
 
     #[test]
     fn the_panel_message_buttons_parse() {
-        let ps: Vec<TicketPanel> =
-            serde_json::from_value(default_panels(&TicketsCfg::default().types)).unwrap();
+        let ps: Vec<TicketPanel> = serde_json::from_value(default_panels()).unwrap();
         let refs: Vec<&TicketPanel> = ps.iter().collect();
-        let m = panel_message(&refs, false, None);
+        let m = panel_message(&refs, false, None, &[], false);
         let c: Vec<Component> = serde_json::from_value(m["components"].clone()).unwrap();
         assert_eq!(c.len(), 1);
         // The default look and an edited one both become a Discord embed.
-        let (e, _, _) = body(&refs, None).unwrap();
+        let (e, _, _) = body(&refs, None, (&[], false)).unwrap();
         assert!(e.footer.is_some() && e.description.is_some());
         let own = json!({"content": "", "embeds": [{"title": "Help desk", "description": "{text}", "color": 1}]});
-        let (e, _, _) = body(&refs, Some(&own)).unwrap();
+        let (e, _, _) = body(&refs, Some(&own), (&[], false)).unwrap();
         assert_eq!(e.title.as_deref(), Some("Help desk"));
     }
 }

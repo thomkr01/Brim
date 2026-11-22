@@ -40,10 +40,10 @@ fn exact(group: &str, log: Log) {
 #[test]
 fn every_d7_log_default_reads_as_the_code_builds_it() {
     let (alex, sam) = (user(6, "alex"), user(5, "sam"));
-    exact("ticket", tickets::new_ticket_log(&alex, None).time());
+    exact("ticket", tickets::new_ticket_log(&alex, None, None).time());
     exact(
         "ticket",
-        tickets::new_ticket_log(&alex, Some("Support")).time(),
+        tickets::new_ticket_log(&alex, Some("Support"), Some("Report")).time(),
     );
     let changes = ["- <@5> claimed it".to_string(), "- type set".into()];
     for (kind, changes) in [(None, &[][..]), (Some("Support"), &changes[..])] {

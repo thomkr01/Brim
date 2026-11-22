@@ -2498,10 +2498,20 @@ fn d7_entries(out: &mut Vec<Def>) {
         ("ticket.new_ticket", "New Ticket", tk),
         "New Ticket",
         GREEN,
-        &[l("User", "{member}"), "{when}".into()],
+        &[
+            l("User", "{member}"),
+            l("Type", "{ticket_type}"),
+            "{when}".into(),
+        ],
         vec![],
         (
-            &["member", "member.username", "member.id", "panel"],
+            &[
+                "member",
+                "member.username",
+                "member.id",
+                "panel",
+                "ticket_type",
+            ],
             &["member"],
             "the member who opened the ticket",
         ),
