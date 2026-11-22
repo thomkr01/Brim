@@ -431,8 +431,12 @@ pub(crate) async fn log_change(
             let log = brim_logging::Log::new("Configuration Changed", brim_logging::embed::BLUE)
                 .text(&text)
                 .time();
+            let embed = crate::discord::framed(&db, guild, "log.config_changes", log).await;
             let posted = match crate::discord::Readers::load(&db, guild, &config).await {
-                Ok(who) => d.post_log(guild, &who, &ch, log).await,
+                Ok(who) => d
+                    .post_embed_with(guild, &who, &ch, embed, json!([]))
+                    .await
+                    .map(drop),
                 Err(e) => Err(e),
             };
             if let Err(e) = posted {

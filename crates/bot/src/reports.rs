@@ -4,7 +4,7 @@ use anyhow::Result;
 use brim_logging::emoji::{Emoji, CLOSE, LINK, PAGE_FIRST, PAGE_LAST, PAGE_NEXT, PAGE_PREV};
 use brim_logging::emoji::{AGE, MEMBER, NO, YES};
 use brim_logging::{
-    embed::{BLUE, HANDLED, ORANGE},
+    embed::{HANDLED, ORANGE},
     Log, LogKind,
 };
 use twilight_model::{
@@ -685,14 +685,10 @@ async fn user_info(
         .public_flags
         .filter(|f| !f.is_empty())
         .map_or("None".into(), |f| format!("{f:?}"));
-    let overview = Log::new(&format!("{} Overview:", user.name), BLUE)
-        .thumbnail(&user)
-        .line("Username", &user.name)
-        .line("Tag", &format!("{}#{:04}", user.name, user.discriminator))
-        .line("ID", &format!("`{}`", user.id))
-        .line("Creation", &format!("<t:{created}:F>"))
-        .line("Badges", &badges)
-        .build();
+    let overview = crate::info::with_avatar(
+        user_overview(app, gid, &user, created, &badges).await,
+        &user,
+    );
     let list: Vec<String> = rows
         .iter()
         .map(|(n, k, active, at)| {
@@ -703,14 +699,19 @@ async fn user_info(
             )
         })
         .collect();
-    let cases = Log::new(&format!("{} Mod Cases ({total}):", user.name), BLUE)
-        .text(&if list.is_empty() {
-            "No cases".into()
-        } else {
-            list.join("\n")
-        })
-        .footer(&format!("Page {}/{pages}", page + 1))
-        .build();
+    let list = if list.is_empty() {
+        crate::reply::say_line(app, gid, "reply.report.no_cases", &[]).await
+    } else {
+        list.join("\n")
+    };
+    let vars = [
+        ("member.username", user.name.clone()),
+        ("case_total", total.to_string()),
+        ("case_list", list),
+        ("page_no", (page + 1).to_string()),
+        ("pages", pages.to_string()),
+    ];
+    let cases = crate::reply::answer(app, gid, "reply.report.user_cases", &vars).await;
     let embeds = [overview, cases];
     let pager = pager(id, page, pages);
     if first {
@@ -728,6 +729,27 @@ async fn user_info(
             .await?;
     }
     Ok(())
+}
+
+/// The User Info overview of a reported member (entry `reply.report.user_overview`).
+async fn user_overview(
+    app: &App,
+    gid: Id<GuildMarker>,
+    user: &twilight_model::user::User,
+    created: u64,
+    badges: &str,
+) -> twilight_model::channel::message::Embed {
+    let vars = [
+        ("member.username", user.name.clone()),
+        (
+            "member.tag",
+            format!("{}#{:04}", user.name, user.discriminator),
+        ),
+        ("member.id", user.id.to_string()),
+        ("member.created_at", format!("<t:{created}:F>")),
+        ("badges", badges.to_string()),
+    ];
+    crate::reply::answer(app, gid, "reply.report.user_overview", &vars).await
 }
 
 fn pager(id: i64, page: i64, pages: i64) -> Component {

@@ -167,6 +167,11 @@ pub(crate) async fn run(
         ))
     };
     let text = |t: &str| Ok((t.to_string(), None));
+    let reply = async |(key, vars): Reply| {
+        let vars: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let said = crate::reply::say(app, gid, key, &vars).await;
+        Ok((said.text, said.embeds.into_iter().next()))
+    };
     let no_permit = async || {
         let said = crate::reply::say(app, gid, "reply.invite.no_permit", &[]).await;
         Ok((said.text, said.embeds.into_iter().next()))
@@ -177,9 +182,7 @@ pub(crate) async fn run(
                 None => invoker,
                 // Another member's counts are as public as the leaderboard.
                 Some(_) if !cfg.misc.invites_public_top && *level == Level::None => {
-                    return text(
-                        "Only members with a permit can see another member's invites here",
-                    );
+                    return reply(("reply.invite.not_public_member", vec![])).await;
                 }
                 Some(a) => match member_arg(app, gid, &a).await? {
                     Ok(id) => id,
@@ -197,7 +200,7 @@ pub(crate) async fn run(
         }
         Sub::Top(page) => {
             if !cfg.misc.invites_public_top && *level == Level::None {
-                return text("Only members with a permit can see the invite leaderboard here");
+                return reply(("reply.invite.not_public_top", vec![])).await;
             }
             let pages = ((store::inviters(&app.pool, g).await? + PER_PAGE - 1) / PER_PAGE).max(1);
             let page = page.min(pages);
@@ -282,18 +285,16 @@ pub(crate) async fn run(
             uses,
         } => {
             if !cfg.misc.invite_tracking || !tracking_ok(app, gid.get()) {
-                return text("Invite tracking is off or not working here, so Brim can't count a link it makes. If it was just turned on, try again in a minute. Staff can check `/invites status`.");
+                return reply(("reply.invite.tracking_off", vec![])).await;
             }
             // A join lock, any lock or an active raid: no new way in.
             if crate::lockdown::join_lock(app, gid).await?.is_some()
                 || crate::lockdown::raid_or_lock(app, gid).await?
             {
-                return text(
-                    "The server is locked or under a raid right now, so no new links are made",
-                );
+                return reply(("reply.invite.locked", vec![])).await;
             }
             let Some(cid) = channel.and_then(Id::new_checked).or(here) else {
-                return text("Name a channel");
+                return reply(("reply.invite.no_channel", vec![])).await;
             };
             // The settings are the server's maximums, and the default.
             let (max_secs, max_uses) = (
@@ -303,9 +304,9 @@ pub(crate) async fn run(
             let secs = secs.unwrap_or(max_secs);
             let uses = uses.unwrap_or(max_uses);
             if let Some(why) = out_of_range(secs, uses, max_secs, max_uses) {
-                return text(&why);
+                return reply(why).await;
             }
-            text(&make(app, gid, invoker, cid, secs, uses, slash).await?)
+            reply(make(app, gid, invoker, cid, secs, uses, slash).await?).await
         }
     }
 }
@@ -361,38 +362,39 @@ fn method(how: &str) -> &'static str {
 }
 
 /// Why a new link is refused for a member with `live` working links whose newest was made at `last_ms`.
-fn capped(live: usize, last_ms: Option<i64>, now: i64) -> Option<String> {
+fn capped(live: usize, last_ms: Option<i64>, now: i64) -> Option<Reply> {
     if live >= MAX_LIVE {
-        return Some(format!(
-            "You already have {MAX_LIVE} working links here. Use one of them, or wait until one expires."
-        ));
+        return Some(("reply.invite.link_cap", vec![("max", MAX_LIVE.to_string())]));
     }
     let next = last_ms? + LINK_GAP_MS;
-    (now < next).then(|| format!("You can make a new link <t:{}:R>", next / 1000))
+    (now < next).then(|| {
+        let next = format!("<t:{}:R>", next / 1000);
+        ("reply.invite.link_gap", vec![("next_link", next)])
+    })
 }
 
 /// Why `secs` or `uses` is refused. A max of 0 allows "never" / "no limit"; any other max is a cap.
-fn out_of_range(secs: i64, uses: i64, max_secs: i64, max_uses: i64) -> Option<String> {
+fn out_of_range(secs: i64, uses: i64, max_secs: i64, max_uses: i64) -> Option<Reply> {
+    let max = |key, n: String| Some((key, vec![("max", n)]));
     let b = limits::INVITE_MAX_AGE.1;
     if max_secs == 0 && !(0..=b).contains(&secs) {
-        return Some(format!(
-            "A link can work for at most {} (or never expire)",
-            embed::duration(b)
-        ));
+        return max("reply.invite.max_age", embed::duration(b));
     }
     if max_secs > 0 && !(1..=max_secs).contains(&secs) {
-        return Some(format!(
-            "Links here work for at most {}",
-            embed::duration(max_secs)
-        ));
+        return max("reply.invite.max_age_here", embed::duration(max_secs));
     }
     let b = limits::INVITE_MAX_USES.1;
     if max_uses == 0 && !(0..=b).contains(&uses) {
-        return Some(format!("Uses must be 0 to {b} (0 = no limit)"));
+        return max("reply.invite.uses_range", b.to_string());
     }
-    (max_uses > 0 && !(1..=max_uses).contains(&uses))
-        .then(|| format!("Links here allow at most {max_uses} uses"))
+    if max_uses > 0 && !(1..=max_uses).contains(&uses) {
+        return max("reply.invite.max_uses_here", max_uses.to_string());
+    }
+    None
 }
+
+/// A reply entry and its values.
+type Reply = (&'static str, Vec<(&'static str, String)>);
 
 /// Discord's effective permissions in a channel include VIEW_CHANNEL and CREATE_INVITE.
 fn can_invite(
@@ -433,11 +435,12 @@ async fn make(
     secs: i64,
     uses: i64,
     slash: bool,
-) -> Result<String> {
+) -> Result<Reply> {
+    let plain = |key| Ok((key, vec![]));
     // The caps only need the database, so they come before any Discord call.
     let key = (gid.get(), invoker.get());
     if !app.invite_claims.lock().unwrap().insert(key) {
-        return Ok("Your last link is still being made".into());
+        return plain("reply.invite.busy");
     }
     let _claim = Claim(app, key);
     let g = gid.get() as i64;
@@ -448,11 +451,11 @@ async fn make(
         return Ok(why);
     }
     if store::recent_links(&app.pool, g).await? >= GUILD_PER_MINUTE {
-        return Ok("Many links were made here in the last minute. Try again soon.".into());
+        return plain("reply.invite.server_busy");
     }
     let ch = match app.http.channel(cid).await {
         Ok(r) => r.model().await?,
-        Err(e) if crate::http_err::no_access(&e) => return Ok("I can't see that channel".into()),
+        Err(e) if crate::http_err::no_access(&e) => return plain("reply.invite.cannot_see"),
         Err(e) => return Err(e.into()),
     };
     let kinds = [
@@ -461,7 +464,7 @@ async fn make(
         ChannelType::GuildVoice,
     ];
     if ch.guild_id != Some(gid) || !kinds.contains(&ch.kind) {
-        return Ok("Pick a text or voice channel of this server".into());
+        return plain("reply.invite.wrong_channel");
     }
     let info = app.guild_info(gid).await?;
     // Read fresh, not from the cached GuildInfo: a role that just lost Create Invite must count.
@@ -476,7 +479,7 @@ async fn make(
         .collect();
     let ows = ch.permission_overwrites.as_deref().unwrap_or_default();
     let Some(m) = crate::http_err::member(&app.http, gid, invoker).await? else {
-        return Ok("You are not in this server".into());
+        return plain("reply.invite.not_member");
     };
     // A timed-out member keeps only View Channel and Read Message History.
     let timed_out = m
@@ -493,17 +496,15 @@ async fn make(
             ows,
         )
     {
-        return Ok(format!(
-            "You need View Channel and Create Invite in <#{cid}> to make a link there"
-        ));
+        let channel = format!("<#{cid}>");
+        return Ok(("reply.invite.member_perms", vec![("channel", channel)]));
     }
     let me = crate::http_err::member(&app.http, gid, app.me).await?;
     let bot_ok = me
         .is_some_and(|b| can_invite(gid, app.me, info.owner, &role_perms, &b.roles, ch.kind, ows));
     if !bot_ok {
-        return Ok(format!(
-            "Brim needs View Channel and Create Invite in <#{cid}>"
-        ));
+        let channel = format!("<#{cid}>");
+        return Ok(("reply.invite.bot_perms", vec![("channel", channel)]));
     }
     // Only these four fields: no roles, targets or temporary membership.
     let made = app
@@ -519,10 +520,8 @@ async fn make(
         Ok(r) => r.model().await?.code,
         Err(e) => {
             let e = anyhow::Error::from(e);
-            return Ok(format!(
-                "Discord refused the link: {}",
-                crate::http_err::why(&e)
-            ));
+            let error = crate::http_err::why(&e);
+            return Ok(("reply.invite.refused", vec![("error", error)]));
         }
     };
     let expires = (secs > 0).then(|| now_ms() + secs * 1000);
@@ -539,19 +538,7 @@ async fn make(
     if let Err(e) = saved {
         tracing::warn!(?e, guild = gid.get(), "invite link not saved, removing it");
         revoke(app, &code).await;
-        return Ok("Saving the link failed, so it was removed. Try again later.".into());
-    }
-    let link =
-        format!(
-        "Your invite link: https://discord.gg/{code}\nIt {}, {}. Joins through it count for you.",
-        expires.map_or("never expires".into(), |ms| format!("expires <t:{}:R>", ms / 1000)),
-        match uses {
-            0 => "with no use limit".to_string(),
-            n => format!("for {n} uses"),
-        }
-    );
-    if slash {
-        return Ok(link);
+        return plain("reply.invite.not_saved");
     }
     let when = expires.map_or("never expires".into(), |ms| {
         format!("expires <t:{}:R>", ms / 1000)
@@ -560,6 +547,10 @@ async fn make(
         0 => "with no use limit".to_string(),
         n => format!("for {n} uses"),
     };
+    if slash {
+        let vars = vec![("code", code), ("expiry", when), ("uses", uses_s)];
+        return Ok(("reply.invite.link", vars));
+    }
     let vars = [
         ("code", code.as_str()),
         ("expiry", when.as_str()),
@@ -570,14 +561,14 @@ async fn make(
         format!("https://discord.gg/{code}"),
     ))];
     if crate::reply::dm_msg(app, Some(gid), invoker, "dm.invite_link", &vars, &rows).await {
-        return Ok("I sent you the link by DM".into());
+        return plain("reply.invite.dm_sent");
     }
     // Nobody got the link: remove it. The row stays as gone, so the 15 minute gap still holds.
     revoke(app, &code).await;
     if let Err(e) = store::links_gone(&app.pool, g, Some(&code), &[], now_ms()).await {
         tracing::warn!(?e, guild = gid.get(), "unsent invite link not marked gone");
     }
-    Ok("I couldn't DM you the link, so I removed it. Use `/invites create` instead.".into())
+    plain("reply.invite.dm_failed")
 }
 
 /// Deletes the working `/invites create` links of a member who was banned or quarantined
@@ -699,11 +690,20 @@ mod tests {
         assert!(notes(true, &ok, 4)[0].starts_with("4 joins in the last 7 days"));
     }
 
+    /// The default text of a reply.
+    fn said((key, vars): Reply) -> String {
+        let vars: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        crate::reply::said_from(key, None, &vars).text
+    }
+
     #[test]
     fn caps_and_ranges() {
         let now = 10 * LINK_GAP_MS;
         assert!(capped(0, None, now).is_none());
-        assert!(capped(3, None, now).unwrap().contains("3 working links"));
+        assert_eq!(
+            said(capped(3, None, now).unwrap()),
+            "You already have 3 working links here. Use one of them, or wait until one expires."
+        );
         assert!(capped(2, Some(now - LINK_GAP_MS + 1), now).is_some());
         assert!(capped(2, Some(now - LINK_GAP_MS), now).is_none());
         // Max 0: never / no limit allowed, Discord's ranges hold.
@@ -962,9 +962,11 @@ mod tests {
         let make = |u: u64, c: u64, slash: bool| {
             let app = &t.app;
             async move {
-                make(app, gid, Id::new(u), Id::new(c), 3600, 5, slash)
-                    .await
-                    .unwrap()
+                said(
+                    make(app, gid, Id::new(u), Id::new(c), 3600, 5, slash)
+                        .await
+                        .unwrap(),
+                )
             }
         };
         assert!(make(member, here, true)

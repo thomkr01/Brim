@@ -400,3 +400,91 @@ fn an_edited_member_info_keeps_its_values_and_the_avatar() {
     assert!(e.fields.is_empty(), "an empty field goes");
     assert_eq!(e.thumbnail.map(|t| t.url), Some(embed::avatar(&u)));
 }
+
+/// The help, dashboard, invite and config answers and the report User Info answer.
+#[test]
+fn general_and_report_answers_default_read_as_the_code_built_them() {
+    use brim_logging::emoji::{HELP, OFF, ON, PERSISTENCE};
+    let pfx = "t!";
+    let help = Log::new("Brim's Help Panel:", BLUE)
+        .text(&format!("{HELP} **General Help:**"))
+        .text(&format!("{ARROW} To view the commands you can use, do: `{pfx}commands`"))
+        .text(&format!("{ARROW} To see how one command works, do: `{pfx}COMMAND -h`"))
+        .text(&format!("{ARROW} Every command explained: https://d.example/#/commands"))
+        .text(&format!("{ARROW} To set things up, use the setup wizard on the dashboard. Settings panels: `{pfx}heat`, `{pfx}an`, `{pfx}jg`..."))
+        .text(&format!("{ARROW} Quick Troubleshooting: `{pfx}tshoot`"));
+    let vars = v(&[
+        ("prefix", pfx),
+        ("commands_page", "https://d.example/#/commands"),
+    ]);
+    same("reply.help.panel", &vars, help);
+    same(
+        "reply.help.dashboard",
+        &v(&[]),
+        Log::new("Brim Dashboard", BLUE).text(&format!(
+            "{ARROW} Set up and manage Brim for this server in the dashboard."
+        )),
+    );
+    same(
+        "reply.help.invite",
+        &v(&[]),
+        Log::new("Invite Brim!", BLUE).text("Thank you for your interest in using Brim, get ready to maximize the security for your server and have the best moderation tools at your service!"),
+    );
+    let on = ON.to_string();
+    let off = OFF.to_string();
+    let mut config = Log::new("S's Config Overview", BLUE)
+        .section("Essential Roles")
+        .text(&format!("{QUARANTINED} **Quarantine Role:** <@&5>"))
+        .section("Major Systems");
+    for (icon, name, sign) in [
+        (ANTI_NUKE, "Anti Nuke", &on),
+        (HEAT, "Heat System", &off),
+        (VERIFICATION, "Verification", &on),
+        (JOIN_GATE, "Join Gate", &off),
+        (JOIN_RAID, "Join Raid", &on),
+        (PERSISTENCE, "Persistence", &off),
+    ] {
+        config = config.text(&format!("{icon} **{name}:** {sign}"));
+    }
+    let vars = v(&[
+        ("server.name", "S"),
+        ("quarantine_role", "<@&5>"),
+        ("anti_nuke_on", &on),
+        ("heat_on", &off),
+        ("verification_on", &on),
+        ("join_gate_on", &off),
+        ("join_raid_on", &on),
+        ("persistence_on", &off),
+    ]);
+    same("reply.config.overview", &vars, config);
+
+    let u = user();
+    let overview = Log::new("alex Overview:", BLUE)
+        .thumbnail(&u)
+        .line("Username", "alex")
+        .line("Tag", "alex#0000")
+        .line("ID", "`123456789012345678`")
+        .line("Creation", "<t:1600000000:F>")
+        .line("Badges", "None");
+    let vars = v(&[
+        ("member.username", "alex"),
+        ("member.tag", "alex#0000"),
+        ("member.id", "123456789012345678"),
+        ("member.created_at", "<t:1600000000:F>"),
+        ("badges", "None"),
+    ]);
+    let got = with_avatar(answer_from("reply.report.user_overview", None, &vars), &u);
+    assert_eq!(json_of(&got), json_of(&overview.build()));
+    let cases = Log::new("alex Mod Cases (2):", BLUE)
+        .text(&format!("{YES} 2 [+BAN] <t:1:R>\n{NO} 1 [+WARN] <t:0:R>"))
+        .footer("Page 1/1");
+    let list = format!("{YES} 2 [+BAN] <t:1:R>\n{NO} 1 [+WARN] <t:0:R>");
+    let vars = v(&[
+        ("member.username", "alex"),
+        ("case_total", "2"),
+        ("case_list", &list),
+        ("page_no", "1"),
+        ("pages", "1"),
+    ]);
+    same("reply.report.user_cases", &vars, cases);
+}

@@ -1,9 +1,6 @@
 //! General commands: about, commands, help (and `-h` after any command), invite, ping, info,
 //! ncases, tshoot and invites.
-use brim_logging::emoji::{
-    ANTI_NUKE, CHEVRON, HEAT, HELP, JOIN_GATE, JOIN_RAID, OFF, ON, PERSISTENCE, QUARANTINED,
-    VERIFICATION,
-};
+use brim_logging::emoji::{CHEVRON, OFF, ON};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -1289,8 +1286,10 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             .await?;
         } else if !(level == Level::None && cfg.misc.ignore_no_permit) {
             // Only commands the member can use are explained, the same as `commands` lists.
-            let text = format!("{NO} You don't have access to `{pfx}{}`. Do `{pfx}commands` to see what you can use.", c.0);
-            send(app, msg, &text, None, vec![]).await?;
+            let command = format!("{pfx}{}", c.0);
+            let vars = [("command", command.as_str()), ("prefix", pfx.as_str())];
+            let said = crate::reply::say(app, gid, "reply.help.no_access", &vars).await;
+            send(app, msg, &said.text, said.embeds.into_iter().next(), vec![]).await?;
         }
         return Ok(true);
     }
@@ -1488,6 +1487,10 @@ async fn answer(
     let arg = words.get(1).copied();
     let text = |t: &str| Ok((t.to_string(), None, vec![]));
     let embed = |e| Ok((String::new(), Some(e), vec![]));
+    let say = async |key: &str| {
+        let said = crate::reply::say(app, gid, key, &[]).await;
+        Ok((said.text, said.embeds.into_iter().next(), vec![]))
+    };
     match name {
         "about" => {
             let (e, pages) = about_page(app, gid, 0).await;
@@ -1503,45 +1506,27 @@ async fn answer(
             ))
         }
         "help" => {
-            let mut e = Log::new("Brim's Help Panel:", BLUE)
-                .text(&format!("{HELP} **General Help:**"))
-                .text(&format!(
-                    "{ARROW} To view the commands you can use, do: `{pfx}commands`"
-                ))
-                .text(&format!(
-                    "{ARROW} To see how one command works, do: `{pfx}COMMAND -h`"
-                ));
-            if let Some(d) = dashboard() {
-                e = e.text(&format!(
-                    "{ARROW} Every command explained: {}/#/commands",
-                    d.trim_end_matches('/')
-                ));
-            }
-            let e = e
-                .text(&format!("{ARROW} To set things up, use the setup wizard on the dashboard. Settings panels: `{pfx}heat`, `{pfx}an`, `{pfx}jg`..."))
-                .text(&format!("{ARROW} Quick Troubleshooting: `{pfx}tshoot`"))
-                .build();
+            // Without a dashboard the commands command is the place where commands are explained.
+            let page = dashboard().map_or(format!("`{pfx}commands`"), |d| {
+                format!("{}/#/commands", d.trim_end_matches('/'))
+            });
+            let vars = [("prefix", pfx.clone()), ("commands_page", page)];
+            let e = crate::reply::answer(app, gid, "reply.help.panel", &vars).await;
             Ok((String::new(), Some(e), links(app)))
         }
         "dashboard" => match dashboard() {
             Some(d) => {
-                let e = Log::new("Brim Dashboard", BLUE)
-                    .text(&format!(
-                        "{ARROW} Set up and manage Brim for this server in the dashboard."
-                    ))
-                    .build();
+                let e = crate::reply::answer(app, gid, "reply.help.dashboard", &[]).await;
                 Ok((
                     String::new(),
                     Some(e),
                     link_row(vec![welcome::link("Dashboard", d)]),
                 ))
             }
-            None => Ok(("This Brim has no dashboard.".into(), None, vec![])),
+            None => say("reply.help.no_dashboard").await,
         },
         "invite" => {
-            let e = Log::new("Invite Brim!", BLUE)
-                .text("Thank you for your interest in using Brim, get ready to maximize the security for your server and have the best moderation tools at your service!")
-                .build();
+            let e = crate::reply::answer(app, gid, "reply.help.invite", &[]).await;
             Ok((String::new(), Some(e), links(app)))
         }
         "ping" => {
@@ -1588,30 +1573,21 @@ async fn answer(
                 .antinuke
                 .quarantine_role
                 .map_or(NO.to_string(), |r| embed::role(r.get()));
-            let systems = [
-                (ANTI_NUKE, "Anti Nuke", cfg.antinuke.enabled),
-                (HEAT, "Heat System", cfg.automod.enabled),
-                (VERIFICATION, "Verification", cfg.verification.enabled),
-                (JOIN_GATE, "Join Gate", cfg.joingate.enabled),
+            let sign = |on: bool| if on { ON } else { OFF }.to_string();
+            let vars = [
+                ("server.name", g.name),
+                ("quarantine_role", role),
+                ("anti_nuke_on", sign(cfg.antinuke.enabled)),
+                ("heat_on", sign(cfg.automod.enabled)),
+                ("verification_on", sign(cfg.verification.enabled)),
+                ("join_gate_on", sign(cfg.joingate.enabled)),
                 (
-                    JOIN_RAID,
-                    "Join Raid",
-                    cfg.joinraid.as_ref().is_some_and(|r| r.enabled),
+                    "join_raid_on",
+                    sign(cfg.joinraid.as_ref().is_some_and(|r| r.enabled)),
                 ),
-                (
-                    PERSISTENCE,
-                    "Persistence",
-                    cfg.misc.enforce_quarantine_perms,
-                ),
+                ("persistence_on", sign(cfg.misc.enforce_quarantine_perms)),
             ];
-            let mut log = Log::new(&format!("{}'s Config Overview", g.name), BLUE)
-                .section("Essential Roles")
-                .text(&format!("{QUARANTINED} **Quarantine Role:** {role}"))
-                .section("Major Systems");
-            for (icon, name, on) in systems {
-                log = log.text(&format!("{icon} **{name}:** {}", if on { ON } else { OFF }));
-            }
-            embed(log.build())
+            embed(crate::reply::answer(app, gid, "reply.config.overview", &vars).await)
         }
         "serverinfo" => server_info(app, gid, invoker).await,
         "security" => embed(crate::info::security_page(app, gid).await?),
@@ -1652,7 +1628,7 @@ async fn answer(
             };
             match e {
                 Some(e) => embed(e),
-                None => text("Nothing found"),
+                None => say("reply.info.nothing_found").await,
             }
         }
         "ncases" => embed(ncases(app, gid, arg).await?),
@@ -1666,7 +1642,7 @@ async fn answer(
             if allowed(level, "owner") {
                 embed(tshoot_lockdown(app, gid).await?)
             } else {
-                text("Only the owner or an Extra Owner can run this")
+                say("reply.tshoot.owner_only").await
             }
         }
         _ => embed(tshoot(app, gid)),

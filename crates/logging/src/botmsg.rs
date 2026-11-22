@@ -1298,6 +1298,25 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "✅ Spam Whitelist\n❌ Ping Whitelist",
     ),
     ("prefix", "The server's command prefix", "t!"),
+    (
+        "commands_page",
+        "Where every command is explained: the dashboard's commands page, or the commands command",
+        "https://example.com/#/commands",
+    ),
+    ("quarantine_role", "The quarantine role, or ❌", "@Quarantined"),
+    ("anti_nuke_on", "Anti Nuke on or off", "🟢"),
+    ("heat_on", "Heat System on or off", "🟢"),
+    ("verification_on", "Verification on or off", "🔴"),
+    ("join_gate_on", "Join Gate on or off", "🟢"),
+    ("join_raid_on", "Join Raid on or off", "🟢"),
+    ("persistence_on", "Persistence on or off", "🔴"),
+    ("member.tag", "Member's name with the old #tag", "alex#0000"),
+    ("case_total", "How many cases the member has", "3"),
+    (
+        "case_list",
+        "The member's cases on this page, one per line",
+        "✅ 12 [+BAN] <t:1700000000:R>",
+    ),
     ("tries", "How many tries or changes failed", "5"),
     ("backup", "Backup ID", "a1b2c3"),
     (
@@ -3060,6 +3079,12 @@ pub const ANSWERS: &[&str] = &[
     "reply.invite.who",
     "reply.invite.who_unseen",
     "reply.invite.status",
+    "reply.help.panel",
+    "reply.help.dashboard",
+    "reply.help.invite",
+    "reply.config.overview",
+    "reply.report.user_overview",
+    "reply.report.user_cases",
 ];
 
 /// A [`FACT_VARS`] name; a name that is not there is a mistake in a template.
@@ -4306,6 +4331,172 @@ fn answer_entries(out: &mut Vec<Def>) {
             what: "whether invite tracking works",
         },
     );
+    general_answers(out);
+}
+
+/// The help, dashboard, invite and config answers, the report User Info answer and the short
+/// replies of the general and invites commands. `{prefix}` is the server's command prefix.
+fn general_answers(out: &mut Vec<Def>) {
+    use crate::emoji::{
+        ANTI_NUKE, ARROW, HEAT, HELP, JOIN_GATE, JOIN_RAID, PERSISTENCE, QUARANTINED, VERIFICATION,
+    };
+    let l = |label: &str, value: &str| fact_line(label, value);
+    let none = Vec::new;
+    let simple = |key, name, title: &str, lines: Vec<String>, required, what| D6 {
+        key,
+        name,
+        title: title.into(),
+        color: BLUE,
+        lines,
+        fields: none(),
+        footer: String::new(),
+        required,
+        what,
+    };
+    d6(out, simple(
+        "reply.help.panel",
+        "Answer: help panel",
+        "Brim's Help Panel:",
+        vec![
+            format!("{HELP} **General Help:**"),
+            format!("{ARROW} To view the commands you can use, do: `{{prefix}}commands`"),
+            format!("{ARROW} To see how one command works, do: `{{prefix}}COMMAND -h`"),
+            format!("{ARROW} Every command explained: {{commands_page}}"),
+            format!("{ARROW} To set things up, use the setup wizard on the dashboard. Settings panels: `{{prefix}}heat`, `{{prefix}}an`, `{{prefix}}jg`..."),
+            format!("{ARROW} Quick Troubleshooting: `{{prefix}}tshoot`"),
+        ],
+        &[],
+        "",
+    ));
+    d6(
+        out,
+        simple(
+            "reply.help.dashboard",
+            "Answer: dashboard link",
+            "Brim Dashboard",
+            vec![format!(
+                "{ARROW} Set up and manage Brim for this server in the dashboard."
+            )],
+            &[],
+            "",
+        ),
+    );
+    d6(out, simple(
+        "reply.help.invite",
+        "Answer: invite Brim",
+        "Invite Brim!",
+        vec!["Thank you for your interest in using Brim, get ready to maximize the security for your server and have the best moderation tools at your service!".into()],
+        &[],
+        "",
+    ));
+    d6(
+        out,
+        simple(
+            "reply.config.overview",
+            "Answer: config overview",
+            "{server.name}'s Config Overview",
+            vec![
+                "**Essential Roles**".into(),
+                format!("{QUARANTINED} **Quarantine Role:** {{quarantine_role}}"),
+                "**Major Systems**".into(),
+                format!("{ANTI_NUKE} **Anti Nuke:** {{anti_nuke_on}}"),
+                format!("{HEAT} **Heat System:** {{heat_on}}"),
+                format!("{VERIFICATION} **Verification:** {{verification_on}}"),
+                format!("{JOIN_GATE} **Join Gate:** {{join_gate_on}}"),
+                format!("{JOIN_RAID} **Join Raid:** {{join_raid_on}}"),
+                format!("{PERSISTENCE} **Persistence:** {{persistence_on}}"),
+            ],
+            &[
+                "quarantine_role",
+                "anti_nuke_on",
+                "heat_on",
+                "verification_on",
+                "join_gate_on",
+                "join_raid_on",
+                "persistence_on",
+            ],
+            "the quarantine role and the on/off sign of each system",
+        ),
+    );
+    // The report's User Info button: two embeds, one entry each.
+    d6(
+        out,
+        simple(
+            "reply.report.user_overview",
+            "Answer: reported member overview",
+            "{member.username} Overview:",
+            vec![
+                l("Username", "{member.username}"),
+                l("Tag", "{member.tag}"),
+                l("ID", "`{member.id}`"),
+                l("Creation", "{member.created_at}"),
+                l("Badges", "{badges}"),
+            ],
+            &["member.id"],
+            "the member's ID",
+        ),
+    );
+    d6(
+        out,
+        D6 {
+            footer: "Page {page_no}/{pages}".into(),
+            ..simple(
+                "reply.report.user_cases",
+                "Answer: reported member cases",
+                "{member.username} Mod Cases ({case_total}):",
+                vec!["{case_list}".into()],
+                &["case_list"],
+                "the member's cases on this page",
+            )
+        },
+    );
+    for d in out.iter_mut().rev().take(2) {
+        d.group = "Reports";
+    }
+    let g = "General commands";
+    let rows: &[(&str, &str, &[&'static str], &str)] = &[
+        ("reply.help.no_dashboard", "no dashboard", &[], "This Brim has no dashboard."),
+        ("reply.info.nothing_found", "info: nothing found", &[], "Nothing found"),
+        ("reply.tshoot.owner_only", "lockdown check is for Owner and EO", &[], "Only the owner or an Extra Owner can run this"),
+        ("reply.report.no_cases", "reported member has no cases", &[], "No cases"),
+        ("reply.invite.not_public_member", "invites of another member are not public", &[], "Only members with a permit can see another member's invites here"),
+        ("reply.invite.not_public_top", "invite leaderboard is not public", &[], "Only members with a permit can see the invite leaderboard here"),
+        ("reply.invite.tracking_off", "invite tracking off", &[], "Invite tracking is off or not working here, so Brim can't count a link it makes. If it was just turned on, try again in a minute. Staff can check `/invites status`."),
+        ("reply.invite.locked", "no links during a lock or raid", &[], "The server is locked or under a raid right now, so no new links are made"),
+        ("reply.invite.no_channel", "invite link: no channel", &[], "Name a channel"),
+        ("reply.invite.max_age", "invite link: too long", &["max"], "A link can work for at most {max} (or never expire)"),
+        ("reply.invite.max_age_here", "invite link: longer than this server allows", &["max"], "Links here work for at most {max}"),
+        ("reply.invite.uses_range", "invite link: uses out of range", &["max"], "Uses must be 0 to {max} (0 = no limit)"),
+        ("reply.invite.max_uses_here", "invite link: more uses than this server allows", &["max"], "Links here allow at most {max} uses"),
+        ("reply.invite.busy", "invite link: last one still being made", &[], "Your last link is still being made"),
+        ("reply.invite.link_cap", "invite link: too many working links", &["max"], "You already have {max} working links here. Use one of them, or wait until one expires."),
+        ("reply.invite.link_gap", "invite link: wait for the next one", &["next_link"], "You can make a new link {next_link}"),
+        ("reply.invite.server_busy", "invite link: many links this minute", &[], "Many links were made here in the last minute. Try again soon."),
+        ("reply.invite.cannot_see", "invite link: channel not visible", &[], "I can't see that channel"),
+        ("reply.invite.wrong_channel", "invite link: wrong channel", &[], "Pick a text or voice channel of this server"),
+        ("reply.invite.not_member", "invite link: not in the server", &[], "You are not in this server"),
+        ("reply.invite.member_perms", "invite link: member lacks Discord permissions", &["channel"], "You need View Channel and Create Invite in {channel} to make a link there"),
+        ("reply.invite.bot_perms", "invite link: Brim lacks Discord permissions", &["channel"], "Brim needs View Channel and Create Invite in {channel}"),
+        ("reply.invite.refused", "invite link: Discord refused", &["error"], "Discord refused the link: {error}"),
+        ("reply.invite.not_saved", "invite link: not saved", &[], "Saving the link failed, so it was removed. Try again later."),
+        ("reply.invite.link", "invite link: the link", &["code", "expiry", "uses"], "Your invite link: https://discord.gg/{code}\nIt {expiry}, {uses}. Joins through it count for you."),
+        ("reply.invite.dm_sent", "invite link: sent by DM", &[], "I sent you the link by DM"),
+        ("reply.invite.dm_failed", "invite link: DM failed", &[], "I couldn't DM you the link, so I removed it. Use `/invites create` instead."),
+    ];
+    let no_access = format!(
+        "{} You don't have access to `{{command}}`. Do `{{prefix}}commands` to see what you can use.",
+        crate::emoji::NO
+    );
+    out.push(say(
+        "reply.help.no_access",
+        "Reply: help for a command you cannot use",
+        g,
+        &["command", "prefix"],
+        &no_access,
+    ));
+    for (key, name, vars, text) in rows {
+        out.push(say(key, &format!("Reply: {name}"), g, vars, text));
+    }
 }
 
 /// The group of the security texts (plan section 6).
@@ -5614,6 +5805,15 @@ fn logs(out: &mut Vec<Def>) {
             out.push(d);
         }
     }
+    // The dashboard's Configuration Changed log has no `LogKind`: one frame of its own.
+    out.push(def(
+        "log.config_changes",
+        "Configuration Changed",
+        "Server logs",
+        false,
+        &["title", "text"],
+        json!({"content": "", "embeds": [{"title": "{title}", "description": "{text}"}]}),
+    ));
 }
 
 /// Every command (the bot's `CMDS` by category; a bot test keeps the two equal): each reply of it
@@ -5932,6 +6132,12 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     ("code", "Invite code", "AbCd123"),
     ("expiry", "Invite expiry", "expires in 7 days"),
     ("uses", "Invite uses", "for 5 uses"),
+    ("max", "Highest allowed value", "7 days"),
+    (
+        "next_link",
+        "When the next link can be made",
+        "in 10 minutes",
+    ),
     (
         "why",
         "Automod reason (with \": \", empty when hidden)",
