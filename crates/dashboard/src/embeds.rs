@@ -1481,8 +1481,11 @@ pub(crate) fn bot_channel(config: &Value, channel: i64, up: &[i64]) -> bool {
         .chain(id(&config["tickets"]["log_channel"]))
         .chain(id(&config["verification"]["channel"]))
         .collect();
-    let category = id(&config["tickets"]["category"]);
-    ours.contains(&channel) || up.iter().any(|p| ours.contains(p) || Some(*p) == category)
+    let tickets = crate::tickets::categories(config);
+    ours.contains(&channel)
+        || up
+            .iter()
+            .any(|p| ours.contains(p) || tickets.contains(&p.to_string().as_str()))
 }
 
 /// The parent of a channel (Discord's channel object) and, for a thread, the parent's parent.

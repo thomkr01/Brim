@@ -298,6 +298,24 @@ async fn gate(
     Ok(None)
 }
 
+/// Discord holds at most 50 channels in one category.
+const CATEGORY_MAX: usize = 50;
+
+/// Every ticket category is full: the owner hears once a day.
+async fn categories_full(app: &App, gid: Id<GuildMarker>) {
+    static LAST: std::sync::Mutex<std::collections::BTreeMap<u64, i64>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    if crate::reply::alert_due(
+        &mut LAST.lock().unwrap(),
+        gid.get(),
+        crate::app::now_secs(),
+        86_400,
+    ) {
+        let text = "Members cannot open tickets: the ticket categories are full (Discord allows 50 channels in one category). Close old tickets, or set a new category for the panel on the Tickets page.";
+        crate::reply::dm_owner(app, gid, "dm.owner_alert", text).await;
+    }
+}
+
 /// Opens a panel ticket: the same refusals as a DM ticket, then a private channel for the member
 /// and staff. `Err(text)` tells the member why not.
 #[allow(clippy::too_many_arguments)]
@@ -318,15 +336,28 @@ async fn open(
     if dm::filtered(app, cfg, &answers.join("\n")) && !dm::bypasses(app, gid, user.id).await {
         return Ok(Err("reply.ticket.answers_filtered"));
     }
-    let category = match p.category {
-        Some(c) if category_live(app, gid, c).await? => c,
-        // A deleted panel category must not stop every ticket: use the ticket category.
-        gone => match ensure_category(app, gid).await? {
-            Some(c) => {
-                if let Some(old) = gone {
-                    tracing::warn!(%gid, panel = %p.id, %old, "panel category is gone, ticket made in the ticket category");
-                }
-                c
+    // A deleted or full panel category must not stop every ticket: use the ticket category.
+    let own = match p.category {
+        Some(c) if category_live(app, gid, c).await? => Some(c),
+        gone => {
+            if let Some(old) = gone {
+                tracing::warn!(%gid, panel = %p.id, %old, "panel category is gone, ticket made in the ticket category");
+            }
+            None
+        }
+    };
+    let info = app.guild_info(gid).await?;
+    // shortcut: the cached count can lag a ticket made a moment ago; that create then fails as before.
+    let full = |c: Id<ChannelMarker>| {
+        info.parents.values().filter(|&&parent| parent == c).count() >= CATEGORY_MAX
+    };
+    let category = match own.filter(|&c| !full(c)) {
+        Some(c) => c,
+        None => match ensure_category(app, gid).await? {
+            Some(c) if !full(c) => c,
+            Some(_) => {
+                categories_full(app, gid).await;
+                return Ok(Err("reply.ticket.categories_full"));
             }
             None => return Ok(Err("reply.ticket.not_taking")),
         },

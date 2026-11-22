@@ -1370,7 +1370,7 @@ pub(crate) async fn overview_check(
 }
 
 /// The feature that owns channel `id` and keeps its permissions fixed (plan 3.2a): log channels,
-/// the appeal, verification and catch channels, and the channels in the ticket category.
+/// the appeal, verification and catch channels, and the channels in a ticket category.
 fn fixed_by(config: &Value, id: &str, parent: Option<&str>) -> Option<&'static str> {
     let is = |v: &Value| v.as_str() == Some(id);
     let logs = serde_json::from_value::<brim_logging::LogConfig>(config["logging"].clone())
@@ -1385,7 +1385,7 @@ fn fixed_by(config: &Value, id: &str, parent: Option<&str>) -> Option<&'static s
         Some("Appeals")
     } else if is(&config["catch"]["channel"]) {
         Some("Catch")
-    } else if parent.is_some() && config["tickets"]["category"].as_str() == parent {
+    } else if parent.is_some_and(|p| crate::tickets::categories(config).contains(&p)) {
         Some("Tickets")
     } else {
         None
@@ -1772,8 +1772,7 @@ async fn create_locked(
         let (w, l) = world_live(st, guild).await?;
         let base = crate::layout::base(st, guild).await?;
         if let Some(p) = parent.as_deref().and_then(|p| p.parse::<u64>().ok()) {
-            let ours = Some(p.to_string())
-                == w.config["tickets"]["category"].as_str().map(String::from)
+            let ours = crate::tickets::categories(&w.config).contains(&p.to_string().as_str())
                 || w.channels.iter().any(|c| {
                     c.parent == Some(p) && crate::embeds::bot_channel(&w.config, c.id as i64, &[])
                 });
@@ -2362,11 +2361,13 @@ pub(crate) mod tests {
 
     #[test]
     fn feature_channels_are_fixed() {
-        let cfg = json!({"verification": {"channel": "13"}, "tickets": {"category": "20"}, "catch": {"channel": "9"}});
+        let cfg = json!({"verification": {"channel": "13"}, "tickets": {"category": "20", "panels": [{"category": "21"}, {"category": null}]}, "catch": {"channel": "9"}});
         assert_eq!(fixed_by(&cfg, "13", None), Some("Verification"));
         assert_eq!(fixed_by(&cfg, "11", Some("20")), Some("Tickets"));
         assert_eq!(fixed_by(&cfg, "9", None), Some("Catch"));
         assert_eq!(fixed_by(&cfg, "11", Some("10")), None);
+        // A panel's own category holds ticket channels too.
+        assert_eq!(fixed_by(&cfg, "11", Some("21")), Some("Tickets"));
     }
 
     #[test]

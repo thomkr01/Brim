@@ -132,6 +132,7 @@ const TICKET_REPLIES: &[(&str, &str, &[&str], bool, &str)] = &[
     ("not_taking", "server takes no tickets (panel button)", &[], true, "This server does not take tickets right now."),
     ("panel_cap", "too many open tickets of this kind", &[], true, "You already have as many open tickets of this kind as you may. Find them in the server's ticket channels."),
     ("channel_failed_panel", "ticket channel could not be made (panel button)", &[], true, "Brim could not make your ticket channel. Please contact an admin of the server."),
+    ("categories_full", "ticket categories are full (panel button)", &[], true, "This server cannot take new tickets right now: its ticket categories are full. Please tell an admin of the server."),
     ("open_failed_panel", "ticket could not be opened (panel button)", &[], true, "Your ticket could not be opened. Please try again."),
     ("error_generic", "something went wrong opening a ticket", &[], true, "Something went wrong, and no ticket was opened. Please try again later."),
     ("opened", "your ticket is open", &["channel"], false, "Your ticket is open: {channel}"),

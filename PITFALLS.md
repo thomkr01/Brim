@@ -137,6 +137,9 @@ A nuker could name spam channels `server-locked` to keep them through a panic re
 **A deleted panel category stopped every ticket of that panel.** (audit, 11-17)
 `panel::open` and `public::ensure` used the saved category id as is, so after staff deleted it every create failed with a vague error. *Avoid:* the same as "A saved id can point at something deleted": `tickets::category_live` (cache, then Discord, only 10003 is gone) before using a panel category, else the ticket category through `ensure_category`, which `public::ensure` now calls too.
 
+**The dashboard knew only the ticket category, not the panel categories.** (ticket types, 11-22)
+Channel Setup (`fixed_by`, `own_access`), the Message Builder's create refusal, `embeds::bot_channel` and lockdown read only `tickets.category`, so a channel in a panel's own category could get its access reset or a bot post. *Avoid:* every check for "this holds ticket channels" uses `tickets::categories` (raw config, so a panel that does not parse keeps its category). A full category (50 channels) made every panel ticket fail: `panel::open` counts the children first and goes on to the ticket category, else `reply.ticket.categories_full` and one owner DM a day (not `alert_owner`: that shares the attack alert slot). DM tickets do not check yet (ticket types step 5).
+
 **A click or a DM paid REST calls per server or per member page with no cache.** (audit, 11-17)
 The DM server menu asked Discord about every ticket server on each open and each "Other server" press, and a message menu's `role.member_count` paged up to 10 000 members on every click. *Avoid:* cache such answers per user or per server for a minute (`dm::shared`, `msgmenu::role_counts`), give every button that starts the work the same cooldown (`tk:other`), and never cache an answer built while a lookup failed. A cap on the lookups (first try: 50 servers) is wrong here: it locked out members of every newer server (review).
 

@@ -15,6 +15,23 @@ use reqwest::Method;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+/// The ticket category and every panel's own category: ticket channels live in these.
+/// It reads the raw config, so a panel that does not parse still keeps its category covered.
+pub(crate) fn categories(config: &Value) -> Vec<&str> {
+    let t = &config["tickets"];
+    std::iter::once(&t["category"])
+        .chain(
+            t["panels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|p| &p["category"]),
+        )
+        .filter_map(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 #[derive(Deserialize)]
 pub(crate) struct Publish {
     expected_version: i32,

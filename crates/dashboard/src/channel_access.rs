@@ -862,10 +862,14 @@ fn own_access(config: &Value) -> Vec<u64> {
             &config["verification"]["channel"],
             &config["catch"]["channel"],
             &config["catch"]["category"],
-            &config["tickets"]["category"],
         ]
         .into_iter()
         .filter_map(id_of),
+    );
+    skip.extend(
+        crate::tickets::categories(config)
+            .into_iter()
+            .filter_map(|c| c.parse::<u64>().ok()),
     );
     skip
 }

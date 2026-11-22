@@ -370,14 +370,16 @@ async fn problems(st: &AppState, guild: i64) -> Result<Vec<Problem>, ApiError> {
     let num = |v: &Value| v.as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
     let bot = st.discord.bot_id().await?;
     let me = bot.as_str();
-    let tickets = c["tickets"]["category"].as_str().filter(|t| !t.is_empty());
+    let tickets = crate::tickets::categories(&c);
     let overwrites: Vec<Overwrite> = channels
         .as_array()
         .into_iter()
         .flatten()
         .flat_map(|c| {
             // A ticket's member and the bot itself are let in on purpose.
-            let ticket = tickets.is_some() && c["parent_id"].as_str() == tickets;
+            let ticket = c["parent_id"]
+                .as_str()
+                .is_some_and(|p| tickets.contains(&p));
             c["permission_overwrites"]
                 .as_array()
                 .into_iter()
