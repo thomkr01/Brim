@@ -10,19 +10,21 @@ enum Item {
     P(&'static str, &'static [&'static str]),
     /// The same sample three times, each with its own edit from EDITS.
     X(&'static str),
+    /// A dashboard list card: title, header button, rows of (name, grey text, action pills joined by |).
+    L(&'static str, &'static str, &'static [(&'static str, &'static str, &'static str)]),
     /// A line a member types, as it appears in Discord.
     C(&'static str),
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{C, E, P, T, X};
+use Item::{C, E, L, P, T, X};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
 /// Feature sections: title and clickable lines; each line shows its own scene of overlapping windows.
 const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Setup Wizard.", &[
-        ("Answer a few questions", "col", &[P("Logging channel", &["-", "?Where do you want Brim to log its actions?", "Logs channel|brim-logs", "Moderation logs channel|mod-logs", ">Next"]), P("Main roles", &["?The role your members need to access the server.", "Main role|Member", ">Next"])]),
+        ("Answer a few questions", "col", &[P("Logging channel", &["-", "?Where do you want Brim to log its actions?", "Logs channel|#brim-logs ▾", "Moderation logs channel|#mod-logs ▾", ">Next"]), P("Main roles", &["?The role your members need to access the server.", "Main role|@Member", ">Next"])]),
         ("Switch on the protection you want", "col", &[P("Automod status", &["?Moderate what members post.", "Moderate invite links", "Filter out malicious links", "Monitor repetitive message spam", "Slow down channels that flood"]), P("Antinuke status", &["?Watch the moderation actions of your staff.", "Monitor staff actions", "Quarantine at the limit"]), P("Anti raid status", &["?Keep bad raids out.", "Join gate", "Raider list"])]),
         ("Set up verification in one step", "break", &[P("Verification status", &["-", "?Members solve a captcha before they can talk.", "Verification", "Web verify", ">Set up channel"]), E("verify_panel")])]),
     ("Verification.", &[
@@ -38,15 +40,15 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Rogue bots are kicked", "tall", &[E("nuke_bot_kicked")]),
         ("Staff powers are watched", "diag", &[P("Anti-nuke", &["Watch staff actions", "Quarantine at the limit", "Restore from backup"]), E("nuke_quarantined"), E("panic_report_loaded")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "diag", &[P("Blocked words", &["?Remove messages that contain words you list.", "Filter", "Action|Warn", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_warn")]),
-        ("Kick for invite links", "break", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_kick")]),
-        ("Time out spammers", "tall", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_timeout"), E("automod_warn")])]),
+        ("Warn for blocked words", "diag", &[P("Blocked words", &["?Remove messages that contain words you list.", "Filter", "Action|Warn ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_warn")]),
+        ("Kick for invite links", "break", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_kick")]),
+        ("Time out spammers", "tall", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_timeout"), E("automod_warn")])]),
     ("Moderation.", &[
         ("Ban with a reason", "col", &[C("/ban @Mika DM ads"), E("ban_result"), E("mod_log")]),
         ("Short or full replies, your choice", "break", &[E("ban_result"), E("ban_compact")]),
         ("Cases your whole team can see", "diag", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
-        ("Monitor every action on your server", "tall", &[P("Log channels", &["?Each kind of log goes to its own channel.", "Moderation|mod-logs", "Auto Mod|automod-logs", "Anti-nuke|antinuke-logs", "Verification|verification-logs", "Everything else|brim-logs", ">Save"]), E("mod_log")]),
+        ("Monitor every action on your server", "tall", &[P("Log channels", &["?Each kind of log goes to its own channel.", "Moderation|#mod-logs ▾", "Auto Mod|#automod-logs ▾", "Anti-nuke|#antinuke-logs ▾", "Verification|#verification-logs ▾", "Everything else|#brim-logs ▾", ">Save"]), E("mod_log")]),
         ("A log for every kind of event", "side", &[P("Log types", &["?Pick what Brim writes to your logs.", "Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("note_modified"), E("verify_deleted"), E("mod_log")]),
         ("Ignore users, roles or channels", "break", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), E("mod_log")])]),
     ("Tickets.", &[
@@ -55,8 +57,8 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Replies reach the member", "tall", &[E("ticket_reply")])]),
     ("Tools.", &[
         ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
-        ("See every change in History", "diag", &[T("History", &[("Welcome message", "Diff|Revert"), ("Log channels", "Diff|Revert"), ("Anti-raid", "Diff|Revert"), ("Auto Mod", "Diff|Revert")])]),
-        ("Back up and load a layout", "tall", &[T("Backups", &[("Before the raid", "View|Preview & load|Delete"), ("Daily", "View|Preview & load|Delete"), ("Fresh server", "View|Preview & load|Delete")]), P("Backups", &["?Save your layout and load it later.", ">Create backup"])])]),
+        ("See every change in History", "diag", &[L("History", "", &[("Welcome message", "Brim · today", "Diff|Revert"), ("Log channels", "Mika · yesterday", "Diff|Revert"), ("Anti-raid", "Sam · Nov 20", "Diff|Revert")])]),
+        ("Back up and load a layout", "tall", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Preview & load|Delete"), ("#9c20", "Brim · yesterday", "View|Preview & load|Delete"), ("#77de", "Brim · Nov 18", "View|Preview & load|Delete")])])]),
 ];
 
 /// The accent colour of the first bot message in a scene, as a CSS variable for its glow.
@@ -214,11 +216,12 @@ pub fn Landing(
                                     E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
-                                        (_, Some(t), _) => view! { <button class="primary" type="button" disabled=true>{t}</button> }.into_any(),
-                                        (_, _, Some((a, b))) => view! { <div class="tog"><label>{a}</label><span class="chip">{b}</span></div> }.into_any(),
+                                        (_, Some(t), _) => view! { <span class="tb-btn tb-btn-primary fakebtn">{t}</span> }.into_any(),
+                                        (_, _, Some((a, b))) => view! { <div class="tog"><label>{a}</label><span class=if b.starts_with('@') { "rolechip" } else if b.ends_with('▾') { "sel" } else { "chip" }>{b}</span></div> }.into_any(),
                                         _ if *row == "-" => view! { <div class="pbar"><i></i></div> }.into_any(),
                                         _ => view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label=*row /></div> }.into_any(),
                                     }).collect_view()}</div> }.into_any(),
+                                    L(title, btn, rows) => view! { <div class="win lcard card"><div class="lhead"><b>{title}</b>{(!btn.is_empty()).then(|| view! { <span class="tb-btn tb-btn-primary fakebtn">{btn}</span> })}</div>{rows.iter().map(|(id, meta, acts)| view! { <div class="lrow"><span class="lname"><b>{*id}</b><small>{*meta}</small></span><span class="lacts">{acts.split('|').map(|a| view! { <span class="pill">{a}</span> }).collect_view()}</span></div> }).collect_view()}</div> }.into_any(),
                                     X(key) => {
                                         let m = sample(key);
                                         EDITS.iter().map(|(color, text)| {

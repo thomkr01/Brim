@@ -663,6 +663,18 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .l-col > div:nth-of-type(3) { grid-area:3/1/4/10; margin-top:var(--space-12); z-index:4; }
 .land .l-col > div:nth-of-type(4) { grid-area:4/4/5/13; margin-top:var(--space-12); }
 .land .l-col > div { transform:none; }
+.land .pane .tog > :not(label) { order:2; }
+.land .pane span.fakebtn { color:var(--on-primary); padding:var(--space-4) var(--space-16); } .land .pane span.sel { color:var(--text); } .land .pane span.rolechip { color:#c9cdfb; padding:var(--space-4) var(--space-12); }
+.land .fakebtn { pointer-events:none; align-self:flex-start; padding:var(--space-4) var(--space-16); }
+.land .sel { padding:var(--space-4) var(--space-12); border-radius:var(--radius-field); background:var(--page); color:var(--text); white-space:nowrap; }
+.land .rolechip { padding:var(--space-4) var(--space-12); border-radius:var(--radius-button); background:#5865f23d; color:#c9cdfb; font-weight:600; }
+.land .lcard { padding:var(--space-12); display:flex; flex-direction:column; gap:var(--space-8); background:var(--surface); min-width:calc(var(--space-56) * 9); }
+.land .lhead { display:flex; align-items:center; justify-content:space-between; gap:var(--space-12); }
+.land .lrow { display:flex; align-items:center; justify-content:space-between; gap:var(--space-12); padding:var(--space-8) 0; }
+.land .lname { display:flex; flex-direction:column; min-width:0; } .land .lname small { color:var(--text-secondary); }
+.land .lacts { display:flex; gap:var(--space-8); flex:none; white-space:nowrap; }
+.land .pill { padding:var(--space-4) var(--space-12); border-radius:var(--radius-button); background:var(--page); font-weight:600; white-space:nowrap; }
+.land .pane { font-size:1.08em; }
 .land .pane .ph { font-size:1.1em; margin-bottom:var(--space-4); } .land .pane p { margin:0 0 var(--space-8); } .land .pane button { align-self:flex-start; } .land .pbar { height:var(--space-4); border-radius:var(--radius-button); background:var(--line); } .land .pbar i { display:block; width:60%; height:100%; border-radius:inherit; background:var(--accent); }
 .land .pane .tog { display:flex; align-items:center; gap:var(--space-8); } .land .pane .tog label { flex:1; }
 .land .pane, .land .tbl { padding:var(--space-12); display:flex; flex-direction:column; gap:var(--space-4); background:var(--surface); }
