@@ -648,15 +648,17 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .win:hover { transform:translateY(-2%) !important; z-index:9 !important; }
 /* Four compositions; each line picks one, so the three lines of a feature look different. */
 /* Panel behind, one enlarged row and the bot's message on top; straight, no tilt. Three arrangements so scenes differ. */
-.land [class*="l-base"] > div:nth-of-type(1) { grid-area:1/1/4/11; margin-top:var(--space-40); z-index:2; }
+.land [class*="l-base"] > div:nth-of-type(1) { grid-area:1/1/4/10; margin-top:var(--space-40); z-index:2; }
 .land [class*="l-base"] > div:nth-of-type(2) { grid-area:4/1/5/13; margin-top:calc(-1 * var(--space-12)); z-index:4; display:flex; align-items:center; }
-.land [class*="l-base"] > div:nth-of-type(3) { grid-area:1/6/4/13; z-index:3; }
-.land .l-baseb > div:nth-of-type(2) { grid-area:1/1/2/10; margin-top:0; }
-.land .l-baseb > div:nth-of-type(1) { grid-area:2/4/4/13; margin-top:calc(-1 * var(--space-8)); }
-.land .l-baseb > div:nth-of-type(3) { grid-area:3/1/6/8; margin-top:var(--space-8); }
+.land [class*="l-base"] > div:nth-of-type(3) { grid-area:1/7/4/13; z-index:3; }
+/* B and C: the row hangs over the panel's top edge; the message covers only the panel's lower right corner. */
+.land :is(.l-baseb, .l-basec) > div:nth-of-type(1) { grid-area:2/1/5/10; margin-top:calc(-1 * var(--space-16)); }
+.land .l-baseb > div:nth-of-type(2) { grid-area:1/1/2/9; margin-top:0; }
 .land .l-basec > div:nth-of-type(2) { grid-area:1/5/2/13; margin-top:0; }
-.land .l-basec > div:nth-of-type(1) { grid-area:2/1/5/10; margin-top:calc(-1 * var(--space-8)); }
-.land .l-basec > div:nth-of-type(3) { grid-area:4/6/7/13; margin-top:calc(-1 * var(--space-16)); }
+.land .l-baseb > div:nth-of-type(3) { grid-area:3/7/6/13; margin-top:var(--space-8); }
+.land .l-basec > div:nth-of-type(3) { grid-area:4/7/7/13; margin-top:var(--space-8); }
+/* A small dashboard card as the third piece hangs over the right edge. */
+.land [class*="l-base"] > .pane:nth-of-type(3) { grid-area:4/8/6/14; margin:calc(-1 * var(--space-8)) calc(-1 * var(--space-24)) 0 0; }
 .land [class*="l-base"] > .pane:nth-of-type(2) { padding:var(--space-12) var(--space-16); }
 .land [class*="l-base"] > .pane:nth-of-type(2) .tog { width:100%; gap:var(--space-12); font-size:1.1em; white-space:nowrap; }
 .land [class*="l-base"] > .pane:nth-of-type(2) .tog label { flex:none; margin-right:auto; }
@@ -685,7 +687,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .fx { position:absolute; inset:0; z-index:0; pointer-events:none; }
 .land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
-.land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .spark, .land .hex { width:var(--space-32); height:var(--space-32); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark.lg { width:var(--space-44); height:var(--space-44); }
 .land .hex.lg { width:var(--space-36); height:var(--space-36); }
 .land .hex { clip-path:var(--shield); filter:none; }

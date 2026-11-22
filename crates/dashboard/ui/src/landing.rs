@@ -115,7 +115,7 @@ fn effects() -> impl IntoView {
     (0..3)
         .flat_map(|k| {
             let (x, y) = (if c[k] % 2 == 0 { 1.0 } else { 93.0 }, 1.0);
-            let (a, b) = if k % 2 == 0 { ("spark lg ol", "hex") } else { ("hex lg ol", "spark") };
+            let (a, b) = if k % 2 == 0 { ("spark ol", "hex") } else { ("hex ol", "spark") };
             let edge = if c[k] < 2 { "top" } else { "bottom" };
             let inward = if c[k] % 2 == 0 { 9.0 } else { -9.0 };
             [(a, edge, x, y), (b, edge, x + inward, y + 2.0 + r() * 3.0)]
