@@ -14,22 +14,23 @@ enum Item {
 }
 use Item::{E, N, P, T};
 
-type Scene = (&'static str, &'static [Item]);
+/// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
+type Scene = (&'static str, &'static str, &'static [Item]);
 /// Feature sections: title and clickable lines; each line shows its own scene of overlapping windows.
 const SECTIONS: [(&str, &[Scene]); 7] = [
-    ("Verification.", &[("Members solve a captcha before they talk", &[E("verify_captcha"), E("verify_panel")]), ("A panel they press to start", &[E("verify_panel"), E("verify_help"), E("verify_captcha")]), ("Help for members who get stuck", &[E("verify_help")])]),
-    ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", &[E("raid"), E("raid_report")]), ("Newcomers wait in quarantine", &[E("raid_report")]), ("Known raiders are flagged on arrival", &[E("raider_alert"), E("raid")])]),
-    ("Anti-nuke.", &[("Mass bans and deletes are stopped", &[E("nuke_quarantined"), E("panic_report_loaded")]), ("Rogue bots are kicked", &[E("nuke_bot_kicked")]), ("A panic report shows what was restored", &[E("panic_report_loaded"), E("nuke_quarantined"), E("nuke_bot_kicked")])]),
+    ("Verification.", &[("Members solve a captcha before they talk", "diag", &[E("verify_captcha"), E("verify_panel")]), ("A panel they press to start", "side", &[E("verify_panel"), E("verify_help"), E("verify_captcha")]), ("Help for members who get stuck", "tall", &[E("verify_help")])]),
+    ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", "break", &[E("raid"), E("raid_report")]), ("Newcomers wait in quarantine", "diag", &[E("raid_report")]), ("Known raiders are flagged on arrival", "side", &[E("raider_alert"), E("raid")])]),
+    ("Anti-nuke.", &[("Mass bans and deletes are stopped", "tall", &[E("nuke_quarantined"), E("panic_report_loaded")]), ("Rogue bots are kicked", "break", &[E("nuke_bot_kicked")]), ("A panic report shows what was restored", "diag", &[E("panic_report_loaded"), E("nuke_quarantined"), E("nuke_bot_kicked")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", &[P("Blocked words", &["Filter on", "Action: Warn", "Strikes on"]), E("automod_warn")]),
-        ("Kick for invite links", &[P("Invite links", &["Filter on", "Action: Kick", "Allow list"]), E("automod_kick")]),
-        ("Time out spammers", &[P("Spam", &["Filter on", "Action: Timeout", "Strikes on"]), E("automod_timeout")])]),
-    ("Moderation.", &[("Ban with a reason", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", &[E("ban_result"), E("ban_compact")]), ("Cases your whole team can see", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
+        ("Warn for blocked words", "side", &[P("Blocked words", &["Filter on", "Action: Warn", "Strikes on"]), E("automod_warn")]),
+        ("Kick for invite links", "tall", &[P("Invite links", &["Filter on", "Action: Kick", "Allow list"]), E("automod_kick")]),
+        ("Time out spammers", "break", &[P("Spam", &["Filter on", "Action: Timeout", "Strikes on"]), E("automod_timeout")])]),
+    ("Moderation.", &[("Ban with a reason", "diag", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", "side", &[E("ban_result"), E("ban_compact")]), ("Cases your whole team can see", "tall", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
-        ("Monitor every action on your server", &[P("Log channels", &["# mod-log", "# message-log", "# member-log", "# server-log"]), E("mod_log")]),
-        ("Make use of 62 log types", &[N("62"), P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("automod_warn")]),
-        ("Ignore users, roles or channels", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
-    ("Tickets.", &[("Members open a private ticket", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]), ("Replies reach the member", &[E("ticket_reply"), E("ticket_intro")])]),
+        ("Monitor every action on your server", "break", &[P("Log channels", &["# mod-log", "# message-log", "# member-log", "# server-log"]), E("mod_log")]),
+        ("Make use of 62 log types", "diag", &[N("62"), P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("automod_warn")]),
+        ("Ignore users, roles or channels", "side", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
+    ("Tickets.", &[("Members open a private ticket", "tall", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", "break", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]), ("Replies reach the member", "diag", &[E("ticket_reply"), E("ticket_intro")])]),
 ];
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -113,7 +114,7 @@ pub fn Landing(
                         <p class="tb-lead">"Brim keeps out raids, scams and rogue staff, so you can enjoy your community. Free, with every feature."</p>
                         <div class="tb-actions">
                             <a class="tb-btn tb-btn-primary" href="/invite">"Invite bot"</a>
-                            <a class="tb-btn tb-btn-quiet" href=login>"Go to dashboard"</a>
+                            <a class="tb-btn tb-btn-quiet" href=login.clone()>"Go to dashboard"</a>
                         </div>
                     </div>
                     <div class="hero-brim">
@@ -135,7 +136,7 @@ pub fn Landing(
                             <div class="feat-copy">
                                 <h3>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
-                                    {tabs.iter().enumerate().map(|(t, (label, _))| view! {
+                                    {tabs.iter().enumerate().map(|(t, (label, _, _))| view! {
                                         <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| on.set(t)>
                                             <span class="feat-dot" aria-hidden="true"></span>{*label}<span class="feat-arrow" aria-hidden="true">"\u{203a}"</span>
                                         </button>
@@ -144,7 +145,7 @@ pub fn Landing(
                             </div>
                             <div class="feat-shot" aria-live="polite">
                                 <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i>
-                                {move || view! { <div class="scene"><i class="burst" aria-hidden="true"></i>{tabs[on.get()].1.iter().map(|it| match *it {
+                                {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show(key)}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| view! { <span class:on=(r == 0)>{*row}</span> }).collect_view()}</div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td><span class="chip">{*b}</span></td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
@@ -155,6 +156,16 @@ pub fn Landing(
                     }
                 }).collect_view()}
                 </div>
+                <p class="land-edit">"Every embed Brim sends can be "<span class="u">"edited"</span>" in the message editor."</p>
+                <section class="land-close">
+                    <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i>
+                    <p class="feat-sub">"Free, with every feature."</p>
+                    <h2>"Give your server a "<span class="u">"guard"</span>"."</h2>
+                    <div class="tb-actions">
+                        <a class="tb-btn tb-btn-primary" href="/invite">"Invite bot"</a>
+                        <a class="tb-btn tb-btn-quiet" href=login>"Go to dashboard"</a>
+                    </div>
+                </section>
             </div>
             <footer class="tb-footer">
                 <a class="tb-link tb-link-strong" href="#/commands">"Docs"</a>
