@@ -172,7 +172,7 @@ pub fn Landing(
     // A reload keeps the scroll position, so the first check waits for the page to be drawn.
     request_animation_frame(check);
 
-    fit();
+    request_animation_frame(fit);
     if let Ok(h) = set_interval_with_handle(fit, std::time::Duration::from_millis(500)) {
         on_cleanup(move || h.clear());
     }

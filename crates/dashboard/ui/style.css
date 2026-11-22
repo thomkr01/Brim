@@ -855,3 +855,4 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .bktext { flex:1 1 12em; min-width:0; overflow-wrap:anywhere; } .bkbtns { display:flex; gap:var(--space-8); flex:none; margin-left:auto; }
 .appeal { max-width:520px; margin:var(--space-24) auto 0; display:flex; flex-direction:column; gap:var(--space-16); } .appeal .card { margin:0; } .appeal .send { width:100%; margin-top:var(--space-8); } .appeal .center { text-align:center; } .appeal-row .row { margin:0 0 var(--space-8); } .appeal .gicon { width:32px; height:32px; border-radius:50%; object-fit:cover; }
 .land .feat-skel { height:calc(var(--space-56) * 3); border-radius:var(--radius-card); }
+.land .feat-shot:not([style*="--k"]) > .scene { visibility:hidden; }
