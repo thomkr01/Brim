@@ -72,13 +72,17 @@ fn cap_message(scene: &web_sys::HtmlElement, limit: f64) {
     let Ok(Some(win)) = scene.query_selector(":scope > div:nth-of-type(3):not(.pane):not(.xs)") else { return };
     if scene.query_selector(".feat-skel").ok().flatten().is_some() || win.get_attribute("data-cap").is_some() { return }
     let _ = win.set_attribute("data-cap", "1");
-    let (Ok(win), Ok(items)) = (win.clone().dyn_into::<web_sys::HtmlElement>(), win.query_selector_all(".embed .md > div")) else { return };
-    let line = |i| items.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
+    let (Ok(win), Ok(items)) = (win.clone().dyn_into::<web_sys::HtmlElement>(), win.query_selector_all(".embed .fields > .blk")) else { return };
+    // Hide whole field rows (name and value together, an inline row as one) from the end only; the first row always stays.
+    let top = |i| items.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
     let mut keep = items.length();
-    let heading = |k: u32| line(k - 1).is_some_and(|l| l.text_content().unwrap_or_default().trim_end().ends_with(':'));
-    while keep > 1 && (f64::from(win.offset_height()) > limit || heading(keep)) {
-        keep -= 1;
-        if let Some(l) = line(keep) { let _ = l.style().set_property("display", "none"); }
+    while keep > 1 && f64::from(win.offset_height()) > limit {
+        let Some(last) = top(keep - 1) else { return };
+        let y = last.offset_top();
+        while keep > 1 && top(keep - 1).is_some_and(|l| l.offset_top() == y) {
+            if let Some(l) = top(keep - 1) { let _ = l.style().set_property("display", "none"); }
+            keep -= 1;
+        }
     }
 }
 
