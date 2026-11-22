@@ -298,24 +298,6 @@ async fn gate(
     Ok(None)
 }
 
-/// Discord holds at most 50 channels in one category.
-const CATEGORY_MAX: usize = 50;
-
-/// Every ticket category is full: the owner hears once a day.
-async fn categories_full(app: &App, gid: Id<GuildMarker>) {
-    static LAST: std::sync::Mutex<std::collections::BTreeMap<u64, i64>> =
-        std::sync::Mutex::new(std::collections::BTreeMap::new());
-    if crate::reply::alert_due(
-        &mut LAST.lock().unwrap(),
-        gid.get(),
-        crate::app::now_secs(),
-        86_400,
-    ) {
-        let text = "Members cannot open tickets: the ticket categories are full (Discord allows 50 channels in one category). Close old tickets, or set a new category for the panel on the Tickets page.";
-        crate::reply::dm_owner(app, gid, "dm.owner_alert", text).await;
-    }
-}
-
 /// Opens a panel ticket: the same refusals as a DM ticket, then a private channel for the member
 /// and staff. `Err(text)` tells the member why not.
 #[allow(clippy::too_many_arguments)]
@@ -346,15 +328,10 @@ async fn open(
             None
         }
     };
-    let info = app.guild_info(gid).await?;
-    // shortcut: the cached count can lag a ticket made a moment ago; that create then fails as before.
-    let full = |c: Id<ChannelMarker>| {
-        info.parents.values().filter(|&&parent| parent == c).count() >= CATEGORY_MAX
-    };
-    let category = match own.filter(|&c| !full(c)) {
-        Some(c) => c,
-        None => match ensure_category(app, gid).await? {
-            Some(c) if !full(c) => c,
+    let category = match own {
+        Some(c) if !full(app, gid, c).await? => c,
+        _ => match ensure_category(app, gid).await? {
+            Some(c) if !full(app, gid, c).await? => c,
             Some(_) => {
                 categories_full(app, gid).await;
                 return Ok(Err("reply.ticket.categories_full"));
@@ -523,7 +500,7 @@ fn kind_menu(types: &[String], placeholder: &str) -> Component {
     kind_menu_as("tk2:kindset", types, placeholder)
 }
 
-/// A menu of ticket types under `custom_id` (the DM one is `tk:kind:<server>`, see `dm::handle`).
+/// A menu of ticket types under `custom_id` (the DM one is `tk:kind:<server>:<dm message>`, see `dm::handle`).
 pub(super) fn kind_menu_as(custom_id: &str, types: &[String], placeholder: &str) -> Component {
     let options = types
         .iter()

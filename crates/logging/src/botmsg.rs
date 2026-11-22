@@ -258,7 +258,6 @@ const DM_REPLIES: &[(&str, &str, &[&str], bool, &str)] = &[
     ("cancelled", "request cancelled", &[], true, "Request cancelled successfully."),
     ("wait", "wait before pressing again", &[], true, "Please wait a few seconds, then press again."),
     ("message_deleted", "your message was deleted", &[], true, "Your message was deleted, so nothing was sent."),
-    ("type_closed", "ticket closed before the type pick", &[], true, "This ticket is closed."),
 ];
 
 /// The server menu of a DM: its embed, and the texts inside the menu itself (message text only).
@@ -5970,7 +5969,6 @@ pub const BOT_WIDE: &[&str] = &[
     "reply.dm.cancelled",
     "reply.dm.wait",
     "reply.dm.message_deleted",
-    "reply.dm.type_closed",
     "reply.dm.menu",
     "reply.dm.option_existing",
     "reply.dm.option_new",

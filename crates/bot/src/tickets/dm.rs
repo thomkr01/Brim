@@ -44,7 +44,7 @@ pub async fn on_dm(app: &App, m: &Message) -> Result<()> {
                 .and_then(Id::new_checked)
             {
                 Some(g) if !body(&m.content, app.me).is_empty() || !m.attachments.is_empty() => {
-                    send_mail(app, m, g).await
+                    send_mail(app, m, g, None).await
                 }
                 _ => say_dm(app, dm, "reply.dm.usage_send", &[("prefix", DM_PREFIX)]).await,
             },
@@ -64,7 +64,7 @@ pub async fn on_dm(app: &App, m: &Message) -> Result<()> {
     ) {
         // `sure`: a failed lookup may hide a second server, so one listed server proves nothing.
         (true, (list, true)) if list.len() == 1 => ask(app, m, &list[0]).await,
-        (false, (list, true)) if list.len() == 1 => send_mail(app, m, list[0].id).await,
+        (false, (list, true)) if list.len() == 1 => send_mail(app, m, list[0].id, None).await,
         _ => pick(app, m).await,
     }
 }
@@ -221,8 +221,9 @@ async fn pick(app: &App, m: &Message) -> Result<()> {
     Ok(())
 }
 
-/// Sends a member's DM to a server, opening a ticket there first when none is open.
-async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>) -> Result<()> {
+/// Sends a member's DM to a server, opening a ticket there first when none is open. `kind`: the
+/// type the member picked, `None` while not asked yet; a server with types asks before the channel.
+async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>, kind: Option<&str>) -> Result<()> {
     let dm = m.channel_id;
     let Some(s) = server(app, gid).await? else {
         return say_key(app, gid, dm, "reply.ticket.dm_server_missing", &[]).await;
@@ -268,10 +269,22 @@ async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>) -> Result<()> {
             let e = stamp(s.tpl("ticket.paused", &[("reason", reason)]));
             return say(app, dm, e.build()).await;
         }
-        None => match create(app, &s, m, &member.roles, t, category).await? {
-            Some(ch) => ch,
-            None => return Ok(()),
-        },
+        None => {
+            if super::full(app, gid, category).await? {
+                super::categories_full(app, gid).await;
+                return say_key(app, gid, dm, "reply.ticket.categories_full", &[]).await;
+            }
+            // A type removed since the menu was sent asks again with the types of now.
+            let kind = match kind {
+                Some(k) if k.is_empty() || t.types.iter().any(|x| x == k) => k,
+                _ if !t.types.is_empty() => return ask_type(app, gid, m, &t.types).await,
+                _ => "",
+            };
+            match create(app, &s, m, &member.roles, t, category, kind).await? {
+                Some(ch) => ch,
+                None => return Ok(()),
+            }
+        }
     };
     let (files, linked) = download(app, &m.attachments).await;
     let (sent, got) = from_member(&s, &m.author, &text);
@@ -317,6 +330,29 @@ async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>) -> Result<()> {
         return say_key(app, gid, dm, "reply.ticket.bot_missing_perms", &[]).await;
     }
     touch(app, gid, ch, false).await
+}
+
+/// The type menu for a new DM ticket, and a button to open it without one. Both carry the
+/// member's DM, which is sent once they answer.
+async fn ask_type(app: &App, gid: Id<GuildMarker>, m: &Message, types: &[String]) -> Result<()> {
+    let id = format!("tk:kind:{gid}:{}", m.id);
+    let skip = button(
+        "Open without a type",
+        format!("{id}:none"),
+        ButtonStyle::Secondary,
+    );
+    let rows = [
+        panel::kind_menu_as(&id, types, "Choose a ticket type"),
+        action_row(vec![skip]),
+    ];
+    let ask = crate::reply::say(app, gid, "reply.ticket.ask_type", &[]).await;
+    app.http
+        .create_message(m.channel_id)
+        .content(&ask.text)
+        .embeds(&ask.embeds)
+        .components(&rows)
+        .await?;
+    Ok(())
 }
 
 /// Quarantined, and the newest quarantine case since this quarantine began is staff's with a
@@ -381,6 +417,7 @@ async fn create(
     roles: &[Id<RoleMarker>],
     t: &TicketsCfg,
     category: Id<ChannelMarker>,
+    kind: &str,
 ) -> Result<Option<Id<ChannelMarker>>> {
     let (gid, user, dm) = (s.id, &m.author, m.channel_id);
     let g = gid.get() as i64;
@@ -405,7 +442,8 @@ async fn create(
             anyhow::Ok(r.model().await?.id)
         }
     };
-    let made = match make(channel_name(&user.name, user.id, rand::random())).await {
+    let name = channel_name(&user.name, user.id, rand::random());
+    let made = match make(kind_name(&name, None, kind)).await {
         // Discord refuses names with words it does not allow (50035); the id always passes.
         Err(e) if http_err::code(&e) == Some(50035) => make(user.id.to_string()).await,
         r => r,
@@ -427,13 +465,14 @@ async fn create(
         }
     };
     let bound = sqlx::query(
-        "UPDATE tickets SET channel_id = $3, status = 'open'
+        "UPDATE tickets SET channel_id = $3, status = 'open', kind = NULLIF($5, '')
          WHERE guild_id = $1 AND number = $2 AND user_id = $4 AND status = 'creating'",
     )
     .bind(g)
     .bind(number)
     .bind(ch.get() as i64)
     .bind(user.id.get() as i64)
+    .bind(kind)
     .execute(&app.pool)
     .await?
     .rows_affected();
@@ -449,11 +488,11 @@ async fn create(
         number,
         Some(user.id),
         "opened",
-        json!({"source": "dm"}),
+        json!({"source": "dm", "type": kind}),
     )
     .await;
     if let Some(log) = t.log_channel {
-        let e = super::new_ticket_log(user, None, None);
+        let e = super::new_ticket_log(user, None, Some(kind));
         if let Err(e) = crate::events::send_private(app, gid, log, e, None).await {
             tracing::warn!(?e, "ticket log failed");
         }
@@ -485,7 +524,7 @@ async fn create(
         .create_message(ch)
         .content(pings.trim())
         .embeds(&[intro])
-        .components(&panel::intro(false, panel::pick(&t.types, "")))
+        .components(&panel::intro(false, panel::pick(&t.types, kind)))
         .allowed_mentions(Some(&mentions))
         .await;
     match sent {
@@ -501,22 +540,7 @@ async fn create(
         }
     }
     if !t.greeting.is_empty() {
-        say(app, dm, notice(s, false, &t.greeting, user, "")).await?;
-    }
-    if !t.types.is_empty() {
-        // The member may skip it: staff pick the type at claim then.
-        let menu = panel::kind_menu_as(&format!("tk:kind:{gid}"), &t.types, "Choose a ticket type");
-        let ask = crate::reply::say(app, gid, "reply.ticket.ask_type", &[]).await;
-        let asked = app
-            .http
-            .create_message(dm)
-            .content(&ask.text)
-            .embeds(&ask.embeds)
-            .components(&[menu])
-            .await;
-        if let Err(e) = asked {
-            tracing::warn!(?e, %gid, "asking for the ticket type failed");
-        }
+        say(app, dm, notice(s, false, &t.greeting, user, kind)).await?;
     }
     Ok(Some(ch))
 }
@@ -563,50 +587,6 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             ..Default::default()
         }),
     };
-    // The ticket type, picked by the member in the DM. The server id comes from the button, so
-    // only the member's own open DM ticket there can change, and only while it has no type.
-    if let Some(g) = rest.strip_prefix("kind:") {
-        let gid = g.parse().ok().and_then(Id::new_checked);
-        let ch = match gid {
-            Some(gid) => open_ticket(app, gid, user).await?.map(|ch| (gid, ch)),
-            None => None,
-        };
-        let kind = c.values.first().map_or("", String::as_str);
-        // Answered first: the type change and the button update are several REST calls (PITFALLS 1).
-        let defer = InteractionResponse {
-            kind: InteractionResponseType::DeferredUpdateMessage,
-            data: None,
-        };
-        client.create_response(i.id, &i.token, &defer).await?;
-        let (ok, s) = match ch {
-            Some((gid, ch)) => {
-                let r = workflow::set_kind(app, gid, ch, user, kind, false).await?;
-                if r.is_ok() {
-                    if let Err(e) = panel::sync_intro(app, gid, ch, None).await {
-                        tracing::warn!(?e, %ch, "updating the ticket buttons failed");
-                    }
-                }
-                let ok = r.is_ok();
-                (ok, panel::shown_of(app, gid, r).await)
-            }
-            // No server to take the words from: the bot-wide entry.
-            None => (
-                false,
-                crate::reply::say_wide(app, "reply.dm.type_closed", &[]).await,
-            ),
-        };
-        // A refused pick keeps the menu, so the member can pick another type.
-        let edit = client
-            .update_response(&i.token)
-            .content(Some(s.text.as_str()).filter(|t| !t.is_empty()))
-            .embeds(Some(&s.embeds));
-        if ok {
-            edit.components(Some(&[])).await?;
-        } else {
-            edit.await?;
-        }
-        return Ok(true);
-    }
     let made_ms = ((prompt.id.get() >> 22) + 1_420_070_400_000) as i64;
     if now_secs() * 1000 - made_ms > MENU_SECS * 1000 {
         let r = update(
@@ -632,6 +612,15 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         }
     };
     let chosen = match parts.as_slice() {
+        // A type menu from before the type was asked first: the member sends the DM again.
+        ["kind", _] => {
+            let r = update(
+                crate::reply::say_wide(app, "reply.dm.expired", &[]).await,
+                vec![],
+            );
+            client.create_response(i.id, &i.token, &r).await?;
+            return Ok(true);
+        }
         ["no"] => {
             let r = update(
                 crate::reply::say_wide(app, "reply.dm.cancelled", &[]).await,
@@ -674,16 +663,28 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
                 .await?;
             return Ok(true);
         }
-        ["ok", g, msg] => g.parse().ok().and_then(Id::new_checked).map(|g| (g, *msg)),
+        ["ok", g, msg] => g
+            .parse()
+            .ok()
+            .and_then(Id::new_checked)
+            .map(|g| (g, *msg, None)),
         ["pick", msg] => c
             .values
             .first()
             .and_then(|v| v.parse().ok())
             .and_then(Id::new_checked)
-            .map(|g| (g, *msg)),
+            .map(|g| (g, *msg, None)),
+        // The ticket type, asked before the channel is made; "none" opens it without one.
+        ["kind", g, msg, rest @ ..] => g.parse().ok().and_then(Id::new_checked).map(|g| {
+            let kind = match rest {
+                ["none"] => "",
+                _ => c.values.first().map_or("", String::as_str),
+            };
+            (g, *msg, Some(kind))
+        }),
         _ => None,
     };
-    let Some((gid, msg)) = chosen else {
+    let Some((gid, msg, kind)) = chosen else {
         return Ok(true);
     };
     let defer = InteractionResponse {
@@ -699,7 +700,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         Err(e) => tracing::warn!(?e, "deleting the ticket prompt failed"),
     }
     match original(msg).await? {
-        Some(m) => send_mail(app, &m, gid).await,
+        Some(m) => send_mail(app, &m, gid, kind).await,
         None => say_dm(app, prompt.channel_id, "reply.dm.message_deleted", &[]).await,
     }?;
     Ok(true)
@@ -781,16 +782,16 @@ mod tests {
             .unwrap()
         };
         let said = |what: &str| t.calls(what);
-        send_mail(&t.app, &dm("you are a badword"), gid)
+        send_mail(&t.app, &dm("you are a badword"), gid, None)
             .await
             .unwrap();
-        send_mail(&t.app, &dm("join discord.gg/abc"), gid)
+        send_mail(&t.app, &dm("join discord.gg/abc"), gid, None)
             .await
             .unwrap();
         assert_eq!(said("words or links that server does not allow"), 2);
         let raid = brim_automod::join::RaidDetector::restored(0, i64::MAX, String::new());
         t.app.raids.lock().unwrap().insert(gid.get(), raid);
-        send_mail(&t.app, &dm("help"), gid).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
         assert_eq!(said("does not take new tickets right now"), 1);
         t.app.raids.lock().unwrap().clear();
         for n in 1..=3 {
@@ -802,7 +803,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        send_mail(&t.app, &dm("help"), gid).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
         assert_eq!(said("too many tickets in that server"), 1);
         assert_eq!(
             said(&format!("POST /guilds/{gid}/channels")),
@@ -841,7 +842,9 @@ mod tests {
         };
         case(crate::test_support::ME, Some("anti-nuke"), 1).await;
         case(9, Some("spamming"), 2).await;
-        send_mail(&t.app, &dm("let me out"), gid).await.unwrap();
+        send_mail(&t.app, &dm("let me out"), gid, None)
+            .await
+            .unwrap();
         assert_eq!(said("were given the reason"), 1);
         // That staff case is from an earlier, lifted quarantine: the current one is the bot's,
         // which told them nothing.
@@ -850,18 +853,30 @@ mod tests {
             .execute(&t.app.pool)
             .await
             .unwrap();
-        send_mail(&t.app, &dm("why am I quarantined?"), gid)
+        // The server has types: the member picks one before the channel is made.
+        send_mail(&t.app, &dm("why am I quarantined?"), gid, None)
             .await
             .unwrap();
+        assert_eq!(said(&format!("tk:kind:{gid}:5:none")), 1);
+        assert_eq!(said(&format!("POST /guilds/{gid}/channels")), 0);
+        // A type the server no longer has asks again.
+        send_mail(&t.app, &dm("why am I quarantined?"), gid, Some("Gone"))
+            .await
+            .unwrap();
+        assert_eq!(said(&format!("tk:kind:{gid}:5:none")), 2);
+        send_mail(&t.app, &dm("why am I quarantined?"), gid, Some("Report"))
+            .await
+            .unwrap();
+        assert_eq!(said("-report-"), 1, "the type is in the channel name");
         assert_eq!(
             said(&format!("POST /guilds/{gid}/channels")),
             1,
             "ticket opened"
         );
         assert_eq!(said("Quarantined"), 1);
-        // The staff buttons on the first message, and the type menu in the member's DM.
+        // The staff buttons on the first message, and no type menu: the ticket has its type.
         assert_eq!(said("tk2:claim"), 1);
-        assert_eq!(said(&format!("tk:kind:{gid}")), 1);
+        assert_eq!(said("tk2:kindset"), 0);
         // The server cap: 20 new tickets an hour from anyone.
         sqlx::query("INSERT INTO tickets (guild_id, number, user_id, closed_at, status) SELECT $1, n, n, now(), 'closed' FROM generate_series(100, 119) n")
             .bind(gid.get() as i64)
@@ -884,7 +899,7 @@ mod tests {
             .execute(&t.app.pool)
             .await
             .unwrap();
-        send_mail(&t.app, &dm("help"), gid).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
         assert_eq!(said("too many new tickets right now"), 1);
         sqlx::query("DELETE FROM ticket_users WHERE user_id = $1")
             .bind(u as i64)

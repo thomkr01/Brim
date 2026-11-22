@@ -304,6 +304,31 @@ pub(crate) async fn category_live(
     }
 }
 
+/// Discord holds at most 50 channels in one category.
+const CATEGORY_MAX: usize = 50;
+
+/// Category `c` holds as many channels as Discord allows.
+// shortcut: the cached count can lag a ticket made a moment ago; that create then fails as before.
+pub(super) async fn full(app: &App, gid: Id<GuildMarker>, c: Id<ChannelMarker>) -> Result<bool> {
+    let info = app.guild_info(gid).await?;
+    Ok(info.parents.values().filter(|&&p| p == c).count() >= CATEGORY_MAX)
+}
+
+/// Every ticket category is full: the owner hears once a day.
+pub(super) async fn categories_full(app: &App, gid: Id<GuildMarker>) {
+    static LAST: std::sync::Mutex<std::collections::BTreeMap<u64, i64>> =
+        std::sync::Mutex::new(std::collections::BTreeMap::new());
+    if crate::reply::alert_due(
+        &mut LAST.lock().unwrap(),
+        gid.get(),
+        crate::app::now_secs(),
+        86_400,
+    ) {
+        let text = "Members cannot open tickets: the ticket categories are full (Discord allows 50 channels in one category). Close old tickets, or set a new category for the panel on the Tickets page.";
+        crate::reply::dm_owner(app, gid, "dm.owner_alert", text).await;
+    }
+}
+
 pub async fn ensure_category(app: &App, gid: Id<GuildMarker>) -> Result<Option<Id<ChannelMarker>>> {
     // One at a time per server: two tickets opened together would each make a category, and the
     // first ticket would sit outside the one saved last. Per server, so a slow one stalls no other.
