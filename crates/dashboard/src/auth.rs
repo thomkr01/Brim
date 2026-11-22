@@ -355,7 +355,10 @@ pub async fn logout(
         .bind(&s.id)
         .execute(&st.db)
         .await?;
-    Ok((jar.remove(cookie("sid", String::new(), st.secure)), Json(json!({"ok": true}))))
+    Ok((
+        jar.remove(cookie("sid", String::new(), st.secure)),
+        Json(json!({"ok": true})),
+    ))
 }
 
 pub async fn me(State(st): State<AppState>, s: Sess) -> Result<Json<serde_json::Value>, ApiError> {
@@ -1054,7 +1057,12 @@ mod tests {
         h.insert(axum::http::header::COOKIE, "sid=x".parse().unwrap());
         let jar = CookieJar::from_headers(&h).remove(cookie("sid", String::new(), true));
         let r = (jar, ()).into_response();
-        let set = r.headers()[axum::http::header::SET_COOKIE].to_str().unwrap();
-        assert!(set.starts_with("sid=;") && set.contains("Path=/") && set.contains("Max-Age=0"), "{set}");
+        let set = r.headers()[axum::http::header::SET_COOKIE]
+            .to_str()
+            .unwrap();
+        assert!(
+            set.starts_with("sid=;") && set.contains("Path=/") && set.contains("Max-Age=0"),
+            "{set}"
+        );
     }
 }
