@@ -576,7 +576,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land header { position:static; height:auto; background:none; z-index:auto; }
 .land main { max-width:none; margin:0; }
 /* Hero (owner decision 2026-11-20): steel and copper drawn here, not from a picture, so it fits any screen. The colours are the banner pack's. */
-.land { --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
+.land { --bar-w:992px; --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
 .land .hero { position:relative; isolation:isolate; overflow:hidden; min-height:min(calc(100 * var(--vh)),940px); display:flex; flex-direction:column; background:linear-gradient(135deg,var(--steel-1) 0%,var(--steel-2) 56%,var(--steel-3) 100%); }
 .land .hero-split { position:absolute; inset:0; z-index:-1; background:#53403338; mask-image:linear-gradient(#000 30%,#0000 80%); clip-path:polygon(50% 0,100% 0,100% 100%,31.5% 100%); }
 .land .hero-lines { mask-image:linear-gradient(#000 40%,#0000 85%); position:absolute; inset:0; z-index:-1; width:100%; height:100%; fill:none; stroke:var(--copper-soft); stroke-opacity:.3; stroke-width:1.5; }
@@ -586,7 +586,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 /* Version B (no "line" class): no line, the fade, the panel and the lines fade out over a long distance. */
 .land .hero-fade { position:absolute; left:0; right:0; bottom:0; height:var(--hero-fade); z-index:0; pointer-events:none; background:linear-gradient(#14181e00,var(--page) 92%); }
 /* The top bar shows only below the hero's copper line; hidden, it is not focusable. */
-.land .tb-header { position:fixed; top:0; left:0; right:0; z-index:5; width:auto; margin:0; padding:var(--space-8) max(var(--space-24), calc((100% - 992px) / 2)); background:var(--page); border-bottom:1px solid var(--surface); visibility:hidden; opacity:0; transform:translateY(-100%); transition:transform .25s ease, opacity .25s ease, visibility 0s .25s; }
+.land .tb-header { position:fixed; top:0; left:0; right:0; z-index:5; width:auto; margin:0; padding:var(--space-8) max(var(--space-24), calc((100% - var(--bar-w)) / 2)); background:var(--page); border-bottom:1px solid var(--surface); visibility:hidden; opacity:0; transform:translateY(-100%); transition:transform .25s ease, opacity .25s ease, visibility 0s .25s; }
 .land .tb-header.is-shown { visibility:visible; opacity:1; transform:none; transition-delay:0s; }
 .land .hero-body { padding-inline:0; padding-top:0; position:relative; z-index:1; flex:1; width:min(1180px,100% - 2 * var(--space-24)); margin:0 auto; display:grid; grid-template-columns:1.05fr .95fr; align-items:center; gap:var(--space-24); padding-bottom:var(--hero-room); }
 .land .hero-copy { text-align:left; }

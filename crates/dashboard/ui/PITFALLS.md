@@ -666,3 +666,9 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 The bar is hidden until the visitor scrolls past the hero's copper line. The first test, "the line has left the top of the screen", never fired on a 1366x768 screen: the page ends 418 px below the top, so the line stays 350 px down.
 
 **Rule:** a scroll trigger that depends on a position must first check that the page can scroll that far. `landing.rs` shows the bar at the line, or at half of the scroll range when the line is out of reach. A hidden bar uses `visibility:hidden`, so it is not focusable; do not use opacity alone.
+
+## The front page bar broke the size check (2026-11-22)
+
+The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-sizes.mjs` allows no raw pixel value in a padding, so dashboard-ui failed on main. It was not run before the push.
+
+**Rule:** a width you need inside a padding goes in a custom property (`--bar-w`), and `node tools/ui-sizes.mjs` runs before every push that touches `style.css`.
