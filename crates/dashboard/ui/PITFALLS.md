@@ -710,3 +710,9 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 Each scene set the stage height (`--sh`) when it was the active one, so a taller or shorter scene changed the height of the block and the lines and the page below jumped. A hover lift on the pieces and a bold active line made the page feel loose too.
 
 **Rule:** the stage is as tall as the tallest scene of its block; a switch changes only which scene shows. Do not change the weight, size or height of anything a click on a line touches. Do not use `prefers-reduced-motion` to turn off front page motion: the owner's motion switch (`data-motion`) decides.
+
+## Front page: stars placed against one scene covered another
+
+Stars placed against the group of the scene that was open covered text in other scenes of the block, because scenes of different size sat at different places in the shared box.
+
+**Rule:** the stars are fixed in the block's box. All scenes of a block start at the same corner, and the star places come from the sizes of the first pieces of all scenes (`fit` in `landing.rs`). After a change to the scene layout, open every scene of every block on a desktop and a phone width and check that no star covers text and no scene leaves the box.

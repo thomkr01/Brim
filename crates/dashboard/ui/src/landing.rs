@@ -86,35 +86,73 @@ fn cap_message(scene: &web_sys::HtmlElement) {
     }
 }
 
-/// Each scene is drawn 616 wide and scaled to fit its box (at most 0.85), so it keeps every window.
-/// shortcut: polled twice a second, because the samples and tab changes alter a scene's height.
+/// The natural size of a scene's group of pieces and of its first piece: (group w, group h, first w, first h).
+fn group(s: &web_sys::HtmlElement) -> (f64, f64, f64, f64) {
+    use wasm_bindgen::JsCast;
+    let kids = s.children();
+    let (mut gw, mut gh, mut w1, mut h1) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+    for i in 0..kids.length() {
+        let Some(c) = kids.item(i).and_then(|c| c.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
+        gw = gw.max(f64::from(c.offset_left() + c.offset_width()));
+        gh = gh.max(f64::from(c.offset_top() + c.offset_height()));
+        if i == 0 { w1 = f64::from(c.offset_width()); h1 = f64::from(c.offset_height()); }
+    }
+    (gw, gh, w1, h1)
+}
+
+/// Every block has one fixed box (784 wide on a desktop, 392 on a phone, as tall as its tallest group plus 48 above and below).
+/// Every scene is scaled to fit and starts at the same corner of the union of all groups, which is centred; the stars sit at fixed places in the box, outside every scene's pieces:
+/// above the second piece, left of the group, and under the first piece beside the third. The proportions are the owner's
+/// approved layout. shortcut: polled twice a second, because the samples and tab changes alter a scene's size.
 fn fit() {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Some(win) = web_sys::window() else { return };
+    let Some(doc) = win.document() else { return };
     let Ok(boxes) = doc.query_selector_all(".feat-shot") else { return };
     use wasm_bindgen::JsCast;
     let html = |n: Option<web_sys::Node>| n.and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
+    let phone = win.inner_width().ok().and_then(|v| v.as_f64()).is_some_and(|v| v <= 760.0);
+    let bw = if phone { 392.0 } else { 784.0 };
     for i in 0..boxes.length() {
         let Some(b) = html(boxes.item(i)) else { continue };
         let w = f64::from(b.client_width());
         let Ok(scenes) = b.query_selector_all(".scene") else { continue };
-        // Every scene gets its own scale, so a scene that fades in already has its final size on the first frame.
-        let mut tall = 0.0_f64;
+        let mut all = vec![];
         for j in 0..scenes.length() {
             let Some(s) = html(scenes.item(j)) else { continue };
             cap_message(&s);
-            let nat = f64::from(s.offset_width());
-            let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.8));
-            let _ = s.style().set_property("--k", &k.to_string());
-            let _ = s.style().set_property("--dx", &format!("{}px", (w - nat * k) / 2.0));
-            tall = tall.max(f64::from(s.offset_height()) * k);
-            if s.class_list().contains("on") {
-                let _ = b.style().set_property("--k", &k.to_string());
-                let _ = b.style().set_property("--fxl", &format!("{}px", (w - nat * k) / 2.0));
-                let _ = b.style().set_property("--fxw", &format!("{}px", nat * k));
-            }
+            all.push((s.clone(), group(&s)));
         }
-        // The box is as tall as its tallest scene, so a switch never moves the lines or the page.
-        let _ = b.style().set_property("--sh", &format!("{tall}px"));
+        let max = |f: fn(&(f64, f64, f64, f64)) -> f64| all.iter().map(|(_, g)| f(g)).fold(0.0, f64::max);
+        let (mgw, mgh, mw1, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.2), max(|g| g.3));
+        let mnw1 = all.iter().map(|(_, g)| g.2).fold(f64::MAX, f64::min);
+        let bh = mgh + 96.0;
+        let k = (w / bw).min(0.85);
+        let (l, t) = ((bw - mgw) / 2.0, (bh - mgh) / 2.0);
+        // Every scene starts at the same corner (the union of all groups is centred), so the stars stay clear of each one.
+        for (s, _) in &all {
+            let _ = s.style().set_property("--k", &k.to_string());
+            let _ = s.style().set_property("--dx", &format!("{}px", (w - bw * k) / 2.0 + l * k));
+            let _ = s.style().set_property("--dy", &format!("{}px", t * k));
+        }
+        let _ = b.style().set_property("--k", &k.to_string());
+        let _ = b.style().set_property("--sh", &format!("{}px", bh * k));
+        let _ = b.style().set_property("--fxl", &format!("{}px", (w - bw * k) / 2.0));
+        let _ = b.style().set_property("--fxw", &format!("{}px", bw * k));
+        // Centres of the six stars in the box: top left pair, top right pair, bottom left pair.
+        let slots = if phone {
+            [(l + 22.0, t - 22.0), (l + 52.0, t - 30.0), (l + mgw - 24.0, t - 20.0), (l + mgw - 52.0, t - 28.0), (l + 24.0, t + mgh + 22.0), (l + 54.0, t + mgh + 30.0)]
+        } else {
+            let bx = l + 0.115 * mnw1; // left of the third piece, which starts 23% into the first
+            [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + mw1 + 14.0, t + 10.0), (l + mw1 + 40.0, t + 30.0), (bx, t + mh1 + 22.0), (bx - 6.0, t + mh1 + 56.0)]
+        };
+        let Ok(stars) = b.query_selector_all(".fx > i") else { continue };
+        for n in 0..stars.length().min(6) {
+            let Some(st) = html(stars.item(n)) else { continue };
+            let (x, y) = slots[n as usize];
+            let half = f64::from(st.offset_width()) / 2.0;
+            let _ = st.style().set_property("left", &format!("{}px", (x * k - half).max(0.0).min(if phone { w - half * 2.0 } else { 1e9 })));
+            let _ = st.style().set_property("top", &format!("{}px", y * k - half));
+        }
     }
 }
 
@@ -133,26 +171,20 @@ fn sample(key: &str) -> serde_json::Value {
     serde_json::from_str(&m.to_string().replace("{prefix}", "t!")).unwrap_or(m)
 }
 
-/// Shapes that belong to a scene: a pair at two random corners (a big sparkle with a small hex, and the other way round),
-/// one at a side edge, and a few rising motes. Each has its own float and twinkle timing. They sit behind the windows,
-/// so they only peek out at corners and edges.
-fn effects() -> impl IntoView {
-    let r = || js_sys::Math::random();
-    // Three of the four corners, each with a shield and a spark outside the group's edge.
-    let mut c = [0, 1, 2, 3];
-    for n in (1..4).rev() { c.swap(n, (r() * (n + 1) as f64) as usize); }
-    (0..3)
-        .flat_map(|k| {
-            let side = if c[k] % 2 == 0 { "left" } else { "right" };
-            let edge = if c[k] < 2 { "top" } else { "bottom" };
-            let (a, b) = if k % 2 == 0 { ("spark ol lg", "spark") } else { ("spark lg", "spark ol") };
-            [(a, side, edge, 1.0, 1.0), (b, side, edge, 12.0, 0.5 + r() * 1.5)]
-        })
-        .map(|(class, side, edge, x, y)| {
-            // Only the spark turns; the shield always stands upright.
-            let turn = if class.starts_with("spark") { -40.0 + r() * 80.0 } else { 0.0 };
-            let style = format!("{side}:{x:.0}%;{edge}:{y:.0}%;rotate:{turn:.0}deg;--gp:{:.0}%;--d:-{:.1}s", r() * 100.0, r() * 7.0);
-            view! { <i class=class style=style aria-hidden="true"></i> }
+/// The stars of a block, fixed in its box (`fit` sets their places): three pairs of a big and a small star, filled and outline.
+/// The seed (the block's number) makes the same few stars vary on every load: 0 to 2 stars are left out, each turns by its own
+/// angle and shows its own slice of the gradient.
+fn effects(seed: usize) -> impl IntoView {
+    let mut x = (seed as u32 + 1).wrapping_mul(2_654_435_761) | 1;
+    let mut r = move || { x ^= x << 13; x ^= x >> 17; x ^= x << 5; f64::from(x) / 4_294_967_296.0 };
+    // The block's number decides how many stars are left out (0, 1 or 2) and the seed which.
+    let left_out = seed % 3;
+    let off: Vec<usize> = (0..left_out).map(|n| (n * 3 + (r() * 3.0) as usize) % 6).collect();
+    (0..6)
+        .map(|n| {
+            let class = match n { 0 | 4 => "spark ol lg", 1 | 5 => "spark", 2 => "spark lg", _ => "spark ol" };
+            let hide = if off.contains(&n) { "display:none;" } else { "" };
+            view! { <i class=class style=format!("{hide}rotate:{:.0}deg;--gp:{:.0}%;--d:-{:.1}s", -40.0 + r() * 80.0, r() * 100.0, r() * 7.0) aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>()
 }
@@ -260,7 +292,7 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot"><div class="fx">{effects()}</div>
+                            <div class="feat-shot"><div class="fx">{effects(i)}</div>
                                 {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{move || tab.2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{shown(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card">{(!name.is_empty()).then(|| view! { <b class="ph">{name}</b> })}{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {

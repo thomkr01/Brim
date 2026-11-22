@@ -28,7 +28,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 - Module pages (Automod, Anti Nuke, Join gate, Verification and the rest): one generic page, `modules.rs`; its form fields come from `crates/dashboard/src/schema.rs`. Form widgets: `form.rs` (the one picker for channel, role, category: `ListPick`; members: `UserPick`, `one_member`). Shared parts (`Head`, `PageTabs`, `AddButton`, `Grip`, `screen_zoom`): `common.rs`. Markdown preview: `md.rs`. Discord message preview: `discord.rs`.
 
 ## Front page
-- `landing.rs`: `SECTIONS` (each block has a title and its scenes), `Landing`. Scene rules in `style.css` under "Three solid pieces per scene". Rules in `crates/dashboard/ui/design/README.md` (section on the front page).
+- `landing.rs`: `SECTIONS` (each block has a title and its scenes), `Landing`. Scene rules in `style.css` under "Three solid pieces per scene" (stars: `fit` and `effects` in `landing.rs`). Rules in `crates/dashboard/ui/design/README.md` (section on the front page).
 
 ## Bot messages and default texts
 - Defaults: `crates/logging/src/botmsg.rs` (`Def`, `COMMANDS`, `AUDIT_LOGS`; each message has a key, a template and its variables). Filling in variables: `render.rs`. Ticket texts: `crates/bot/src/tickets/msgs.rs`. Panic, lockdown and verify texts sit beside their code (`panic.rs`, `lockdown.rs`, `verify.rs`).
