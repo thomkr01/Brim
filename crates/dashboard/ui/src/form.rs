@@ -909,7 +909,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
         .as_str()
         .map_or_else(|| tail.replace('_', " "), String::from);
     // The group's name labels the control inside, whatever kind it is.
-    view! { <div class="row" class:tog=kind == "bool" role="group" aria-label=label.clone()><label>{label.clone()}{tip}</label>{input}</div> }
+    view! { <div class="row" class:tog=kind == "bool" role="group" aria-label=label.clone()><label>{label.clone()}{tip}</label>{input}{f["warn"].as_str().map(|w| view! { <span class="warn wline">{w.to_string()}</span> })}</div> }
 }
 
 /// Raw JSON of one section of the config in `val`.

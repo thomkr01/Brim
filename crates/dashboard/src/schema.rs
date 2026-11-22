@@ -75,6 +75,12 @@ fn hp(mut v: Value, help: &str) -> Value {
     v
 }
 
+/// A warning shown under the field, in full (not behind the info icon).
+fn wn(mut v: Value, warn: &str) -> Value {
+    v["warn"] = json!(warn);
+    v
+}
+
 /// A field stored in another section, shown on this section's page (saved with it).
 fn sx(section: &str, mut v: Value) -> Value {
     v["section"] = json!(section);
@@ -1341,8 +1347,8 @@ pub fn schema() -> Vec<Value> {
             "Full conversation in the ticket log",
         ),
         hp(
-            ti(dv(fg("General", "public_channel", "bool"), true), "Public ticket channel"),
-            "Brim keeps #open-a-ticket in the ticket category with the panel message. Verified members only see it and press the button; nobody can write or react there. Turning this off deletes the channel.",
+            wn(ti(dv(fg("General", "public_channel", "bool"), true), "Public ticket channel"), "Turning this off deletes the channel."),
+            "Brim keeps #open-a-ticket in the ticket category with the panel message. Verified members only see it and press the button; nobody can write or react there.",
         ),
         ti(fg("General", "ping_roles", "roles"), "Roles pinged on a new ticket"),
         ti(fg("General", "ping_here", "bool"), "Ping @here on a new ticket"),
