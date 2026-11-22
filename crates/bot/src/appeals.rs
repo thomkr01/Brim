@@ -150,7 +150,7 @@ async fn decide(
         // One transaction: a crash between them would drop the jobs that hold the real end, so a
         // retry would record a permanent ban as the undo (R-h3 4).
         let done = sqlx::query(
-            "UPDATE appeals SET status=$2, decided_by=$3, reply=nullif($4,'') WHERE id=$1 AND status='open'",
+            "UPDATE appeals SET status=$2, decided_by=$3, reply=nullif($4,''), decided_at=now() WHERE id=$1 AND status='open'",
         )
         .bind(id)
         .bind(status)
@@ -197,6 +197,11 @@ async fn decide(
         tx.commit().await?;
     } else {
         drop(tx);
+    }
+    if act == "accept" {
+        let until = crate::app::now_secs() + WATCH_SECS;
+        let mut all = ACCEPTED.lock().unwrap_or_else(|e| e.into_inner());
+        all.insert((gid.get(), user as u64), until);
     }
     if act == "accept" && !resumed {
         // The appeal is already decided; a lost stats row must not report it as failed.
@@ -369,6 +374,38 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         )
         .await?;
     Ok(true)
+}
+
+/// Per server and member: until when an accepted appeal makes their messages count as from a
+/// suspicious account (a little more automod heat for 7 days, owner decision 2026-11-22).
+static ACCEPTED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<(u64, u64), i64>>> =
+    std::sync::LazyLock::new(Default::default);
+const WATCH_SECS: i64 = 7 * 86_400;
+
+pub fn recently_accepted(gid: Id<GuildMarker>, user: Id<UserMarker>) -> bool {
+    let now = crate::app::now_secs();
+    let mut all = ACCEPTED.lock().unwrap_or_else(|e| e.into_inner());
+    all.retain(|_, until| *until > now);
+    all.contains_key(&(gid.get(), user.get()))
+}
+
+/// The accepts of the last 7 days, read once at start.
+pub async fn load_accepted(pool: &sqlx::PgPool) {
+    let rows: Result<Vec<(i64, i64, i64)>, _> = sqlx::query_as(
+        "SELECT guild_id, user_id, EXTRACT(EPOCH FROM decided_at)::BIGINT FROM appeals
+         WHERE status = 'accepted' AND decided_at > now() - interval '7 days'",
+    )
+    .fetch_all(pool)
+    .await;
+    match rows {
+        Ok(rows) => {
+            let mut all = ACCEPTED.lock().unwrap_or_else(|e| e.into_inner());
+            for (g, u, at) in rows {
+                all.insert((g as u64, u as u64), at + WATCH_SECS);
+            }
+        }
+        Err(e) => tracing::warn!(?e, "reading the recently accepted appeals failed"),
+    }
 }
 
 /// Job `appeal_accept`: a dashboard accept runs here, so it goes through the same permit, panic

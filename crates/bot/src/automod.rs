@@ -307,9 +307,11 @@ async fn check_message(
         upper_chars,
         lower_chars,
         from_webhook: m.webhook_id.is_some(),
-        // Hidden factor: no avatar, or younger than the join gate's minimum age.
+        // Hidden factor: no avatar, younger than the join gate's minimum age, or an appeal
+        // accepted in the last 7 days.
         suspicious_account: m.author.avatar.is_none()
-            || now - account_created_ms(m.author.id.get()) < cfg.joingate.min_age_ms(),
+            || now - account_created_ms(m.author.id.get()) < cfg.joingate.min_age_ms()
+            || crate::appeals::recently_accepted(gid, m.author.id),
         whitelist: Whitelist {
             spam: partner || listed(&wl.spam),
             mention_spam: listed(&wl.mentions),

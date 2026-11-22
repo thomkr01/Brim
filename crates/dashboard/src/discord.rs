@@ -208,7 +208,7 @@ impl Discord {
     }
 
     /// A bot GET reused for [`MEMO_TTL`]; None when Discord answers 404.
-    async fn memo_get(&self, path: String) -> Result<Option<serde_json::Value>> {
+    pub(crate) async fn memo_get(&self, path: String) -> Result<Option<serde_json::Value>> {
         self.memo_get_within(path, MEMO_TTL).await
     }
 

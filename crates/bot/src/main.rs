@@ -191,6 +191,7 @@ async fn main() -> Result<()> {
         }
     });
     metrics::load_seen(&app.pool).await;
+    appeals::load_accepted(&app.pool).await;
     tokio::spawn(metrics::keep_seen(app.pool.clone()));
     metrics::STARTED.store(app::now_secs() as u64, std::sync::atomic::Ordering::Relaxed);
     tokio::spawn(scheduler::run(app.clone()));

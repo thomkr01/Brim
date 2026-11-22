@@ -78,6 +78,22 @@ pub fn AppealList(guild: String) -> impl IntoView {
             reply.try_set(String::new());
         })
     };
+    let ask = move |id: i64| {
+        busy.set((id, "ask"));
+        spawn_local(async move {
+            let path = format!("/api/guilds/{}/appeals/{id}/ask", g.get_value());
+            let r = api("POST", &path, Some(json!({"text": reply.get_untracked()}))).await;
+            busy.try_set((0, ""));
+            match r {
+                Ok(_) => {
+                    msg.ok("Question sent. The member's answer shows under the appeal.");
+                    reply.try_set(String::new());
+                    load()
+                }
+                Err(e) => msg.err(e),
+            }
+        })
+    };
     // The link members get in the ban DM: staff can post it in the rules for members whose DMs are closed.
     let link = format!(
         "{}/#/appeal/{}",
@@ -118,6 +134,7 @@ pub fn AppealList(guild: String) -> impl IntoView {
                             <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "deny", false, false, false)>{busy_label(move || busy.get() == (id, "deny"), "Deny")}</button>
                             <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "blacklist", false, true, false)>{busy_label(move || busy.get() == (id, "blacklist"), "Deny and blacklist")}</button>
                             <button class="ghost" disabled=move || busy.get().0 != 0 on:click=move |_| decide(id, "dismiss", false, false, true)>{busy_label(move || busy.get() == (id, "dismiss"), "Dismiss")}</button>
+                            <button class="ghost" disabled=move || busy.get().0 != 0 || reply.get().trim().is_empty() title="Sends the reply text above as a question. The member answers on the appeal page." on:click=move |_| ask(id)>{busy_label(move || busy.get() == (id, "ask"), "Ask the member")}</button>
                         </div>
                     </Show>
                 </div> }
@@ -230,18 +247,48 @@ pub fn AppealForm(guild: String) -> impl IntoView {
             }
         })
     };
-    spawn_local(async move {
-        match api("GET", &format!("/api/appeal/{}", g.get_value()), None).await {
-            Ok(v) => {
-                answers.set(vec![
-                    String::new();
-                    v["fields"].as_array().map_or(0, Vec::len)
-                ]);
-                info.set(v)
-            }
-            Err(e) => fail.set(Some(e)),
+    let load_info = move || {
+        if g.is_disposed() {
+            return;
         }
-    });
+        spawn_local(async move {
+            match api("GET", &format!("/api/appeal/{}", g.get_value()), None).await {
+                Ok(v) => {
+                    answers.try_set(vec![
+                        String::new();
+                        v["fields"].as_array().map_or(0, Vec::len)
+                    ]);
+                    info.try_set(v);
+                }
+                Err(e) => {
+                    fail.try_set(Some(e));
+                }
+            }
+        })
+    };
+    load_info();
+    // More for the open appeal: as often as the member wants until it is decided.
+    let more = RwSignal::new(String::new());
+    let add = move |_| {
+        sending.set(true);
+        spawn_local(async move {
+            let r = api(
+                "POST",
+                &format!("/api/appeal/{}/add", g.get_value()),
+                Some(json!({"text": more.get_untracked()})),
+            )
+            .await;
+            sending.try_set(false);
+            match r {
+                Ok(_) => {
+                    more.try_set(String::new());
+                    msg.ok("Added to your appeal.");
+                    load_mine()
+                }
+                Err(e) => msg.err(e),
+            }
+        })
+    };
     let submit = move |_| {
         sending.set(true);
         spawn_local(async move {
@@ -253,7 +300,11 @@ pub fn AppealForm(guild: String) -> impl IntoView {
             .await;
             sending.try_set(false);
             match r {
-                Ok(_) => done.set(true),
+                Ok(_) => {
+                    done.set(true);
+                    load_mine();
+                    load_info()
+                }
                 Err(e) => msg.err(e),
             }
         })
@@ -274,6 +325,7 @@ pub fn AppealForm(guild: String) -> impl IntoView {
                 view! { <div class="card appeal-row">
                     <div class="row"><span class=format!("chip {chip}")>{text}</span><b>{format!("{} appeal", s(&r["kind"]))}</b><span class="sp"></span><span class="muted small">{format!("Sent {}", crate::profile::when(&r["at"]))}</span></div>
                     {r["reply"].as_str().map(|t| view! { <p><b>"Staff reply: "</b>{t.to_string()}</p> })}
+                    {open.then(|| r["answers"].as_array().cloned().unwrap_or_default().into_iter().map(|a| view! { <p><b>{s(&a["label"])}</b><br/>{s(&a["answer"])}</p> }).collect_view())}
                     <Show when=move || open><button class="ghost" on:click=withdraw>"Withdraw"</button></Show>
                 </div> }
             }
@@ -288,7 +340,15 @@ pub fn AppealForm(guild: String) -> impl IntoView {
             let i = info.get();
             if i["blacklisted"] == true { panel(Brim::Stop, "Appeals are closed for you", "You can no longer appeal in this server.").into_any() }
             else if i["kind"].is_null() { panel(Brim::ThumbsUp, "Nothing to appeal", "You are not banned or timed out in this server.").into_any() }
+            else if i["open"] == true { view! { <div class="card">
+                {about(&i, g.get_value())}
+                <h2>"Add to your appeal"</h2>
+                <p class="muted">"Staff have not decided yet. Add more, or answer their question. Once they decide, nothing more can be added."</p>
+                <textarea class="short" aria-label="more for your appeal" maxlength="1000" prop:value=more on:input=move |e| more.set(event_target_value(&e))></textarea>
+                <button class="send" disabled=move || sending.get() || more.get().trim().is_empty() on:click=add>{busy_label(move || sending.get(), "Add")}</button>
+            </div> }.into_any() }
             else { view! { <div class="card">
+                {about(&i, g.get_value())}
                 <h2>{if i["kind"] == "ban" { "Appeal your ban" } else { "Appeal your timeout" }}</h2>
                 <p class="muted">"Answer the questions below. Staff read your appeal and answer it on this page."</p>
                 {questions(i["fields"].as_array().cloned().unwrap_or_default(), answers)}
@@ -296,6 +356,19 @@ pub fn AppealForm(guild: String) -> impl IntoView {
             </div> }.into_any() }
         }}
         </div>
+    }
+}
+
+/// The server, the reason the member was told and, for a temporary punishment only, its end.
+fn about(i: &Value, guild: String) -> impl IntoView {
+    let name = s(&i["server"]["name"]);
+    let icon = i["server"]["icon"].as_str().map(|h| format!("https://cdn.discordapp.com/icons/{guild}/{h}.png?size=64"));
+    let reason = i["reason"].as_str().filter(|r| !r.is_empty()).map(String::from);
+    let ends = i["ends"].as_str().map(|_| crate::profile::when(&i["ends"]));
+    view! {
+        <Show when={let n = name.clone(); move || !n.is_empty()}><div class="row">{icon.clone().map(|src| view! { <img class="gicon" src=src alt="" /> })}<b>{name.clone()}</b></div></Show>
+        {reason.map(|r| view! { <p><b>"Reason: "</b>{r}</p> })}
+        {ends.map(|t| view! { <p><b>"Ends: "</b>{t}</p> })}
     }
 }
 

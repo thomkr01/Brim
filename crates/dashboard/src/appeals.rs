@@ -28,6 +28,7 @@ type MineRow = (
     String,
     Option<String>,
     chrono::DateTime<chrono::Utc>,
+    Value,
 );
 
 const MAX_ANSWER: usize = 1000;
@@ -76,8 +77,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/appeal/notifications", get(unread).post(mark_seen))
         .route("/api/appeal/{guild}/mine", get(mine))
         .route("/api/appeal/{guild}/withdraw", post(withdraw))
+        .route("/api/appeal/{guild}/add", post(add))
         .route(g, get(list))
         .route(&format!("{g}/{{id}}/decide"), post(decide))
+        .route(&format!("{g}/{{id}}/ask"), post(ask))
         .route(
             &format!("{g}/blacklist"),
             get(blacklist).post(blacklist_add),
@@ -103,18 +106,18 @@ fn not_found(e: &anyhow::Error) -> bool {
         == Some(reqwest::StatusCode::NOT_FOUND)
 }
 
-/// What the user can appeal in this server: "ban", "timeout" or None.
+/// What the user can appeal in this server: "ban", "timeout" or None, and a timeout's end.
 async fn punishment(
     st: &AppState,
     guild: i64,
     user: i64,
-) -> Result<Option<&'static str>, ApiError> {
+) -> Result<Option<(&'static str, Option<String>)>, ApiError> {
     match st
         .discord
         .call(Method::GET, &format!("/guilds/{guild}/bans/{user}"), None)
         .await
     {
-        Ok(_) => return Ok(Some("ban")),
+        Ok(_) => return Ok(Some(("ban", None))),
         Err(e) if not_found(&e) => {}
         Err(e) => return Err(e.into()),
     }
@@ -128,10 +131,11 @@ async fn punishment(
         .await
     {
         Ok(m) => {
-            let until = m["communication_disabled_until"]
-                .as_str()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok());
-            Ok(until.filter(|t| *t > chrono::Utc::now()).map(|_| "timeout"))
+            let until = m["communication_disabled_until"].as_str();
+            let on = until
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .is_some_and(|t| t > chrono::Utc::now());
+            Ok(on.then(|| ("timeout", until.map(String::from))))
         }
         Err(e) if not_found(&e) => Ok(None),
         Err(e) => Err(e.into()),
@@ -154,7 +158,50 @@ async fn form(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     if !c.enabled {
         return Err(ApiError::NotFound);
     }
-    let kind = punishment(&st, guild, s.user_id).await?;
+    let p = punishment(&st, guild, s.user_id).await?;
+    let kind = p.as_ref().map(|p| p.0);
+    // The reason the member was told in the punishment DM: staff's newest Brim case for it. Nothing
+    // staff-only: no moderator, proof or note. The bot's own cases are left out, because their DM
+    // may hide the reason (an automod filter, the Join Gate's minimum age). A ban made outside
+    // Brim has no case and no reason.
+    let bot: i64 = st.discord.bot_id().await?.parse().unwrap_or_default();
+    let case: Option<(Option<String>, Option<chrono::DateTime<chrono::Utc>>)> = match kind {
+        Some(k) => sqlx::query_as(
+            "select reason, case when kind = 'tempban' then expires_at end from cases
+             where guild_id = $1 and user_id = $2 and active and mod_id <> $4
+               and kind = any(case when $3 = 'ban' then array['ban', 'tempban'] else array['timeout'] end)
+             order by created_at desc limit 1",
+        )
+        .bind(guild)
+        .bind(s.user_id)
+        .bind(k)
+        .bind(bot)
+        .fetch_optional(&st.db)
+        .await?,
+        None => None,
+    };
+    let (reason, ban_end) = case.unwrap_or_default();
+    // Only a temporary punishment has an end: a timeout, or a ban Brim lifts by itself.
+    let ends = p.and_then(|p| p.1).or(ban_end.map(|t| t.to_rfc3339()));
+    // Only for someone punished here: anyone else learns nothing about the server. A failed lookup
+    // only hides the name.
+    let server = match kind {
+        Some(_) => st
+            .discord
+            .memo_get(format!("/guilds/{guild}"))
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    }
+    .map(|g| json!({"name": g["name"], "icon": g["icon"]}));
+    let open: bool = sqlx::query_scalar(
+        "select exists(select 1 from appeals where guild_id = $1 and user_id = $2 and status = 'open')",
+    )
+    .bind(guild)
+    .bind(s.user_id)
+    .fetch_one(&st.db)
+    .await?;
     let fields: Vec<Value> = c
         .fields
         .iter()
@@ -162,7 +209,8 @@ async fn form(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         .map(|f| json!({"label": f.label, "long": f.long, "required": f.required, "options": f.options, "multi": f.multi, "min": f.min, "max": f.max}))
         .collect();
     Ok(Json(
-        json!({"fields": fields, "kind": kind, "blacklisted": blacklisted(&st, guild, s.user_id).await?}),
+        json!({"fields": fields, "kind": kind, "blacklisted": blacklisted(&st, guild, s.user_id).await?,
+            "server": server, "reason": reason, "ends": ends, "open": open}),
     ))
 }
 
@@ -196,7 +244,7 @@ async fn submit(
             "you can no longer appeal in this server",
         ));
     }
-    let kind = punishment(&st, guild, s.user_id)
+    let (kind, _) = punishment(&st, guild, s.user_id)
         .await?
         .ok_or(ApiError::Forbidden("you are not banned or timed out here"))?;
     // Withdraw and appeal again must not become a way to flood staff.
@@ -274,7 +322,7 @@ async fn submit(
 /// The member's own appeals with their status and the staff reply.
 async fn mine(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
     let rows: Vec<MineRow> = sqlx::query_as(
-        "select id, kind, status, reply, created_at from appeals
+        "select id, kind, status, reply, created_at, answers from appeals
          where guild_id = $1 and user_id = $2 order by created_at desc limit 20",
     )
     .bind(guild)
@@ -283,7 +331,7 @@ async fn mine(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     .await?;
     Ok(Json(json!(rows
         .into_iter()
-        .map(|(id, kind, status, reply, at)| json!({"id": id, "kind": kind, "status": status, "reply": reply, "at": at}))
+        .map(|(id, kind, status, reply, at, answers)| json!({"id": id, "kind": kind, "status": status, "reply": reply, "at": at, "answers": answers}))
         .collect::<Vec<_>>())))
 }
 
@@ -322,6 +370,130 @@ async fn withdraw(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -
     .await?;
     let id = id.ok_or(ApiError::NotFound)?;
     close_log(&st, guild, id, "Withdrawn by the member").await;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Entries an open appeal holds at most: the form's answers, then the member's additions and
+/// staff questions, one row each. The member stops 10 below it, so staff can always still ask.
+const MAX_ENTRIES: i32 = MAX_APPEAL_FIELDS as i32 + 40;
+
+#[derive(Deserialize)]
+struct Text {
+    text: String,
+}
+
+/// One more entry on an open appeal; once it is decided nothing is added. `who` is the member
+/// (`Ok`, their open appeal) or staff (`Err`, the appeal id). `None`: no open appeal matched, or
+/// it is full.
+async fn add_entry(
+    st: &AppState,
+    guild: i64,
+    who: Result<i64, i64>,
+    label: &str,
+    text: &str,
+) -> Result<Option<i64>, ApiError> {
+    let text = text.trim();
+    if text.is_empty() || text.chars().count() > MAX_ANSWER {
+        return Err(ApiError::BadRequest(format!(
+            "write 1 to {MAX_ANSWER} characters"
+        )));
+    }
+    let (q, key) = match who {
+        Ok(user) => (
+            "update appeals set answers = answers || $3 where guild_id = $1 and user_id = $2
+             and status = 'open' and jsonb_array_length(answers) < $4 returning id",
+            user,
+        ),
+        Err(id) => (
+            "update appeals set answers = answers || $3 where guild_id = $1 and id = $2
+             and status = 'open' and jsonb_array_length(answers) < $4 returning id",
+            id,
+        ),
+    };
+    let cap = if who.is_ok() {
+        MAX_ENTRIES - 10
+    } else {
+        MAX_ENTRIES
+    };
+    Ok(sqlx::query_scalar(q)
+        .bind(guild)
+        .bind(key)
+        .bind(json!([{"label": label, "answer": text}]))
+        .bind(cap)
+        .fetch_optional(&st.db)
+        .await?)
+}
+
+/// The member adds to their open appeal, as often as they want within [`MAX_ENTRIES`].
+async fn add(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Json(b): Json<Text>,
+) -> Res {
+    if !cfg(&st, guild).await?.enabled {
+        return Err(ApiError::NotFound);
+    }
+    let Some(id) = add_entry(&st, guild, Ok(s.user_id), "Added by the member", &b.text).await?
+    else {
+        return Err(ApiError::BadRequest(
+            "no open appeal, or it holds as much as it can".into(),
+        ));
+    };
+    // The member's text: a masked link or a mention must show as typed, not work.
+    let text = brim_core::msgvars::escape(b.text.trim());
+    patch_log(&st, guild, id, "Added by the member", &text, false).await;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// Staff ask the member a question before they decide; it shows on the appeal page and in a DM.
+async fn ask(
+    State(st): State<AppState>,
+    s: Sess,
+    Path((guild, id)): Path<(i64, i64)>,
+    Json(b): Json<Text>,
+) -> Res {
+    reviewer(&st, &s, guild).await?;
+    let label = "Question from staff";
+    add_entry(&st, guild, Err(id), label, &b.text)
+        .await?
+        .ok_or(ApiError::BadRequest(
+            "this appeal is decided, or it holds as much as it can".into(),
+        ))?;
+    let q = b.text.trim();
+    patch_log(
+        &st,
+        guild,
+        id,
+        &format!("Asked by {}", s.username),
+        q,
+        false,
+    )
+    .await;
+    let (user, kind): (i64, String) =
+        sqlx::query_as("select user_id, kind from appeals where id = $1 and guild_id = $2")
+            .bind(id)
+            .bind(guild)
+            .fetch_one(&st.db)
+            .await?;
+    let link = format!(
+        "{}/#/appeal/{guild}",
+        st.discord.redirect_uri.trim_end_matches("/auth/callback")
+    );
+    let id_s = id.to_string();
+    let vars = [
+        ("kind", kind.as_str()),
+        ("id", id_s.as_str()),
+        ("staff_question", q),
+        ("appeal_link", link.as_str()),
+    ];
+    if let Err(e) = st
+        .discord
+        .dm(&st.db, Some(guild), user, "dm.appeal_question", &vars)
+        .await
+    {
+        tracing::warn!(?e, "appeal question DM failed");
+    }
     Ok(Json(json!({"ok": true})))
 }
 
@@ -408,7 +580,7 @@ async fn decide(
     };
     let reply = b.reply.trim().chars().take(1000).collect::<String>();
     sqlx::query(
-        "update appeals set status = $2, decided_by = $3, reply = nullif($4, '') where id = $1",
+        "update appeals set status = $2, decided_by = $3, reply = nullif($4, ''), decided_at = now() where id = $1",
     )
     .bind(id)
     .bind(status)
@@ -463,6 +635,30 @@ async fn decide(
 
 /// Closes the Discord log of an appeal decided elsewhere: buttons off, a Decision field added.
 async fn close_log(st: &AppState, guild: i64, id: i64, decision: &str) {
+    patch_log(st, guild, id, "Decision", decision, true).await
+}
+
+/// Adds a field to the appeal's Discord log; `close` also takes its buttons off.
+async fn patch_log(st: &AppState, guild: i64, id: i64, name: &str, value: &str, close: bool) {
+    // One edit at a time: each one reads the message and writes all its embeds back, so two at
+    // once would drop a field (or an addition would remove the Decision field).
+    static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = ONE.lock().await;
+    if !close {
+        let open: bool = sqlx::query_scalar(
+            "select status = 'open' from appeals where id = $1 and guild_id = $2",
+        )
+        .bind(id)
+        .bind(guild)
+        .fetch_optional(&st.db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+        if !open {
+            return;
+        }
+    }
     let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
         "select log_channel, log_message from appeals where id = $1 and guild_id = $2",
     )
@@ -480,28 +676,45 @@ async fn close_log(st: &AppState, guild: i64, id: i64, decision: &str) {
         return;
     };
     let mut embeds = m["embeds"].take();
-    add_decision(&mut embeds, decision);
-    let body = if embeds.is_array() {
-        json!({"embeds": embeds, "components": []})
-    } else {
-        json!({"components": []})
-    };
+    add_field(&mut embeds, name, value, close);
+    let mut body = json!({});
+    if embeds.is_array() {
+        body["embeds"] = embeds;
+    }
+    if close {
+        body["components"] = json!([]);
+    }
     if let Err(e) = st.discord.call(Method::PATCH, &path, Some(body)).await {
         tracing::warn!(?e, "closing the appeal log failed");
     }
 }
 
-/// Adds the Decision field to the log's first embed. A log without an embed is left as it is
-/// (`embeds[0]` would panic and kill `decide` before the verdict DM).
-fn add_decision(embeds: &mut Value, decision: &str) {
+/// Adds a field to the log's first embed. A log without an embed is left as it is (`embeds[0]`
+/// would panic and kill `decide` before the verdict DM). An addition (`last` false) is cut short and
+/// left out once the log is long, so the Decision field always fits.
+fn add_field(embeds: &mut Value, name: &str, value: &str, last: bool) {
     let Some(e) = embeds.get_mut(0).and_then(Value::as_object_mut) else {
         return;
     };
-    // Discord refuses the whole PATCH (buttons stay) for a value over 1024 or a 26th field.
-    let value: String = decision.chars().take(1024).collect();
+    // Discord refuses the whole PATCH (buttons stay) for a value over 1024, a 26th field or an
+    // embed over 6000 characters in all.
+    let size = |v: &Value| v.as_str().map_or(0, |s| s.chars().count());
+    let used = size(&e.get("description").cloned().unwrap_or_default())
+        + e.get("fields").and_then(Value::as_array).map_or(0, |f| {
+            f.iter().map(|f| size(&f["name"]) + size(&f["value"])).sum()
+        });
+    let (cap, room, max) = if last {
+        (1024, 25, usize::MAX)
+    } else {
+        (300, 24, 4000)
+    };
+    let mut value: String = value.chars().take(cap).collect();
+    if value.is_empty() {
+        value = "-".into();
+    }
     if let Some(fields) = e.entry("fields").or_insert(json!([])).as_array_mut() {
-        if fields.len() < 25 {
-            fields.push(json!({"name": "Decision", "value": value, "inline": false}));
+        if fields.len() < room && used + value.chars().count() <= max {
+            fields.push(json!({"name": name, "value": value, "inline": false}));
         }
     }
 }
@@ -813,11 +1026,11 @@ mod tests {
             (json!([{"fields": 1}]), json!([{"fields": 1}])),
             (json!([{"fields": [d]}]), json!([{"fields": [d, d]}])),
         ] {
-            add_decision(&mut embeds, "Denied");
+            add_field(&mut embeds, "Decision", "Denied", true);
             assert_eq!(embeds, want);
         }
         let mut long = json!([{}]);
-        add_decision(&mut long, &"x".repeat(1100));
+        add_field(&mut long, "Decision", &"x".repeat(1100), true);
         assert_eq!(
             long[0]["fields"][0]["value"]
                 .as_str()
@@ -827,8 +1040,20 @@ mod tests {
             1024
         );
         let mut full = json!([{"fields": vec![d.clone(); 25]}]);
-        add_decision(&mut full, "Denied");
+        add_field(&mut full, "Decision", "Denied", true);
         assert_eq!(full[0]["fields"].as_array().unwrap().len(), 25);
+        // An addition keeps the last field and room for the Decision field.
+        let mut near = json!([{"fields": vec![d.clone(); 24]}]);
+        add_field(&mut near, "Added by the member", "more", false);
+        assert_eq!(near[0]["fields"].as_array().unwrap().len(), 24);
+        let mut long = json!([{"description": "x".repeat(3900)}]);
+        add_field(&mut long, "Added by the member", &"y".repeat(500), false);
+        assert!(long[0]
+            .get("fields")
+            .is_none_or(|f| f.as_array().unwrap().is_empty()));
+        let mut short = json!([{}]);
+        add_field(&mut short, "Added by the member", &"y".repeat(500), false);
+        assert_eq!(short[0]["fields"][0]["value"].as_str().unwrap().len(), 300);
     }
 
     #[test]

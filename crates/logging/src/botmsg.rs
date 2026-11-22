@@ -461,6 +461,15 @@ fn build() -> Vec<Def> {
             text,
         ));
     }
+    out.push(plain(
+        "dm.appeal_question",
+        "Appeal question",
+        g,
+        &["kind", "id", "staff_question", "appeal_link"],
+        "Question about your appeal",
+        BLUE,
+        "❓ Staff have a question about your {kind} appeal (#{id}):\n{staff_question}\nAnswer it on the appeal page: {appeal_link}",
+    ));
     out.push(frame(
         "dm.join_gate",
         "Join Gate punishment",
@@ -6161,6 +6170,16 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     ("kind", "Appeal kind", "ban"),
     ("id", "ID of the item (appeal number, note id ...)", "42"),
     ("verdict", "Verdict", "approved"),
+    (
+        "staff_question",
+        "Staff question",
+        "Can you tell us more about what happened?",
+    ),
+    (
+        "appeal_link",
+        "Link to the appeal page",
+        "https://example.com/#/appeal/123456789012345678",
+    ),
     (
         "reply",
         "Staff reply",
