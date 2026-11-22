@@ -672,3 +672,11 @@ The bar is hidden until the visitor scrolls past the hero's copper line. The fir
 The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-sizes.mjs` allows no raw pixel value in a padding, so dashboard-ui failed on main. It was not run before the push.
 
 **Rule:** a width you need inside a padding is the page width token `--w-wide` (never a raw value or a new property that only hides it), and `node tools/ui-sizes.mjs` runs before every push that touches `style.css`.
+
+## Module and part switches lied after a failed reload and on an off module (bug hunt 2026-11-22)
+
+- After a good save, the switch read the config again and ignored a failed read: it kept the old state and the toast said "Saved!".
+- A part of an off module (Join Gate while Server Joins is off) showed ON and asked "Turn Join Gate off?", but nothing ran. An Editor got an enabled part switch there, and every click was refused, because turning the module on needs a Trusted Admin with 2FA.
+- At 375 px a part card held icon, text, switch and chevron; the title wrapped in an 80 px column and the chevron left the card.
+- Root cause: the switches were tested only on the good path, as Owner, at desktop width.
+- **Rule:** a control that reads the state again after a save reports a failed read as an error. A part switch shows what runs (`part_on` reads the module too), and its `may` asks for every bar the server checks for that write. A card row that adds a control is measured at 375 px.

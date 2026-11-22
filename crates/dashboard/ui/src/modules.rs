@@ -34,8 +34,26 @@ fn flag(page: &str) -> Option<&'static str> {
     ["automod", "antinuke", "joingate", "joinraid", "verification", "tickets", "catch", "raider_list"].into_iter().find(|k| *k == page)
 }
 
-/// Whether a part is on; `None` when it has no switch or the config is not loaded.
+/// The module key a part belongs to (same as `brim_core::sections::module_of`).
+fn module_key(part: &str) -> Option<&'static str> {
+    match part {
+        "joingate" | "joinraid" | "verification" | "raider_list" => Some("server_joins"),
+        "catch" => Some("moderation"),
+        _ => None,
+    }
+}
+
+/// The off module a part waits on: its own setting may be on, but nothing runs.
+fn module_off(cfg: &Value, part: &str) -> Option<&'static str> {
+    module_key(part).filter(|m| cfg["config"]["modules"][*m].as_bool() == Some(false))
+}
+
+/// Whether a part runs; `None` when it has no switch or the config is not loaded. A part of an off
+/// module shows off, so its switch does not ask to stop what already does not run.
 pub fn part_on(cfg: &Value, page: &str) -> Option<bool> {
+    if module_off(cfg, page).is_some() && cfg["config"].is_object() {
+        return Some(false);
+    }
     cfg["config"][flag(page)?]["enabled"].as_bool().or_else(|| cfg["config"].is_object().then_some(false))
 }
 
@@ -97,7 +115,12 @@ pub fn ModuleSwitch(guild: String, section: &'static str, #[prop(default = "enab
     let cfg = expect_context::<Cfg>().0;
     let aria = format!("{group} on or off");
     // `modules` is no page: its bar is a Trusted Admin (the server checks it, and the 2FA step-up).
-    let may = move || if section == "modules" { access.rank() >= 3 } else { access.of(section) == "full" };
+    // A part of an off module turns the module on too, so it needs that bar as well.
+    let may = move || match section {
+        "modules" => access.rank() >= 3,
+        _ if module_off(&cfg.get(), section).is_some() => access.rank() >= 3 && access.of(section) == "full",
+        _ => access.of(section) == "full",
+    };
     let click = move |e: leptos::ev::MouseEvent| {
         // The switch sits in the module's link: no navigation, and the checkbox follows the saved state only.
         e.prevent_default();
@@ -110,18 +133,26 @@ pub fn ModuleSwitch(guild: String, section: &'static str, #[prop(default = "enab
             return msg.err(format!("Brim could not read the {group} settings, so open its page to see why."));
         }
         let (g, group, version, now) = (guild.clone(), group.clone(), v["version"].as_i64().unwrap_or(0), switch_on(&v, section, key).unwrap_or(false));
+        // A part that is kept on in an off module: turning it on means turning its module on.
+        let (section, key) = match module_off(&v, section) {
+            Some(m) if v["config"][section]["enabled"] == true => ("modules", m),
+            _ => (section, key),
+        };
         let mut value = if v["config"][section].is_object() { v["config"][section].clone() } else { json!({}) };
         value[key] = json!(!now);
         let go = move |_: String| {
             busy.set(true);
             run_act(
                 async move {
-                    let r = api("PUT", &format!("/api/guilds/{g}/config/{section}"), Some(json!({"expected_version": version, "value": value}))).await;
+                    let mut r = api("PUT", &format!("/api/guilds/{g}/config/{section}"), Some(json!({"expected_version": version, "value": value}))).await;
                     // The config is read again, except while the 2FA prompt is open: rebuilding the nav would
                     // drop the control that is clicked again after the code. A conflict means another tab saved first.
                     if r.as_ref().err().is_none_or(|e| e != "step_up_required") && crate::hash().first().map(String::as_str) == Some(g.as_str()) {
-                        if let Ok(c) = api("GET", &format!("/api/guilds/{g}/config"), None).await {
-                            cfg.try_set(c);
+                        match api("GET", &format!("/api/guilds/{g}/config"), None).await {
+                            Ok(c) => _ = cfg.try_set(c),
+                            // The switch still shows the old state: say so, not "Saved!".
+                            Err(_) if r.is_ok() => r = Err("Saved, but the page could not load the new state. Reload the page.".into()),
+                            Err(_) => {}
                         }
                     }
                     busy.try_set(false);
@@ -207,4 +238,20 @@ pub fn group_by_slug(s: &str) -> Option<&'static str> {
 /// Sidebar title of a module entry (a group name or a page key).
 pub fn label(entry: &str) -> String {
     TOP.iter().chain(NAV.iter().flat_map(|(_, i)| i.iter())).find(|(k, _)| *k == entry).map_or(entry.to_string(), |(_, t)| t.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn part_of_off_module_shows_off() {
+        let cfg = json!({"config": {"modules": {"server_joins": false}, "joingate": {"enabled": true}, "automod": {"enabled": true}}});
+        assert_eq!(part_on(&cfg, "joingate"), Some(false));
+        assert_eq!(module_off(&cfg, "joingate"), Some("server_joins"));
+        assert_eq!(part_on(&cfg, "automod"), Some(true));
+        let on = json!({"config": {"joingate": {"enabled": true}}});
+        assert_eq!(part_on(&on, "joingate"), Some(true));
+        assert_eq!(part_on(&json!(null), "joingate"), None);
+    }
 }
