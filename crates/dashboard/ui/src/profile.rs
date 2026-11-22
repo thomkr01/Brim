@@ -224,34 +224,37 @@ impl Page {
             },
         );
     }
+    /// What stops a save, said as the save says it.
+    fn problem(self) -> Option<String> {
+        let nick = self.nick.get_untracked().trim().chars().count();
+        let bio = self.bio.get_untracked().trim().chars().count();
+        if nick > NICK_MAX {
+            return Some(format!("The bot name is longer than {NICK_MAX} characters."));
+        }
+        if bio > BIO_MAX {
+            return Some(format!("The bio is longer than {BIO_MAX} characters."));
+        }
+        let (kind, text) = (self.kind.get_untracked(), self.text.get_untracked());
+        let text = text.trim();
+        if !untrack(|| self.changes().contains(&"status")) {
+            return None;
+        }
+        if !kind.is_empty() && text.is_empty() {
+            return Some("Enter the status text, or pick no activity.".into());
+        }
+        (text.chars().count() > TEXT_MAX).then(|| format!("The status text is longer than {TEXT_MAX} characters."))
+    }
     fn save(self) {
+        if let Some(e) = self.problem() {
+            return self.msg.err(e);
+        }
         let nick = self.nick.get_untracked().trim().to_string();
         let bio = self.bio.get_untracked().trim().to_string();
-        if nick.chars().count() > NICK_MAX {
-            return self.msg.err(format!(
-                "The bot name is longer than {NICK_MAX} characters."
-            ));
-        }
-        if bio.chars().count() > BIO_MAX {
-            return self
-                .msg
-                .err(format!("The bio is longer than {BIO_MAX} characters."));
-        }
         let (kind, text) = (
             self.kind.get_untracked(),
             self.text.get_untracked().trim().to_string(),
         );
         let changes = untrack(|| self.changes());
-        if changes.contains(&"status") {
-            if !kind.is_empty() && text.is_empty() {
-                return self.msg.err("Enter the status text, or pick no activity.");
-            }
-            if text.chars().count() > TEXT_MAX {
-                return self.msg.err(format!(
-                    "The status text is longer than {TEXT_MAX} characters."
-                ));
-            }
-        }
         let mut jobs = vec![];
         for c in changes {
             let job = match c {
@@ -435,6 +438,7 @@ fn Form(p: Page) -> impl IntoView {
     let dot = move || format!("bp-dot {}", p.status.get());
     let act = move || activity(&p.kind.get(), &p.text.get());
     let dirty = Memo::new(move |_| !p.changes().is_empty());
+    crate::guard::guard(move || dirty.try_get().unwrap_or(false), move || p.sending.try_get().unwrap_or(false), move || p.problem(), move || p.save());
     let ops = move || {
         let list = p.get("ops").as_array().cloned().unwrap_or_default();
         if list.is_empty() {

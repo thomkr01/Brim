@@ -690,3 +690,8 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 - Root cause: the pages were tested only with a live session and good answers.
 - **Rule:** `reply` sends a 401 on a signed-in page (CSRF set) to sign-in with `next`; logout and Secure my account call `signed_out()` first, so a late 401 does not sign the person in again. A list sets `loaded` only after a good load. Only "login required" from `/api/me` is the front page; other errors say so. An access answer counts only with its `guild`; a failed one fails closed (`failed`: no page, rank 0, a Try again card). Level `none` sees no page and no Home.
 
+
+## Leaving with unsaved edits (2026-11-22)
+- One guard for the whole dashboard: `guard::guard(dirty, busy, problem, save)` in the page, `guard::leave(then)` for a page's own Back button. Never write a page-local "Leave without saving?" ask. `problem` is the text of what must be fixed first (a missing `{text}`, a JSON error); the dialog then has no Save button.
+- A page change is held in `guard::hold` (main.rs router): the address is put back with `replaceState`, the dialog opens one tick later (the dialog closes itself on a hash change). Do not create an `Effect` in a dialog answer: the dialog's view owns it and drops it when the dialog closes; wait with a timeout loop (`settle`).
+- Tickets and Logging are hubs like the other modules: parts are NAV keys like `tickets/publish`; `Access::of` reads the part before the `/`.

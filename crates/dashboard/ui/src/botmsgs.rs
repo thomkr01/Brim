@@ -261,18 +261,7 @@ pub fn BotMessages(
             let _ = web_sys::window().unwrap().location().set_hash(&to);
         }
     };
-    let back = move |to: Option<String>| {
-        if !dirty.get_untracked() {
-            return close(to);
-        }
-        ask(
-            Ask::new("Leave without saving?")
-                .text("The changes since the last save are lost.")
-                .yes("Leave")
-                .danger(),
-            move |_| close(to.clone()),
-        )
-    };
+    let back = move |to: Option<String>| crate::guard::leave(move || close(to));
     // A security text's save, revert, undo or import asks for a 2FA code; after it the request goes again.
     let need = step_up();
     // `label` names the button that shows the working sign.
@@ -324,6 +313,16 @@ pub fn BotMessages(
             load();
         })
     };
+    crate::guard::guard(
+        move || open.with(Option::is_some) && dirty.try_get().unwrap_or(false),
+        move || busy.try_get().unwrap_or(false),
+        move || {
+            let gone = open.with(|o| cur.with(|c| o.as_ref().map(|r| missing(r, &c["body"])))).unwrap_or_default();
+            let vars: Vec<String> = gone.iter().map(|v| format!("{{{v}}}")).collect();
+            (!vars.is_empty()).then(|| format!("This message must show {} (press Insert in the editor).", vars.join(", ")))
+        },
+        save,
+    );
     let revert = move |r: Value| {
         let key = r["key"].as_str().unwrap_or("").to_string();
         let name = r["name"].as_str().unwrap_or("").to_string();

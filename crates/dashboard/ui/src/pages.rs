@@ -1424,7 +1424,7 @@ pub fn Catch(guild: String) -> impl IntoView {
 
 /// Tickets settings with a one-click setup that creates the category and the ticket log.
 #[component]
-pub fn Tickets(guild: String) -> impl IntoView {
+pub fn Tickets(guild: String, tab: String) -> impl IntoView {
     let (msg, need) = (Msg::default(), step_up());
     // Bumped after a setup so the form below reloads the config the setup changed.
     // A setup rebuilds the form from the server: edits not saved yet would be lost.
@@ -1473,22 +1473,24 @@ pub fn Tickets(guild: String) -> impl IntoView {
             set_up.try_set(done);
         });
     });
-    // The parts stay mounted and are only hidden, so unsaved settings survive a tab change.
-    let tab = RwSignal::new("settings");
+    // The parts stay mounted and are only hidden; the address picks the open one (the hub's cards link to them).
+    let tab = if ["publish", "cases", "stats"].contains(&tab.as_str()) { tab } else { "settings".into() };
     let tabs: [(&str, &str); 4] = [("settings", "Settings"), ("publish", "Panels"), ("cases", "Cases"), ("stats", "Stats")];
+    let g4 = guild.clone();
+    let t2 = tab.clone();
     view! {
-        <PageTabs tabs=tabs.map(|(k, t)| Tab::state(k, t)).to_vec() active=Signal::derive(move || tab.get().to_string()) on_pick=Callback::new(move |k| tab.set(k)) />
-        <div class:hide=move || tab.get() != "settings">
+        <PageTabs tabs=tabs.map(|(k, t)| Tab::link(k, t, if k == "settings" { format!("#/{g4}/tickets") } else { format!("#/{g4}/tickets/{k}") })).to_vec() active=t2 />
+        <div class:hide=tab != "settings">
         <div class="row"><Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up the ticket category and log")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="tickets".to_string() dirty on_save=Callback::new(move |_| saved.update(|n| *n += 1)) /> } }}
         </div>
-        <div class:hide=move || tab.get() != "publish">
+        <div class:hide=tab != "publish">
         <crate::tickets::Publish guild=g2.clone() saved />
         </div>
-        <div class:hide=move || tab.get() != "cases">
+        <div class:hide=tab != "cases">
         <crate::tickets::Cases guild=g2.clone() />
         </div>
-        <div class:hide=move || tab.get() != "stats">
+        <div class:hide=tab != "stats">
         <crate::tickets::Stats guild=g2 />
         </div>
     }

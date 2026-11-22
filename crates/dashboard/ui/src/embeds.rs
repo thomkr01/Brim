@@ -1474,22 +1474,17 @@ pub fn Embeds(
         })
     };
     let back = move || {
-        let bad_json = json_view.get_untracked() && jerr.with_untracked(Option::is_some);
-        if !dirty.get_untracked() && !bad_json {
+        crate::guard::leave(move || {
             open.set(false);
-            return load();
-        }
-        ask(
-            Ask::new("Leave without saving?")
-                .text("The changes since the last save are lost.")
-                .yes("Leave")
-                .danger(),
-            move |_| {
-                open.set(false);
-                load()
-            },
-        )
+            load()
+        })
     };
+    crate::guard::guard(
+        move || open.get() && (dirty.try_get().unwrap_or(false) || json_view.get() && jerr.with(Option::is_some)),
+        move || busy.try_get().unwrap_or(None).is_some(),
+        move || jerr.get().filter(|_| json_view.get()).map(|e| format!("The JSON has an error. {e}")),
+        move || save(None),
+    );
     // Sent log delete: Brim deletes that copy in Discord, then its row goes.
     let del_sent = move |send: i64| {
         ask(

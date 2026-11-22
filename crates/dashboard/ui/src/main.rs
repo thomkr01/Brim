@@ -12,6 +12,7 @@ mod discord;
 mod histdiff;
 mod embeds;
 mod form;
+mod guard;
 mod help;
 mod home;
 mod icons;
@@ -68,7 +69,6 @@ const TOP: &[(&str, &str)] = &[
     ("overview", "Overview"),
     ("misc", "Miscellaneous"),
     ("permits", "Permits"),
-    ("logging", "Logging"),
     ("backups", "Backups"),
     ("channel_setup", "Channel Setup"),
     ("lockdown", "Lockdown"),
@@ -103,6 +103,14 @@ const NAV: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Tickets",
+        &[("tickets", "Settings"), ("tickets/publish", "Panels"), ("tickets/cases", "Cases"), ("tickets/stats", "Stats")],
+    ),
+    (
+        "Logging",
+        &[("logging/brim", "Brim logs"), ("logging/discord", "Discord logs")],
+    ),
+    (
         "Moderation",
         &[
             ("cases", "Cases"),
@@ -134,7 +142,10 @@ fn page_icon(p: &str) -> &'static str {
         "overview" => "info",
         "misc" => "sparkle",
         "permits" => "fingerprint",
-        "logging" => "logs",
+        "logging" | "Logging" | "logging/brim" | "logging/discord" => "logs",
+        "tickets/publish" => "announcement",
+        "tickets/cases" => "case",
+        "tickets/stats" => "analytics",
         "backups" => "tray",
         "channel_setup" => "channel_text",
         "lockdown" => "lock",
@@ -155,7 +166,7 @@ fn page_icon(p: &str) -> &'static str {
         "mod_stats" => "analytics",
         "notes" => "note",
         "report_list" => "report",
-        "tickets" => "ticket",
+        "tickets" | "Tickets" => "ticket",
         "catch" => "target",
         "raider_list" => "suspicious_account",
         "Tools" => "settings",
@@ -289,8 +300,6 @@ fn nav_key(p: &str) -> &str {
     }
 }
 
-/// "Module › Page" for a page in a sidebar group: ((group name, link to the group's first page this viewer
-/// may open), page name).
 /// The card of a hidden page, or of a server whose access answer failed (with a retry).
 fn no_access(access: Access, failed: bool, text: &'static str) -> AnyView {
     if failed {
@@ -299,10 +308,14 @@ fn no_access(access: Access, failed: bool, text: &'static str) -> AnyView {
     view! { <div class="card empty"><Pose pose=Brim::Stop class="pose-top" /><h2>"No access"</h2><p>{text}</p></div> }.into_any()
 }
 
-fn module_of(guild: &str, p: &str, visible: impl Fn(&str) -> bool) -> Option<((String, String), String)> {
+/// "Module › Page" for a page in a sidebar group: ((group name, link to the group's first page this viewer
+/// may open), page name).
+fn module_of(guild: &str, p: &str, part: Option<&str>, visible: impl Fn(&str) -> bool) -> Option<((String, String), String)> {
     let key = nav_key(p);
+    // A hub's part (Tickets > Panels) is a key like "tickets/publish".
+    let own = part.map(|s| format!("{key}/{s}"));
     NAV.iter().find_map(|(grp, items)| {
-        let (_, name) = items.iter().find(|(k, _)| *k == key)?;
+        let (_, name) = items.iter().find(|(k, _)| Some(*k) == own.as_deref()).or_else(|| items.iter().find(|(k, _)| *k == key))?;
         let first = items.iter().find(|(k, _)| visible(k)).map_or(key, |(k, _)| *k);
         let href = if modules::is_module(grp) { format!("#/{guild}/module/{}", modules::slug(grp)) } else { format!("#/{guild}/{first}") };
         Some(((grp.to_string(), href), name.to_string()))
@@ -701,9 +714,12 @@ fn App() -> impl IntoView {
         });
     }
     let (route, set_route) = signal(hash());
-    window_event_listener(leptos::ev::hashchange, move |_| {
+    window_event_listener(leptos::ev::hashchange, move |e| {
         let next = hash();
         // A new page (server or page part changed) starts at the top; tab switches keep the scroll.
+        if guard::hold(&e) {
+            return;
+        }
         if !route.get_untracked().iter().take(2).eq(next.iter().take(2)) {
             web_sys::window().unwrap().scroll_to_with_x_and_y(0.0, 0.0)
         }
@@ -1083,7 +1099,7 @@ fn App() -> impl IntoView {
                                 ("automod_panic", _) => view! { <Panic guild=g.clone() part="heat,general" /> }.into_any(),
                                 ("antinuke_panic", _) => view! { <Panic guild=g.clone() part="nuke,general" /> }.into_any(),
                                 ("tickets", Some(l)) if l == "log" && rest.len() == 3 => view! { <TicketLog guild=g.clone() channel=rest[1].clone() message=rest[2].clone() /> }.into_any(),
-                                ("tickets", _) => view! { <Tickets guild=g.clone() /> }.into_any(),
+                                ("tickets", _) => view! { <Tickets guild=g.clone() tab=rest.first().cloned().unwrap_or_default() /> }.into_any(),
                                 ("rescue", _) => view! { <Rescue guild=g.clone() /> }.into_any(),
                                 ("bot_profile", _) => view! { <profile::BotProfile guild=g.clone() /> }.into_any(),
                                 ("misc", _) => view! { {sec("misc", "")}<PurgeData guild=g.clone() /> }.into_any(),
@@ -1123,7 +1139,7 @@ fn App() -> impl IntoView {
                             if p == "module" { return page.into_any(); }
                             { let (page_name, big) = title(p);
                               // Untracked: reading the access here rebuilt the whole page (and cleared typed text) each time the access was fetched again.
-                              let (module, page_name) = untrack(|| module_of(g, p, |k| access.of(k) != "hidden")).map_or((None, page_name), |(m, n)| (Some(m), n)); let help = help::steps(nav_key(p));
+                              let (module, page_name) = untrack(|| module_of(g, p, if p == "logging" { Some(if rest.first().is_some_and(|r| r == "discord") { "discord" } else { "brim" }) } else { rest.first().map(String::as_str) }, |k| access.of(k) != "hidden")).map_or((None, page_name), |(m, n)| (Some(m), n)); let help = help::steps(nav_key(p));
                               // A detail page's crumb adds its parent ("Moderation › Filters › Anti Spam"); there is no back button.
                               let detail = match (p.as_str(), rest.first()) {
                                   ("filters", Some(sub)) => Some(("Filters", "filters", FILTER_PAGES.iter().find(|(s, ..)| sub.starts_with(s) || (*s == "spam_text" && sub.starts_with("spam_"))).map_or(String::new(), |(_, t, _)| t.to_string()))),
@@ -1135,6 +1151,8 @@ fn App() -> impl IntoView {
                                   Some((parent, path, name)) => (Some((parent.to_string(), format!("#/{g}/{path}"))), name.clone(), Some(name)),
                                   None => (None, page_name, big),
                               };
+                              // A page inside a module shows its own name as the big title.
+                              let big = big.or_else(|| module.as_ref().map(|_| page_name.clone()));
                               let pose = page_pose(p);
                               let head = match big { Some(b) => view! { <Head guild=g.clone() page=page_name big=b module up help pose /> }.into_any(), None => view! { <Head guild=g.clone() page=page_name module up help pose /> }.into_any() };
                               let page = match acc.as_str() {

@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 pub struct Cfg(pub RwSignal<Value>);
 
 /// Sidebar "Modules", in order. A NAV group name opens its module page; a page key opens that page.
-pub const MODULE_ORDER: &[&str] = &["Auto Mod", "Anti Nuke", "Server Joins", "Moderation", "tickets", "Messages", "logging"];
+pub const MODULE_ORDER: &[&str] = &["Auto Mod", "Anti Nuke", "Server Joins", "Moderation", "Tickets", "Messages", "Logging"];
 
 /// NAV groups that are no module: their pages are general sidebar links.
 pub const GENERAL_GROUPS: &[&str] = &["Tools"];
@@ -63,11 +63,11 @@ pub fn switch_of(group: &str) -> Option<(&'static str, &'static str)> {
     match group {
         "Auto Mod" => Some(("automod", "enabled")),
         "Anti Nuke" => Some(("antinuke", "enabled")),
-        "tickets" => Some(("tickets", "enabled")),
+        "tickets" | "Tickets" => Some(("tickets", "enabled")),
         "Server Joins" => Some(("modules", "server_joins")),
         "Moderation" => Some(("modules", "moderation")),
         "Messages" => Some(("modules", "messages")),
-        "logging" => Some(("modules", "logging")),
+        "logging" | "Logging" => Some(("modules", "logging")),
         _ => None,
     }
 }
@@ -197,9 +197,21 @@ pub fn blurb(p: &str) -> &'static str {
         "feeds" => "New YouTube videos and RSS posts, posted in your channels.",
         "permits" => "Who may do what with Brim.",
         "backups" => "Backups of your server, by hand or on a schedule.",
+        "logging/brim" => "The channel for Brim's logs and mod logs, and what to ignore.",
+        "logging/discord" => "Where messages, members, channels, roles and other Discord events are logged.",
+        "tickets/publish" => "Post the ticket panels members press to open a ticket.",
+        "tickets/cases" => "Open and closed tickets.",
+        "tickets/stats" => "How many tickets, and how fast staff answer.",
         "logging" => "Choose where Brim logs what happens.",
         _ => "",
     }
+}
+
+/// The module's On/Off line under its title (nothing while the config loads).
+#[component]
+pub fn ModState(group: String) -> impl IntoView {
+    let cfg = expect_context::<Cfg>().0;
+    move || module_on(&cfg.get(), &group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">{if on { "Turn it on or off with the switch in the menu." } else { "Nothing below runs until you turn it on with the switch in the menu. The settings are kept." }}</span></p> })
 }
 
 #[component]
@@ -212,17 +224,19 @@ pub fn ModulePage(guild: String, group: &'static str) -> impl IntoView {
     view! {
         <Head guild=guild.clone() page="Modules".to_string() big=group.to_string() />
         <Toast msg />
-        {move || module_on(&cfg.get(), group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">{if on { "Turn it on or off with the switch in the menu." } else { "Nothing below runs until you turn it on with the switch in the menu. The settings are kept." }}</span></p> })}
+        <ModState group=group.to_string() />
         <div class="stack">
             {items.iter().filter(|(p, _)| access.of(p) != "hidden").map(|(p, t)| {
                 let (g, p, t) = (g.clone(), *p, *t);
                 let g2 = g.clone();
                 // A part with its own on/off shows its switch; the others are pages without one.
-                view! { <a class="card link" href=format!("#/{g}/{p}")>
+                // A part that is a module itself (Moderation's Tickets) opens that module's page.
+                let href = if is_module(t) { format!("#/{g}/module/{}", slug(t)) } else { format!("#/{g}/{p}") };
+                view! { <a class="card link" href=href>
                     <span class="ico">{icons::icon(page_icon(p))}</span>
                     <span><h3>{t}</h3><span class="muted">{blurb(p)}</span></span>
                     <span class="sp"></span>
-                    {move || part_on(&cfg.get(), p).map(|on| view! { <ModuleSwitch guild=g2.clone() section=p group=t.to_string() on msg need busy /> })}
+                    {move || part_on(&cfg.get(), p).filter(|_| group != "Tickets").map(|on| view! { <ModuleSwitch guild=g2.clone() section=p group=t.to_string() on msg need busy /> })}
                     {icons::icon("chevron_right")}
                 </a> }
             }).collect_view()}

@@ -86,7 +86,12 @@ pub struct Ask {
     yes: String,
     danger: bool,
     input: Option<String>,
+    /// A second answer next to the confirm button; `yes` is then given [`ALT`].
+    alt: String,
 }
+
+/// What `yes` is given when the dialog's second button was pressed.
+pub const ALT: &str = "\u{0}alt";
 
 impl Ask {
     pub fn new(title: impl Into<String>) -> Self {
@@ -96,7 +101,12 @@ impl Ask {
             yes: "Confirm".into(),
             danger: false,
             input: None,
+            alt: String::new(),
         }
+    }
+    pub fn alt(mut self, t: impl Into<String>) -> Self {
+        self.alt = t.into();
+        self
     }
     pub fn text(mut self, t: impl Into<String>) -> Self {
         self.text = t.into();
@@ -256,7 +266,8 @@ pub fn Dialog() -> impl IntoView {
                         {a.input.is_some().then(|| view! { <input aria-label=a.title.clone() prop:value=text on:input=move |e| text.set(event_target_value(&e)) on:keydown=move |e| if is_enter(&e) { e.prevent_default(); yes() } /> })}
                         <div class="acts">
                             <button class="ghost" on:click=move |_| close_dialog(None)>"Cancel"</button>
-                            <button class:danger=a.danger on:click=move |_| yes()>{a.yes.clone()}</button>
+                            {(!a.alt.is_empty()).then(|| view! { <button class="ghost" on:click=move |_| close_dialog(Some(ALT.into()))>{a.alt.clone()}</button> })}
+                            {(!a.yes.is_empty()).then(|| view! { <button class:danger=a.danger on:click=move |_| yes()>{a.yes.clone()}</button> })}
                         </div>
                     </div>
                 </div> }
@@ -837,7 +848,7 @@ impl Access {
     /// (`failed`) hides every page and button until a retry loads it.
     pub fn of(&self, page: &str) -> String {
         self.pages
-            .with(|p| if p["level"] == "none" || p["failed"] == true { "hidden" } else { p["pages"][page].as_str().unwrap_or("full") }.to_string())
+            .with(|p| if p["level"] == "none" || p["failed"] == true { "hidden" } else { p["pages"][page.split('/').next().unwrap_or(page)].as_str().unwrap_or("full") }.to_string())
     }
     /// The user's level as a rank (viewer 1 .. owner 4) for buttons on pages everyone may open.
     /// Unknown counts as owner; the server still refuses.

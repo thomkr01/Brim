@@ -1388,7 +1388,7 @@ pub fn Section(
         );
     };
     // Turning the public ticket channel off deletes it: ask first (owner decision 11-15).
-    let save = move |_: leptos::ev::MouseEvent| {
+    let save = move |()| {
         let public = |v: &Value| v["tickets"]["public_channel"] != json!(false);
         let (cur, before) = (val.get_untracked(), orig.get_untracked());
         if public(&before) && !public(&cur) && before["tickets"]["public_channel_id"].is_string() {
@@ -1404,6 +1404,15 @@ pub fn Section(
             do_save(())
         }
     };
+    {
+        let save = save.clone();
+        crate::guard::guard(
+            move || val.try_with(|v| orig.with(|o| v != o)).unwrap_or(false),
+            move || saving.try_get().unwrap_or(false),
+            || None,
+            move || save(()),
+        );
+    }
     // Read per card, not in the grouping closure: rebuilding the cards on every switch flip cut the knob's animation.
     // A missing key reads as the switch's own default, like the switch shows it (every system starts off).
     // A section without a master switch (Logging, Lockdown, ...) is never off.
@@ -1459,7 +1468,7 @@ pub fn Section(
             </details>
         </Show>
         <Fade when=Signal::derive(move || val.get() != orig.get())>
-            <div class="bar"><b>"Changes detected!"</b><button class="ghost" on:click=move |_| val.set(orig.get_untracked())>"Cancel"</button><button disabled=move || saving.get() || failed.get() on:click=save.clone()>{busy_label(move || saving.get(), "Save")}</button></div>
+            <div class="bar"><b>"Changes detected!"</b><button class="ghost" on:click=move |_| val.set(orig.get_untracked())>"Cancel"</button><button disabled=move || saving.get() || failed.get() on:click={ let save = save.clone(); move |_| save(()) }>{busy_label(move || saving.get(), "Save")}</button></div>
         </Fade>
         <Toast msg />
     }

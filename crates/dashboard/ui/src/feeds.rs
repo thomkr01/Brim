@@ -627,6 +627,15 @@ pub fn Feeds(guild: String) -> impl IntoView {
             }
         })
     };
+    crate::guard::guard(
+        move || open.with(Option::is_some) && dirty.try_get().unwrap_or(false),
+        move || busy.try_get().unwrap_or(false),
+        move || {
+            let gone = open.with(|o| cur.with(|c| o.as_ref().is_some_and(|(_, r)| !crate::botmsgs::missing(r, &c["body"]).is_empty())));
+            gone.then(|| "{link} is missing: keep {link} in the message text or the first embed.".to_string())
+        },
+        move || if let Some((f, _)) = open.get_untracked() { save_message(f["id"].to_string(), cur.with_untracked(|c| c["body"].clone()), "Saved!") },
+    );
     let editor = move || {
         let (f, row) = open.get()?;
         let id = f["id"].to_string();
@@ -645,7 +654,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                 <b class="name">{format!("Message of “{}”", name_of(&f))}</b>
                 <span class="states">{if own { view! { <span class="chip info">"Own version"</span> }.into_any() } else { view! { <span class="chip">"Server's version"</span> }.into_any() }}</span>
                 <span class="sp"></span>
-                <button class="ghost" on:click=move |_| { if dirty.get_untracked() { ask(Ask::new("Leave without saving?").text("The changes since the last save are lost.").yes("Leave").danger(), move |_| close_editor()) } else { close_editor() } }>"Close"</button>
+                <button class="ghost" on:click=move |_| crate::guard::leave(close_editor)>"Close"</button>
                 {(can && own).then(|| view! { <button class="danger" disabled=move || busy.get() on:click=move |_| { let d = r3_default(&row); cur.set(json!({"body": d})); save_message(i1.clone(), Value::Null, "This feed uses the server's version again.") }>"Use the server's version"</button> })}
             </div>
             {repo(&f).then(|| { let f7 = f.clone(); view! {
