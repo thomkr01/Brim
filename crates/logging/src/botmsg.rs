@@ -5816,7 +5816,7 @@ fn logs(out: &mut Vec<Def>) {
     ));
 }
 
-/// Every command (the bot's `CMDS` by category; a bot test keeps the two equal): each reply of it
+/// Every command by category, as the bot's help pages and the Commands page list it: each reply of it
 /// is a frame like a log, key `cmd.<name>`. Anti-nuke, panic, join-raid and whitelist commands are
 /// security texts.
 pub const COMMANDS: &[(&str, &[&str])] = &[

@@ -5,7 +5,7 @@
 
 use crate::{
     access::Level,
-    api::{log_change, require, Res},
+    api::{log_by, require, Res},
     auth::Sess,
     channels::{desired, normalized, Ctx, Draft, World},
     ops, store, ApiError, AppState,
@@ -483,16 +483,13 @@ async fn save(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         return Err(AGAIN);
     };
     prune(&st, guild, version).await?;
-    log_change(
+    log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &config,
         None,
-        format!(
-            "{} (<@{}>) saved the current server as server layout v{version} (Layout Guard).",
-            s.username, s.user_id
-        ),
+        &format!("saved the current server as server layout v{version} (Layout Guard)."),
     )
     .await;
     // Just saved from this read, so nothing differs: no second read of Discord.
@@ -976,17 +973,7 @@ async fn rollback(
     else {
         return Err(STALE);
     };
-    log_change(
-        &st,
-        guild,
-        s.user_id,
-        &config,
-        None,
-        format!(
-            "{} (<@{}>) rolled the server layout back to v{version}, saved as v{new} (Layout Guard). Discord is not changed.",
-            s.username, s.user_id
-        ),
-    )
+    log_by(&st, &s, guild, &config, None, &format!("rolled the server layout back to v{version}, saved as v{new} (Layout Guard). Discord is not changed."))
     .await;
     Ok(Json(json!({"saved": true, "version": new})))
 }

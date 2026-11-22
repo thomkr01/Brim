@@ -1,5 +1,6 @@
 //! General commands: about, commands, help (and `-h` after any command), invite, ping, info,
 //! ncases, tshoot and invites.
+use brim_logging::botmsg::COMMANDS;
 use brim_logging::emoji::{CHEVRON, OFF, ON};
 use std::time::Instant;
 
@@ -762,114 +763,8 @@ fn who(perm: &str) -> String {
 
 /// The prefix commands the Moderation module switch turns off.
 pub fn moderation_commands() -> &'static [&'static str] {
-    CATEGORIES[2].1
+    COMMANDS[2].1
 }
-
-const CATEGORIES: [(&str, &[&str]); 4] = [
-    (
-        "General Commands:",
-        &[
-            "about",
-            "commands",
-            "dashboard",
-            "help",
-            "invite",
-            "invites",
-            "ping",
-            "info",
-            "roleinfo",
-            "serverinfo",
-            "security",
-        ],
-    ),
-    (
-        "Settings Commands:",
-        &[
-            "config",
-            "statics",
-            "heat",
-            "hfilters",
-            "antinuke",
-            "ancaps",
-            "anpanic",
-            "antinukerestore",
-            "joingate",
-            "joinraid",
-            "verification",
-            "raiderlist",
-            "misc",
-            "whitelist",
-            "tshoot",
-        ],
-    ),
-    (
-        "Moderation Commands:",
-        &[
-            "ban",
-            "hackban",
-            "unban",
-            "kick",
-            "timeout",
-            "untimeout",
-            "warn",
-            "unwarn",
-            "warns",
-            "clearwarns",
-            "quarantine",
-            "unquarantine",
-            "purge",
-            "slowmode",
-            "lock",
-            "unlock",
-            "sanitize",
-            "verify",
-            "cases",
-            "modcases",
-            "editc",
-            "proof",
-            "closecase",
-            "raider",
-            "ncases",
-            "notes",
-            "backups",
-        ],
-    ),
-    (
-        "Ticket Commands:",
-        &[
-            "reply",
-            "close",
-            "closeall",
-            "blacklist",
-            "unblock",
-            "blacklistclear",
-            "viewblacklist",
-            "snippet",
-            "snippetadd",
-            "snippetremove",
-            "snippetclear",
-            "viewsnippet",
-            "claim",
-            "unclaim",
-            "reassign",
-            "priority",
-            "tickettype",
-            "ticketnote",
-            "ticketinfo",
-            "ticketsetup",
-            "category",
-            "pingrole",
-            "logging",
-            "loggingplus",
-            "commandonly",
-            "anonymous",
-            "greetingmessage",
-            "closingmessage",
-            "toggle",
-            "viewconfig",
-        ],
-    ),
-];
 
 fn allowed(level: &Level, perm: &str) -> bool {
     match perm {
@@ -884,10 +779,10 @@ fn allowed(level: &Level, perm: &str) -> bool {
 /// `COMMAND -h`: name, who may run it, category, what it does, usage, each argument, the message
 /// variables where text is filled in, an example and the aliases.
 fn help_embed(c: &Cmd, pfx: &str, asker: &str) -> Embed {
-    let cat = CATEGORIES
+    let cat = COMMANDS
         .iter()
         .find(|k| k.1.contains(&c.0))
-        .map_or("general", |k| k.0.trim_end_matches(" Commands:"));
+        .map_or("general", |k| k.0.trim_end_matches(" commands"));
     let mut e = Log::new(&format!("{asker}, here's some help!"), BLUE);
     if let Some(d) = dashboard() {
         e = e.text(&format!(
@@ -966,10 +861,10 @@ pub fn catalog() -> serde_json::Value {
         }
     };
     let cat = |n: &str| {
-        CATEGORIES
+        COMMANDS
             .iter()
             .find(|c| c.1.contains(&n))
-            .map_or("", |c| c.0.trim_end_matches(':'))
+            .map_or(String::new(), |c| title(c.0))
     };
     let commands: Vec<_> = CMDS
         .iter()
@@ -1070,9 +965,9 @@ fn about_stats() -> Vec<(&'static str, String)> {
 
 /// One category per page, only the commands `level` may use.
 pub fn commands_page(level: &Level, prefix: &str, page: usize) -> (Embed, usize) {
-    let page = page.min(CATEGORIES.len() - 1);
-    let (title, names) = CATEGORIES[page];
-    let mut e = Log::new(title, BLUE);
+    let page = page.min(COMMANDS.len() - 1);
+    let (group, names) = COMMANDS[page];
+    let mut e = Log::new(&format!("{}:", title(group)), BLUE);
     for name in names
         .iter()
         .filter_map(|n| lookup(n))
@@ -1088,8 +983,13 @@ pub fn commands_page(level: &Level, prefix: &str, page: usize) -> (Embed, usize)
         .text(&format!(
             "{ARROW} For details on one command, add `-h` after it, for example: `{prefix}ban -h`"
         ))
-        .footer(&format!("Page: {}/{}", page + 1, CATEGORIES.len()));
-    (e.build(), CATEGORIES.len())
+        .footer(&format!("Page: {}/{}", page + 1, COMMANDS.len()));
+    (e.build(), COMMANDS.len())
+}
+
+/// "Ticket commands" as the help pages and the Commands page name it: "Ticket Commands".
+fn title(group: &str) -> String {
+    group.replace(" commands", " Commands")
 }
 
 pub(crate) fn dashboard() -> Option<String> {
@@ -1665,18 +1565,12 @@ mod tests {
     /// Bot messages has one entry per command; the logging crate keeps its own copy of the list.
     #[test]
     fn every_command_has_a_bot_message_in_its_category() {
-        for (cat, names) in CATEGORIES {
-            let group = cat.replace(" Commands:", " commands");
+        for (group, names) in COMMANDS {
             for n in names.iter() {
                 let d = brim_logging::botmsg::find(&format!("cmd.{n}")).expect(n);
-                assert!(d.security || d.group == group, "{n} is in {}", d.group);
+                assert!(d.security || d.group == *group, "{n} is in {}", d.group);
             }
         }
-        let listed: usize = brim_logging::botmsg::COMMANDS
-            .iter()
-            .map(|c| c.1.len())
-            .sum();
-        assert_eq!(listed, CMDS.len());
     }
 
     #[test]
@@ -1687,11 +1581,11 @@ mod tests {
                 assert!(seen.insert(*n), "{n} listed twice");
             }
         }
-        for (_, names) in CATEGORIES {
+        for (_, names) in COMMANDS {
             assert!(names.iter().all(|n| lookup(n).is_some()));
         }
         assert_eq!(
-            CATEGORIES.iter().map(|c| c.1.len()).sum::<usize>(),
+            COMMANDS.iter().map(|c| c.1.len()).sum::<usize>(),
             CMDS.len()
         );
     }

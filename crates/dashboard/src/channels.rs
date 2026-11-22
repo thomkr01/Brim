@@ -3,7 +3,7 @@
 //! rules, takes a backup and then runs the steps.
 use crate::{
     access::Level,
-    api::{log_change, require, Res},
+    api::{log_by, log_change, require, Res},
     auth::Sess,
     ops::{self, overwrite_body},
     recovery::live_image,
@@ -1846,16 +1846,14 @@ async fn create_locked(
         .bind(s.user_id)
         .execute(&st.db)
         .await?;
-        log_change(
+        log_by(
             st,
+            s,
             guild,
-            s.user_id,
             &w.config,
             None,
-            format!(
-                "{} (<@{}>) made the channel <#{id}> from the Message Builder ({}){}",
-                s.username,
-                s.user_id,
+            &format!(
+                "made the channel <#{id}> from the Message Builder ({}){}",
                 if staff_only { "only staff" } else { "everyone" },
                 layout.log_text()
             ),

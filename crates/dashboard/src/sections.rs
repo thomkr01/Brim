@@ -426,18 +426,7 @@ async fn auto_setup(
     };
     let moved = channel_access::send_moves(&st, guild, moves).await;
     let access = open_channels(&st, guild, &config, &staff_ids).await;
-    api::log_change(
-        &st,
-        guild,
-        s.user_id,
-        &config,
-        Some(version),
-        format!(
-            "{} (<@{}>) ran auto-setup -> config v{version}",
-            s.username, s.user_id
-        ),
-    )
-    .await;
+    api::log_by(&st, &s, guild, &config, Some(version), "ran auto-setup").await;
     Ok(Json(
         json!({"version": version, "created": {"quarantine_role": role, "member_role": member, "staff": staff, "logs": logs, "chats": chats, "information": info, "categories": sorted}, "catch_stays": catch_stays, "quarantine_failed": quarantine_failed, "channel_access": access,
             "steps": steps(&Report { roles_stay: roles_stay.as_deref(), quarantine_failed, lounge_failed, moved, catch_stays: catch_stays.as_deref(), verify_failed, access: &access })}),
@@ -1146,16 +1135,13 @@ async fn verify_channel(
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    api::log_change(
+    api::log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &config,
         Some(version),
-        format!(
-            "{} (<@{}>) set up the verification channel -> config v{version}",
-            s.username, s.user_id
-        ),
+        "set up the verification channel",
     )
     .await;
     reshape_verification(&st, &channel, &config).await?;
@@ -1255,16 +1241,13 @@ async fn catch_channel(
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    api::log_change(
+    api::log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &config,
         Some(version),
-        format!(
-            "{} (<@{}>) set up the catch channel -> config v{version}",
-            s.username, s.user_id
-        ),
+        "set up the catch channel",
     )
     .await;
     if let Some(ch) = &made {
@@ -1290,18 +1273,7 @@ async fn tickets_setup(
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    api::log_change(
-        &st,
-        guild,
-        s.user_id,
-        &config,
-        Some(version),
-        format!(
-            "{} (<@{}>) set up tickets -> config v{version}",
-            s.username, s.user_id
-        ),
-    )
-    .await;
+    api::log_by(&st, &s, guild, &config, Some(version), "set up tickets").await;
     Ok(Json(json!({"version": version, "channel": log})))
 }
 
@@ -1668,16 +1640,13 @@ async fn log_setup(
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    api::log_change(
+    api::log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &config,
         Some(version),
-        format!(
-            "{} (<@{}>) created the log channels -> config v{version}",
-            s.username, s.user_id
-        ),
+        "created the log channels",
     )
     .await;
     Ok(Json(json!({"version": version, "created": created})))

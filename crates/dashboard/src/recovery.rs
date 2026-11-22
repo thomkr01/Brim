@@ -2,7 +2,7 @@
 //! that changes the server is queued as a job for the bot, which owns the restore code.
 use crate::{
     access::Level,
-    api::{log_change, require, Res},
+    api::{log_by, require, Res},
     auth::Sess,
     store, ApiError, AppState,
 };
@@ -53,15 +53,7 @@ async fn queue(st: &AppState, guild: i64, kind: &str, payload: Value) -> Result<
 
 async fn announce(st: &AppState, s: &Sess, guild: i64, what: &str) -> Result<(), ApiError> {
     let (_, config) = store::current(&st.db, guild).await?;
-    log_change(
-        st,
-        guild,
-        s.user_id,
-        &config,
-        None,
-        format!("{} (<@{}>) {what}", s.username, s.user_id),
-    )
-    .await;
+    log_by(st, s, guild, &config, None, what).await;
     Ok(())
 }
 

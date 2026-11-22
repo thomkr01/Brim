@@ -1,6 +1,6 @@
 use crate::{
     access::Level,
-    api::{log_change, require, Res},
+    api::{log_by, require, Res},
     auth::Sess,
     ApiError, AppState,
 };
@@ -328,17 +328,13 @@ async fn audit_version(
     version: Option<i32>,
 ) -> Result<(), ApiError> {
     let (_, c) = crate::store::current(&st.db, guild).await?;
-    let v = version.map_or(String::new(), |v| format!(" -> config v{v}"));
-    log_change(
+    log_by(
         st,
+        s,
         guild,
-        s.user_id,
         &c,
         version,
-        format!(
-            "{} (<@{}>) {what} from the dashboard{v}",
-            s.username, s.user_id
-        ),
+        &format!("{what} from the dashboard"),
     )
     .await;
     Ok(())

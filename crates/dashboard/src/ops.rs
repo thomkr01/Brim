@@ -1,6 +1,6 @@
 use crate::{
     access::Level,
-    api::{log_change, require, Res},
+    api::{log_by, log_change, require, Res},
     auth::{self, Sess},
     ApiError, AppState,
 };
@@ -776,16 +776,13 @@ async fn keep_staff(st: &AppState, s: &Sess, guild: i64, c: &Value, entry: Optio
     };
     let version = crate::store::commit(&mut tx, guild, cur, &config, s.user_id).await?;
     tx.commit().await?;
-    log_change(
+    log_by(
         st,
+        s,
         guild,
-        s.user_id,
         c,
         Some(version),
-        format!(
-            "{} (<@{}>) kept the previous owner's {what} -> config v{version}",
-            s.username, s.user_id
-        ),
+        &format!("kept the previous owner's {what}"),
     )
     .await;
     Ok(Json(json!({"ok": true, "version": version})))
@@ -834,12 +831,7 @@ async fn fix(
             .ok_or_else(|| {
                 ApiError::BadRequest("Brim could not read the server's channels from Discord. Try again in a minute.".into())
             })?;
-        log_change(&st, guild, s.user_id, &c, None,
-            format!(
-                "{} (<@{}>) denied the quarantine role in every channel from the security score ({failed} failed)",
-                s.username, s.user_id
-            ),
-        )
+        log_by(&st, &s, guild, &c, None, &format!("denied the quarantine role in every channel from the security score ({failed} failed)"))
         .await;
         return Ok(Json(json!({"ok": true, "failed": failed})));
     }
@@ -851,11 +843,13 @@ async fn fix(
             .map(|r| r as u64)
             .collect();
         crate::channel_access::staff_access(&st, guild, &c, &staff).await?;
-        log_change(&st, guild, s.user_id, &c, None,
-            format!(
-                "{} (<@{}>) let the staff roles into the Logs and Staff categories from the security score",
-                s.username, s.user_id
-            ),
+        log_by(
+            &st,
+            &s,
+            guild,
+            &c,
+            None,
+            "let the staff roles into the Logs and Staff categories from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
@@ -869,16 +863,13 @@ async fn fix(
                 "Discord refused moving the channel. A category holds at most 50 channels: make room, then try again".into(),
             ));
         }
-        log_change(
+        log_by(
             &st,
+            &s,
             guild,
-            s.user_id,
             &c,
             None,
-            format!(
-                "{} (<@{}>) moved the ticket log into the Logs category from the security score",
-                s.username, s.user_id
-            ),
+            "moved the ticket log into the Logs category from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
@@ -886,16 +877,13 @@ async fn fix(
     if b.setting.as_deref() == Some(brim_antinuke::security::BOT_HOIST) {
         // Adds a role with no permissions: no backup needed.
         crate::sections::show_bot(&st, guild, &c).await?;
-        log_change(
+        log_by(
             &st,
+            &s,
             guild,
-            s.user_id,
             &c,
             None,
-            format!(
-                "{} (<@{}>) showed Brim separately in the member list from the security score",
-                s.username, s.user_id
-            ),
+            "showed Brim separately in the member list from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
@@ -916,12 +904,7 @@ async fn fix(
                 failed += 1;
             }
         }
-        log_change(&st, guild, s.user_id, &c, None,
-            format!(
-                "{} (<@{}>) showed the staff roles separately in the member list from the security score ({failed} failed)",
-                s.username, s.user_id
-            ),
-        )
+        log_by(&st, &s, guild, &c, None, &format!("showed the staff roles separately in the member list from the security score ({failed} failed)"))
         .await;
         return Ok(Json(json!({"ok": true, "failed": failed})));
     }
@@ -974,12 +957,7 @@ async fn fix(
             true => catch_stays,
             false => Some("Discord refused moving the catch channel. A category holds at most 50 channels: make room, then try again".into()),
         };
-        log_change(&st, guild, s.user_id, &c, None,
-            format!(
-                "{} (<@{}>) gave the open channels, Information, the catch and the verification channel the standard permissions from the security score ({failed} failed)",
-                s.username, s.user_id
-            ),
-        )
+        log_by(&st, &s, guild, &c, None, &format!("gave the open channels, Information, the catch and the verification channel the standard permissions from the security score ({failed} failed)"))
         .await;
         return Ok(Json(
             json!({"ok": true, "failed": failed, "catch_stays": catch_stays}),
@@ -1003,16 +981,13 @@ async fn fix(
                 Some(json!({ key: value })),
             )
             .await?;
-        log_change(
+        log_by(
             &st,
+            &s,
             guild,
-            s.user_id,
             &c,
             None,
-            format!(
-                "{} (<@{}>) set `{key}` to `{value}` from the security score",
-                s.username, s.user_id
-            ),
+            &format!("set `{key}` to `{value}` from the security score"),
         )
         .await;
         return Ok(Json(json!({"ok": true})));
@@ -1050,16 +1025,14 @@ async fn fix(
                 Some(json!(body)),
             )
             .await?;
-        log_change(
+        log_by(
             &st,
+            &s,
             guild,
-            s.user_id,
             &c,
             None,
-            format!(
-                "{} (<@{}>) moved role `{}` right below the bot from the security score, {}",
-                s.username,
-                s.user_id,
+            &format!(
+                "moved role `{}` right below the bot from the security score, {}",
                 q.name,
                 crate::recovery::backup_named(backup)
             ),
@@ -1216,16 +1189,13 @@ async fn save_fix(
     let mut tx = st.db.begin().await?;
     let version = crate::store::commit(&mut tx, guild, cur, config, s.user_id).await?;
     tx.commit().await?;
-    log_change(
+    log_by(
         st,
+        s,
         guild,
-        s.user_id,
         config,
         Some(version),
-        format!(
-            "{} (<@{}>) {what} from the security score -> config v{version}",
-            s.username, s.user_id
-        ),
+        &format!("{what} from the security score"),
     )
     .await;
     Ok(version)
@@ -1497,12 +1467,7 @@ async fn make_private(
             )
             .await?;
     }
-    log_change(st, guild, s.user_id, config, None,
-        format!(
-            "{} (<@{}>) made the log channel <#{}> private and locked against deletes from the security score, {}",
-            s.username, s.user_id, ch.id, crate::recovery::backup_named(backup)
-        ),
-    )
+    log_by(st, s, guild, config, None, &format!("made the log channel <#{}> private and locked against deletes from the security score, {}", ch.id, crate::recovery::backup_named(backup)))
     .await;
     Ok(Json(json!({"ok": true, "backup": backup})))
 }
@@ -1863,16 +1828,13 @@ async fn revert(
     }
     {
         let (_, c) = crate::store::current(&st.db, guild).await?;
-        log_change(
+        log_by(
             &st,
+            &s,
             guild,
-            s.user_id,
             &c,
             None,
-            format!(
-                "{} (<@{}>) reverted {done} action(s)",
-                s.username, s.user_id
-            ),
+            &format!("reverted {done} action(s)"),
         )
         .await;
     }

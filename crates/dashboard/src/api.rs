@@ -446,6 +446,32 @@ pub(crate) async fn log_change(
     }
 }
 
+/// [`log_change`] for a change `s` made: "Name (<@id>) {what}", and " -> config v{version}" when
+/// the change saved a config version.
+pub(crate) async fn log_by(
+    st: &AppState,
+    s: &Sess,
+    guild: i64,
+    config: &Value,
+    version: Option<i32>,
+    what: &str,
+) {
+    log_change(
+        st,
+        guild,
+        s.user_id,
+        config,
+        version,
+        by_line(s, version, what),
+    )
+    .await
+}
+
+fn by_line(s: &Sess, version: Option<i32>, what: &str) -> String {
+    let v = version.map_or(String::new(), |v| format!(" -> config v{v}"));
+    format!("{} (<@{}>) {what}{v}", s.username, s.user_id)
+}
+
 /// The first id `new` adds that is not one of the guild's channels or roles.
 fn foreign_id(
     section: &str,
@@ -783,16 +809,13 @@ pub async fn put_section(
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    log_change(
+    log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &config,
         Some(version),
-        format!(
-            "{} (<@{}>) changed `{section}` -> config v{version}",
-            s.username, s.user_id
-        ),
+        &format!("changed `{section}`"),
     )
     .await;
     Ok(Json(json!({"version": version})))
@@ -838,18 +861,7 @@ pub async fn put_permits(
     let (_, config) = store::current(&st.db, guild).await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;
-    log_change(
-        &st,
-        guild,
-        s.user_id,
-        &config,
-        Some(version),
-        format!(
-            "{} (<@{}>) changed `permits` -> config v{version}",
-            s.username, s.user_id
-        ),
-    )
-    .await;
+    log_by(&st, &s, guild, &config, Some(version), "changed `permits`").await;
     Ok(Json(json!({"version": version})))
 }
 
@@ -1384,16 +1396,13 @@ pub async fn import(
     }
     let version = store::commit(&mut tx, guild, b.expected_version, &new, s.user_id).await?;
     tx.commit().await?;
-    log_change(
+    log_by(
         &st,
+        &s,
         guild,
-        s.user_id,
         &new,
         Some(version),
-        format!(
-            "{} (<@{}>) imported settings from another server -> config v{version}",
-            s.username, s.user_id
-        ),
+        "imported settings from another server",
     )
     .await;
     Ok(Json(json!({"version": version, "cleared": cleared})))
@@ -1645,6 +1654,25 @@ fn heat_ok(h: &brim_automod::heat::HeatCfg) -> Result<(), &'static str> {
 mod logging_validate_tests {
     use super::*;
     use serde_json::json;
+
+    /// The change line reads as the routes wrote it by hand: name, mention, change, version.
+    #[test]
+    fn change_line_names_who_and_the_version() {
+        let s = Sess {
+            id: String::new(),
+            user_id: 7,
+            username: "owner".into(),
+            access_token: String::new(),
+            stepped_up: false,
+            step_up_guild: None,
+            csrf: String::new(),
+        };
+        assert_eq!(by_line(&s, None, "ran x"), "owner (<@7>) ran x");
+        assert_eq!(
+            by_line(&s, Some(4), "ran x"),
+            "owner (<@7>) ran x -> config v4"
+        );
+    }
 
     /// S-h3 6: a section the bot cannot read is named, so Overview and the page show it.
     #[test]
