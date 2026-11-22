@@ -16,12 +16,10 @@ enum Item {
     G(&'static [&'static str], &'static [(&'static str, &'static [&'static str])]),
     /// A dashboard list card: title, header button, rows of (name, grey text, action pills joined by |).
     L(&'static str, &'static str, &'static [(&'static str, &'static str, &'static str)]),
-    /// A line a member types, as it appears in Discord.
-    C(&'static str),
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{C, E, F, G, L, P, T, X};
+use Item::{E, F, G, L, P, T, X};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -42,13 +40,13 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Anti-nuke.", &[
         ("Mass bans and deletes are stopped", "diag", &[E("nuke_quarantined"), E("panic_report_loaded")]),
         ("Rogue bots are kicked", "tall", &[E("nuke_bot_kicked")]),
-        ("Staff powers are watched", "base", &[P("Anti-nuke", &["?Stop staff who delete or ban too fast.", "Watch staff actions", "Quarantine at the limit", "Restore from backup", ">Save"]), P("", &["~Channel deletes|4 per minute|Quarantine ▾"]), E("nuke_quarantined")])]),
+        ("Staff powers are watched", "base", &[P("Anti-nuke", &["?Stop staff who delete or ban too fast.", "Bans|6 per hour", "Role deletes|3 per hour", "Watch staff actions", "Quarantine at the limit", "Restore from backup", ">Save"]), P("", &["~Channel deletes|4 per min"]), E("nuke_quarantined")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "base", &[P("Blocked words", &["?Remove messages that contain words you list.", "Words|free nitro", "Filter", "Action|Warn ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), P("", &["~Warn|3 strikes|Blocked word"]), E("automod_warn")]),
+        ("Warn for blocked words", "base", &[P("Blocked words", &["?Remove messages that contain words you list.", "Words|free nitro", "Exempt|@Staff", "Filter", "Action|Warn ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), P("", &["~Warn|3 strikes|Spam"]), E("automod_warn")]),
         ("Kick for invite links", "break", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_kick")]),
         ("Time out spammers", "tall", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_timeout"), E("automod_warn")])]),
     ("Moderation.", &[
-        ("Ban with a reason", "col", &[C("/ban @Mika DM ads"), E("ban_result"), E("mod_log")]),
+        ("Ban with a reason", "col", &[E("ban_result"), E("mod_log")]),
         ("Short or full replies, your choice", "break", &[E("ban_result"), E("ban_compact")]),
         ("Cases your whole team can see", "diag", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
@@ -57,7 +55,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Ignore users, roles or channels", "break", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), E("mod_log")])]),
     ("Tickets.", &[
         ("Members open a private ticket", "diag", &[E("ticket_intro"), E("ticket_received")]),
-        ("Staff see the new ticket", "base", &[P("Tickets", &["?Where members open a private ticket.", "Panel|#support", "Staff|@Support", "Transcript on close", ">Save"]), P("", &["~Close when idle|3d|Reminder 1d"]), E("ticket_received")]),
+        ("Staff see the new ticket", "base", &[P("Tickets", &["?Where members open a private ticket.", "Panel|#support", "Staff|@Support", "Limit|3 per member", "Transcript on close", ">Save"]), P("", &["~Close idle|3d|Notify"]), E("ticket_received")]),
         ("Replies reach the member", "tall", &[E("ticket_reply")])]),
     ("Tools.", &[
         ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
@@ -127,7 +125,7 @@ fn effects() -> impl IntoView {
     let out = shapes
         .into_iter()
         .map(|(class, x, y)| {
-            let style = format!("left:{x:.0}%;top:{y:.0}%;rotate:{:.0}deg", -60.0 + r() * 120.0);
+            let style = format!("left:{x:.0}%;top:{y:.0}%;rotate:{:.0}deg;--gp:{:.0}%", -60.0 + r() * 120.0, r() * 100.0);
             view! { <i class=class style=style aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>();
@@ -270,7 +268,6 @@ pub fn Landing(
                                             view! { <div class="win">{shown(m)}</div> }
                                         }).collect_view().into_any()
                                     }
-                                    C(text) => view! { <div class="win cmd">{crate::discord::chat("Mika", view! { <span class="md">{text}</span> }.into_any())}</div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                 }).collect_view()}</div> }).collect_view()}
                             </div>
