@@ -81,6 +81,12 @@ fn wn(mut v: Value, warn: &str) -> Value {
     v
 }
 
+/// Turning a switch off asks first, with this text.
+fn co(mut v: Value, text: &str) -> Value {
+    v["confirm_off"] = json!(text);
+    v
+}
+
 /// A field stored in another section, shown on this section's page (saved with it).
 fn sx(section: &str, mut v: Value) -> Value {
     v["section"] = json!(section);
@@ -1347,7 +1353,7 @@ pub fn schema() -> Vec<Value> {
             "Full conversation in the ticket log",
         ),
         hp(
-            wn(ti(dv(fg("General", "public_channel", "bool"), true), "Public ticket channel"), "Turning this off deletes the channel."),
+            co(wn(ti(dv(fg("General", "public_channel", "bool"), true), "Public ticket channel"), "Turning this off deletes the channel."), "Brim deletes the #open-a-ticket channel and its panel message when you save."),
             "Brim keeps #open-a-ticket in the ticket category with the panel message. Verified members only see it and press the button; nobody can write or react there.",
         ),
         ti(fg("General", "ping_roles", "roles"), "Roles pinged on a new ticket"),

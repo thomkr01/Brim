@@ -494,7 +494,20 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
     let at_floor = move || default.get_value().is_null() && !get().is_null() && num() == lo;
     // A single category picker is the channel picker listing categories.
     let input = match if kind == "category" { "channel" } else { kind.as_str() } {
-        "bool" => view! { <input type="checkbox" class="sw" prop:checked=move || get().as_bool().unwrap_or(false) on:change=move |e| set(json!(event_target_checked(&e))) /> }.into_any(),
+        "bool" => {
+            // `confirm_off` (schema): turning the switch off asks first; Cancel leaves it on.
+            let confirm = f["confirm_off"].as_str().map(String::from);
+            view! { <input type="checkbox" class="sw" prop:checked=move || get().as_bool().unwrap_or(false) on:change=move |e| {
+                let on = event_target_checked(&e);
+                match (&confirm, on) {
+                    (Some(text), false) => {
+                        event_target::<web_sys::HtmlInputElement>(&e).set_checked(true);
+                        ask(Ask::new("Turn this off?").text(text.clone()).yes("Turn off").danger(), move |_| set(json!(false)));
+                    }
+                    _ => set(json!(on)),
+                }
+            } /> }.into_any()
+        }
         "int" if dur => {
             let per = if tail.ends_with("_ms") { 0.001 } else { 1.0 }; // seconds per stored unit
             let secs = move || get().as_f64().unwrap_or(0.0) * per;
