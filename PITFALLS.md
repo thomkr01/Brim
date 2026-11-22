@@ -1369,6 +1369,9 @@ Only `frame-ancestors` was set. The UI writes message previews and emoji as raw 
 **The verify page's button stayed dead after a lost connection, and the raid page was wider than a phone.** (bug hunt 2026-11-22)
 The verify script caught a bad answer but not a failed `fetch`: with no connection the click threw, the button stayed disabled and no text said why, so the member had to reload. A 32-character name with no space ran out of the raid report page at 375 px. Root cause: the pages the server makes itself were tested only on the good path and at desktop width. *Avoid:* a script on such a page wraps `fetch` in `try`, shows a message and frees the button; the page body has `overflow-wrap:anywhere`. Searched: only the verify page and the raid report page are made by the server with a script or a list.
 
+**Logout left the `sid` cookie in the browser.** (bug hunt 2026-11-22)
+`jar.remove(Cookie::from("sid"))` sends `sid=; Max-Age=0` with no path, so the browser applied it to `/auth` and kept the cookie set with `Path=/`. The same at the login callback for `oauth_state` and `login_next`, and at Secure my account. The session row was deleted, so no access remained. Root cause: a removal cookie must carry the same path as the cookie it removes. *Avoid:* remove with `jar.remove(auth::cookie(name, String::new(), st.secure))`, the same builder that set it; a test checks the `Set-Cookie` of a removal.
+
 ## 7. Build and deploy
 
 **Every push to a PR branch ran the whole CI twice.** (owner decision, 11-20)

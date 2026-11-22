@@ -6,7 +6,7 @@
 //! thief holding the Discord account could then set it up first (PITFALLS, data delete 11-19).
 use crate::{api::Res, auth::Sess, ops, ApiError, AppState};
 use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
-use axum_extra::extract::cookie::{Cookie, CookieJar};
+use axum_extra::extract::cookie::CookieJar;
 use serde::Deserialize;
 use serde_json::json;
 
@@ -215,7 +215,7 @@ async fn press(
         "secure my account pressed"
     );
     Ok((
-        jar.remove(Cookie::from("sid")),
+        jar.remove(crate::auth::cookie("sid", String::new(), st.secure)),
         Json(
             json!({"sessions": sessions, "updates": updates, "tokens": tokens, "writes": writes,
             "update_running": running, "guild": guild.to_string()}),

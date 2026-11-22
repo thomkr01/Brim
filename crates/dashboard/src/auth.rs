@@ -128,7 +128,9 @@ pub fn token() -> String {
     B64.encode(b)
 }
 
-fn cookie(name: &'static str, val: String, secure: bool) -> Cookie<'static> {
+/// Also the removal cookie (`jar.remove(cookie(name, ..))`): a removal needs the same `Path=/`, or the
+/// browser applies it to `/auth` only and keeps the cookie.
+pub(crate) fn cookie(name: &'static str, val: String, secure: bool) -> Cookie<'static> {
     Cookie::build((name, val))
         .http_only(true)
         .same_site(SameSite::Lax)
@@ -319,8 +321,8 @@ pub async fn callback(
         .get("login_next")
         .map_or("/".into(), |c| c.value().to_string());
     Ok((
-        jar.remove(Cookie::from("oauth_state"))
-            .remove(Cookie::from("login_next"))
+        jar.remove(cookie("oauth_state", String::new(), st.secure))
+            .remove(cookie("login_next", String::new(), st.secure))
             .add(cookie("sid", sid, st.secure)),
         Redirect::to(&next),
     )
@@ -353,7 +355,7 @@ pub async fn logout(
         .bind(&s.id)
         .execute(&st.db)
         .await?;
-    Ok((jar.remove(Cookie::from("sid")), Json(json!({"ok": true}))))
+    Ok((jar.remove(cookie("sid", String::new(), st.secure)), Json(json!({"ok": true}))))
 }
 
 pub async fn me(State(st): State<AppState>, s: Sess) -> Result<Json<serde_json::Value>, ApiError> {
@@ -1044,5 +1046,15 @@ mod tests {
             .execute(&st.db)
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn removal_cookie_has_the_login_path() {
+        let mut h = axum::http::HeaderMap::new();
+        h.insert(axum::http::header::COOKIE, "sid=x".parse().unwrap());
+        let jar = CookieJar::from_headers(&h).remove(cookie("sid", String::new(), true));
+        let r = (jar, ()).into_response();
+        let set = r.headers()[axum::http::header::SET_COOKIE].to_str().unwrap();
+        assert!(set.starts_with("sid=;") && set.contains("Path=/") && set.contains("Max-Age=0"), "{set}");
     }
 }
