@@ -224,7 +224,7 @@ pub fn Landing(
                     view! {
                         <section class="feat" class:flip=i % 2 == 1 class:big=i == 0>
                             <div class="feat-copy">
-                                <h3>{*title}</h3>
+                                <h3 class:deep=title.chars().take(4).any(|c| "gjpqy".contains(c))>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
                                     {tabs.iter().enumerate().map(|(t, (label, _, _))| view! {
                                         <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| { on.set(t); request_animation_frame(fit); }>
