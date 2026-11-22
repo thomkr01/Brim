@@ -856,8 +856,8 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 
 /* Dense groups: smaller text in the pieces, labels on one line, the message capped with a soft fade. */
 .land [class*="l-base"] .pane { font-size:.9em; } .land .pane .tog label { white-space:nowrap; }
-.land [class*="l-base"] > div:nth-of-type(3) { max-height:calc(var(--space-56) * 5); mask-image:linear-gradient(#000 82%, #0000); }
-.land [class*="l-base"] > .xs { max-height:none; mask-image:none; }
+.land [class*="l-base"] > div:nth-of-type(3) { max-height:calc(var(--space-56) * 5); }
+.land [class*="l-base"] > .xs { max-height:none; }
 .land .win.xs { display:flex; flex-direction:column; background:none; box-shadow:none; gap:var(--space-8); overflow:visible; }
 .land .win.xs > * { transform:scale(.98); }
 @media (max-width:760px) { .land .scene { padding:var(--space-40) 0 var(--space-56); } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } .land [class*="l-base"] .pane { font-size:1em; } .land [class*="l-base"] > div:nth-of-type(3) { max-height:calc(var(--space-56) * 6); } }
