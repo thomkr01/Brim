@@ -654,15 +654,18 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .scene { row-gap:0; }
 .land .scene .pane, .land .scene .lcard { width:max-content; max-width:calc(var(--space-56) * 7); justify-self:start; }
 .land .scene .lcard { min-width:calc(var(--space-56) * 5); }
-.land .scene .pane .tog { gap:var(--space-24); }
+.land .scene .pane .tog { gap:var(--space-4) var(--space-24); flex-wrap:wrap; }
+.land .lcard, .land .tbl { font-size:1.2em; }
 .land .scene .pane .tog label { flex:1; min-width:0; white-space:normal; }
 /* One arrangement for every scene (desktop): the first piece sets the size of the scene; the second lies 84% of its width to the right and 31% down, the third 23% in and 88% down, in front. A phone stacks them (rules at the end). landing.rs centres the group in the block's fixed box and places the stars. */
 @media (min-width:761px) {
   .land .scene { display:block; width:max-content; padding:0; }
   .land .scene > div:nth-of-type(1) { position:relative; z-index:1; }
+  .land .scene > .pane:nth-of-type(1), .land .scene > .lcard:nth-of-type(1), .land .scene > .tbl:nth-of-type(1) { padding-right:calc(var(--space-56) + var(--space-8)); padding-bottom:calc(var(--space-24) + var(--space-12)); min-width:calc(var(--space-56) * 7); }
   .land .scene > div:nth-of-type(2) { position:absolute; left:84%; top:31%; z-index:2; }
   .land .scene > div:nth-of-type(3) { position:absolute; left:23%; top:88%; z-index:4; }
   .land .scene > .win:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 7); z-index:5; }
+  .land .scene:has(> .win:not(.pane):not(.lcard):not(.tbl)) > :is(.pane, .lcard, .tbl):nth-of-type(3) { width:max-content; max-width:calc(var(--space-56) * 5.5); padding-right:calc(var(--space-56) + var(--space-24)); }
   .land .scene > .win.xs { width:calc(var(--space-56) * 6.4); }
 }
 .land .embed .fields > .blk[style*="span 4"] { grid-column:span 6 !important; }
@@ -679,7 +682,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .lname { display:flex; flex-direction:column; min-width:0; } .land .lname small { color:var(--text-secondary); }
 .land .lacts { display:flex; gap:var(--space-8); flex:none; white-space:nowrap; }
 .land .pill { padding:var(--space-4) var(--space-12); border-radius:var(--radius-button); background:var(--page); font-weight:600; white-space:nowrap; }
-.land .pane { font-size:1.08em; } .land .big .pane { font-size:1.3em; }
+.land .pane { font-size:1.3em; }
 .land .gmark { color:var(--text-secondary); font-weight:700; } .land .gmark.al { color:var(--ok); } .land .gmark.de { color:var(--bad); }
 .land .pane .ph { font-size:1.1em; margin-bottom:var(--space-4); } .land .pane p { margin:0 0 var(--space-8); } .land .pane button { align-self:flex-start; } .land .pbar { height:var(--space-4); border-radius:var(--radius-button); background:var(--line); } .land .pbar i { display:block; width:60%; height:100%; border-radius:inherit; background:var(--accent); }
 .land .pane .tog { display:flex; align-items:center; gap:var(--space-8); } .land .pane .tog label { flex:1; }
@@ -857,8 +860,8 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .feat-shot:not([style*="--k"]) > .scene, .land .feat-shot:not([style*="--k"]) .fx { visibility:hidden; }
 
 /* Dense groups: smaller text in the pieces, labels on one line, the message capped with a soft fade. */
-.land [class*="l-base"] .pane { font-size:.9em; } .land .pane .tog label { white-space:nowrap; }
+
 
 .land .win.xs { display:flex; flex-direction:column; background:none; box-shadow:none; gap:var(--space-8); overflow:visible; }
 .land .win.xs > * { transform:scale(.98); }
-@media (max-width:760px) { .land .scene { padding:0; } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } .land [class*="l-base"] .pane { font-size:1em; } }
+@media (max-width:760px) { .land .scene { padding:0; } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } }
