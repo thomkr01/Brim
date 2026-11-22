@@ -183,11 +183,12 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
                     view! {
                         <div class="row">
                             <b>{format!("#{}", r["code"].as_str().unwrap_or_default())}</b>
-                            <span class="muted">{format!("{} · {} · {} roles · {} channels", if r["by"].is_null() { "Brim".to_string() } else { format!("user {}", r["by"]) }, when(r["at"].as_i64().unwrap_or(0)), r["roles"], r["channels"])}</span>
-                            <span class="sp"></span>
+                            <span class="muted bktext">{format!("{} · {} · {} roles · {} channels", if r["by"].is_null() { "Brim".to_string() } else { format!("user {}", r["by"]) }, when(r["at"].as_i64().unwrap_or(0)), r["roles"], r["channels"])}</span>
+                            <span class="bkbtns">
                             <button class="ghost" on:click={let (c, v) = (r["code"].as_str().unwrap_or_default().to_string(), view_it.clone()); move |_| v(c.clone())}>"View"</button>
                             <button class="ghost" on:click=move |_| show.run(id)>"Preview & load"</button>
                             <button class="ghost" disabled=move || access.rank() < 4 title=move || (access.rank() < 4).then_some("Needs the owner or an Extra Owner") on:click=move |_| remove.run(id)>"Delete"</button>
+                            </span>
                         </div>
                     }
                 }

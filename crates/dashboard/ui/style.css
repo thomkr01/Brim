@@ -746,3 +746,5 @@ button.card.hub .txt { flex:1; min-width:0; display:flex; flex-direction:column;
 button.card.hub .chev .i { width:24px; height:24px; transition:transform var(--dur) var(--ease); } button.card.hub.on .chev .i { transform:rotate(90deg); }
 button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--space-8); }
 .hubsubs .mlist { margin:0 0 var(--space-12) var(--space-16); }
+/* Backup row: the text wraps, the three buttons stay on one line at the right. */
+.bktext { flex:1 1 12em; min-width:0; overflow-wrap:anywhere; } .bkbtns { display:flex; gap:var(--space-8); flex:none; margin-left:auto; }
