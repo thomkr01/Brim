@@ -23,6 +23,8 @@ pub struct Card {
     pub alert: Option<&'static str>,
     /// (field, follower): changing the field sets the follower to the same value.
     pub links: &'static [(&'static str, &'static str)],
+    /// Switches the wizard turns on while the saved settings have no value for them yet.
+    pub preset: &'static [&'static str],
 }
 
 const fn card(
@@ -43,6 +45,7 @@ const fn card(
         when: &[],
         alert: None,
         links: &[],
+        preset: &[],
     }
 }
 
@@ -140,6 +143,8 @@ pub const AUTOMOD: &[Card] = &[
             "automod.filters.chars_lower.enabled",
             "automod.filters.chars_upper.enabled",
         )],
+        // Owner decision 2026-11-22: on unless the owner already chose.
+        preset: &["automod.filters.suspicion.enabled"],
         ..boxed(card(
             "Antispam module",
             "Do you want Brim to also monitor and fight off spam in your server?",
@@ -167,6 +172,10 @@ pub const AUTOMOD: &[Card] = &[
                     "Monitor new lines in messages",
                 ),
                 ("automod.filters.zalgo.enabled", "Monitor zalgo in messages"),
+                (
+                    "automod.filters.suspicion.enabled",
+                    "Add a little heat for suspicious accounts (no avatar, very new, or appeal accepted in the last week)",
+                ),
                 (
                     "automod.auto_slowmode.enabled",
                     "Slow down channels that flood",

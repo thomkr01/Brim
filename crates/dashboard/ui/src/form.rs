@@ -1195,6 +1195,7 @@ pub fn Section(
                 );
                 // Unset values take their defaults, so changing one and back leaves nothing to save.
                 let mut c = val.get_untracked();
+                let unset: Vec<&str> = cards.into_iter().flatten().flat_map(|c| c.preset).copied().filter(|p| get_path(&c, p).is_null()).collect();
                 for f in fields.get_untracked() {
                     let p = f["path"].as_str().unwrap_or("");
                     // `fallback`: an older field of the same section that held this value in other units.
@@ -1216,6 +1217,10 @@ pub fn Section(
                     }
                 }
                 orig.set(c.clone());
+                // A wizard switch that starts on and was never saved shows as an unsaved change.
+                for p in unset {
+                    set_path(&mut c, p, json!(true));
+                }
                 val.set(c);
             }
         }

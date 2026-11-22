@@ -339,6 +339,29 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
             steps: vec![],
         });
     }
+    // Owner decision 2026-11-22: suspicious accounts, and members whose appeal was accepted in the
+    // last week, get a little more heat.
+    let automod = &config["automod"];
+    // Its heat counts only with Anti Spam on (on unless switched off).
+    if automod["enabled"] == true
+        && automod["anti_spam"] != false
+        && automod["filters"]["suspicion"]["enabled"] != true
+    {
+        rows.push(Check {
+            id: "suspicion_off".into(),
+            severity: Severity::Warn,
+            title: "Suspicious account filter off",
+            detail: "Accounts with no avatar, very new accounts and members whose appeal was accepted in the last 7 days get no extra automod heat.".into(),
+            fix: Some(Fix {
+                label: "Turn on",
+                role_id: None,
+                channel_id: None,
+                setting: Some(SUSPICION),
+                move_under_bot: false,
+            }),
+            steps: vec![],
+        });
+    }
     let mut rows = json!(rows);
     // Move into range's confirm names each value and where it goes.
     if let Some(r) = rows
@@ -449,6 +472,9 @@ pub(crate) async fn member_pages(
 
 /// The [`Fix::setting`] that moves every stored number outside its range to the nearest end.
 const CLAMP: &str = "clamp_stored";
+
+/// The [`Fix::setting`] that turns on the automod's Suspicious account filter.
+const SUSPICION: &str = "enable_suspicion";
 
 /// The [`Fix::setting`] that gives back one thing the previous owner set (`role_id` names it:
 /// `eo:<user>`, `ta:<user>`, `member:<user>:<permit>`, `role:<role>:<permit>`), or with `role_id` "done" closes the card.
@@ -1375,6 +1401,34 @@ async fn setup_fix(
                 )));
             }
             done(json!({"ok": true, "backup": backup}))
+        }
+        SUSPICION => {
+            if level < crate::access::write_bar("automod").0 {
+                return Err(ApiError::Forbidden("you cannot change the automod"));
+            }
+            let Some(a) = config.get_mut("automod").and_then(Value::as_object_mut) else {
+                return Err(ApiError::BadRequest("the automod is not set up yet".into()));
+            };
+            let f = a.entry("filters").or_insert(json!({}));
+            if !f.is_object() {
+                *f = json!({});
+            }
+            let on = &mut f["suspicion"];
+            if !on.is_object() {
+                *on = json!({});
+            }
+            on["enabled"] = json!(true);
+            crate::api::validate("automod", &config["automod"], &c["automod"])?;
+            let version = save_fix(
+                st,
+                s,
+                guild,
+                cur,
+                &config,
+                "turned on the Suspicious account filter",
+            )
+            .await?;
+            done(json!({"ok": true, "version": version}))
         }
         CLAMP => {
             let mut moved = vec![];
@@ -2990,6 +3044,15 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(r.0["clamped"], json!(["panic.window_secs: 0 -> 1"]));
+        // The Suspicious account filter goes on, also with no filters saved yet.
+        let (v, mut c) = crate::store::current(&st.db, g).await.unwrap();
+        c["automod"] = json!({"enabled": true});
+        let _ = setup_fix(&st, &s, g, Level::Owner, v, &c, Some(SUSPICION))
+            .await
+            .unwrap()
+            .unwrap();
+        let (_, c) = crate::store::current(&st.db, g).await.unwrap();
+        assert_eq!(c["automod"]["filters"]["suspicion"]["enabled"], json!(true));
         wipe(&st, g).await;
     }
 
