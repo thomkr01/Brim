@@ -89,6 +89,11 @@ fn fit() {
 const EDITS: [(u64, &str); 3] = [(0x5865f2, "Welcome! One step left."), (0xe91e63, "Hey there, press the button."), (0x1be725, "Verify to join the fun.")];
 
 /// A sample as the bot sends it, with the template's `{prefix}` filled from the sample prefix (the one in the bot's sample variables).
+/// A sample as a window body; until the samples load, a calm pulsing block of about the same size.
+fn shown(m: serde_json::Value) -> AnyView {
+    if m.is_null() { view! { <div class="skel feat-skel"></div> }.into_any() } else { crate::discord::show_msg(m) }
+}
+
 fn sample(key: &str) -> serde_json::Value {
     let m = crate::discord::sample(key);
     if m.is_null() { return m }
@@ -131,18 +136,6 @@ const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
 fn appeal_login(id: &str) -> Option<String> {
     let ok = (17..=20).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit());
     ok.then(|| format!("/auth/login?next=/%23/appeal/{id}"))
-}
-
-/// Animations off: the user's choice (`data-motion`), or the system setting, under which
-/// bundle.css stops every animation, so no animationend would ever end a phase.
-fn calm() -> bool {
-    let w = web_sys::window().unwrap();
-    w.match_media("(prefers-reduced-motion: reduce)").ok().flatten().is_some_and(|m| m.matches())
-        || w.document()
-        .and_then(|d| d.document_element())
-        .and_then(|r| r.get_attribute("data-motion"))
-        .as_deref()
-        == Some("reduced")
 }
 
 #[component]
@@ -241,8 +234,8 @@ pub fn Landing(
                                 </div>
                             </div>
                             <div class="feat-shot">
-                                {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{effects()}{tab.2.iter().map(|it| match *it {
-                                    E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
+                                {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{effects()}{move || tab.2.iter().map(|it| match *it {
+                                    E(key) => view! { <div class="win">{shown(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
                                         (_, Some(t), _) => view! { <span class="tb-btn tb-btn-primary fakebtn">{t}</span> }.into_any(),
@@ -268,7 +261,7 @@ pub fn Landing(
                                                 e["color"] = (*color).into();
                                                 if e["description"].is_string() { e["description"] = (*text).into(); }
                                             }
-                                            view! { <div class="win">{crate::discord::show_msg(m)}</div> }
+                                            view! { <div class="win">{shown(m)}</div> }
                                         }).collect_view().into_any()
                                     }
                                     C(text) => view! { <div class="win cmd">{crate::discord::chat("Mika", view! { <span class="md">{text}</span> }.into_any())}</div> }.into_any(),

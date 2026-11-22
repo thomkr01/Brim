@@ -12,11 +12,23 @@ thread_local! {
         {
             let s = s.clone();
             leptos::task::spawn_local(async move {
-                if let Ok(v) = crate::common::api("GET", "/api/previews", None).await { s.set(v) }
+                // Retry with a growing pause: a slow or failed first call must not leave the front page empty.
+                for secs in [0u32, 1, 2, 4, 8, 15] {
+                    if secs > 0 { pause(secs * 1000).await; }
+                    if let Ok(v) = crate::common::api("GET", "/api/previews", None).await { s.set(v); break }
+                }
             });
         }
         s
     };
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn pause(ms: u32) {
+    let p = js_sys::Promise::new(&mut |ok, _| {
+        if let Some(w) = web_sys::window() { let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(&ok, ms as i32); }
+    });
+    let _ = wasm_bindgen_futures::JsFuture::from(p).await;
 }
 
 /// One of the bot's sample messages; null until they have loaded or before the bot first started.
