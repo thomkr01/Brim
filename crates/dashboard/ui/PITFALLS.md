@@ -671,4 +671,4 @@ The bar is hidden until the visitor scrolls past the hero's copper line. The fir
 
 The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-sizes.mjs` allows no raw pixel value in a padding, so dashboard-ui failed on main. It was not run before the push.
 
-**Rule:** a width you need inside a padding goes in a custom property (`--bar-w`), and `node tools/ui-sizes.mjs` runs before every push that touches `style.css`.
+**Rule:** a width you need inside a padding is the page width token `--w-wide` (never a raw value or a new property that only hides it), and `node tools/ui-sizes.mjs` runs before every push that touches `style.css`.
