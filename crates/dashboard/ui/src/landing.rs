@@ -72,17 +72,24 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
 fn fit() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(boxes) = doc.query_selector_all(".feat-shot") else { return };
+    use wasm_bindgen::JsCast;
+    let html = |n: Option<web_sys::Node>| n.and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
     for i in 0..boxes.length() {
-        use wasm_bindgen::JsCast;
-        let Some(b) = boxes.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
-        let Some(s) = b.query_selector(".scene.on").ok().flatten().and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
+        let Some(b) = html(boxes.item(i)) else { continue };
         let w = f64::from(b.client_width());
-        let nat = f64::from(s.offset_width());
-        let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.55));
-        let st = b.style();
-        let _ = st.set_property("--k", &k.to_string());
-        let _ = st.set_property("--dx", &format!("{}px", (w - nat * k) / 2.0));
-        let _ = st.set_property("--sh", &format!("{}px", s.offset_height()));
+        let Ok(scenes) = b.query_selector_all(".scene") else { continue };
+        // Every scene gets its own scale, so a scene that fades in already has its final size on the first frame.
+        for j in 0..scenes.length() {
+            let Some(s) = html(scenes.item(j)) else { continue };
+            let nat = f64::from(s.offset_width());
+            let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.55));
+            let _ = s.style().set_property("--k", &k.to_string());
+            let _ = s.style().set_property("--dx", &format!("{}px", (w - nat * k) / 2.0));
+            if s.class_list().contains("on") {
+                let _ = b.style().set_property("--k", &k.to_string());
+                let _ = b.style().set_property("--sh", &format!("{}px", s.offset_height()));
+            }
+        }
     }
 }
 
@@ -224,7 +231,7 @@ pub fn Landing(
                                 <h3>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
                                     {tabs.iter().enumerate().map(|(t, (label, _, _))| view! {
-                                        <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| on.set(t)>
+                                        <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| { on.set(t); request_animation_frame(fit); }>
                                             <span class="feat-dot" aria-hidden="true"></span>{*label}<span class="feat-arrow" aria-hidden="true">"\u{203a}"</span>
                                         </button>
                                     }).collect_view()}
