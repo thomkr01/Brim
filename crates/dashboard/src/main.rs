@@ -66,8 +66,6 @@ pub struct AppState {
     pub db: PgPool,
     pub discord: discord::Discord,
     pub secure: bool,
-    /// Per-user TOTP failures and last accepted step.
-    pub totp: Shared<i64, auth::TotpAttempts>,
     /// Per-session request buckets.
     pub rate: Shared<String, auth::Bucket>,
     /// Tor, VPN and hosting ranges for web verification's VPN block.
@@ -161,6 +159,45 @@ fn site_page(html: &str, redirect_uri: &str) -> String {
     html.replace("__SITE__", &base.replace(['"', '<', '>', '&'], ""))
 }
 
+/// The browser's script rule: only the UI's own files and the inline scripts of `page` (by their
+/// hash), so markup injected into a page can not run a script (security review 2026-11-22).
+fn script_csp(page: Option<&str>) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use sha2::{Digest, Sha256};
+    let hashes: String = inline_scripts(page.unwrap_or(""))
+        .iter()
+        .map(|s| format!(" 'sha256-{}'", STANDARD.encode(Sha256::digest(s))))
+        .collect();
+    format!("script-src 'self' 'wasm-unsafe-eval'{hashes}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+}
+
+/// The bodies of the `<script>` elements without a `src`.
+fn inline_scripts(html: &str) -> Vec<&str> {
+    let mut out = vec![];
+    let mut rest = html;
+    while let Some(at) = rest.find("<script") {
+        rest = &rest[at..];
+        let Some(open) = rest.find('>') else { break };
+        let Some(close) = rest.find("</script>") else {
+            break;
+        };
+        if close > open && !rest[..open].contains(" src=") {
+            out.push(&rest[open + 1..close]);
+        }
+        rest = &rest[close.max(open)..];
+        rest = rest.get(1..).unwrap_or("");
+    }
+    out
+}
+
+/// The script rule of a page the server makes itself: only scripts that carry `nonce`, plus `hosts`.
+pub(crate) fn nonce_csp(nonce: &str, hosts: &str) -> HeaderValue {
+    HeaderValue::from_str(&format!(
+        "script-src 'nonce-{nonce}'{hosts}; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    ))
+    .expect("a nonce and hosts are header-safe")
+}
+
 /// Whether trunk named this built file by a hash of its content (`name-1a2b3c4d5e6f7a8b.js`,
 /// `name-1a2b3c4d5e6f7a8b_bg.wasm`): a file of that name never changes. Copied assets keep their names.
 fn hashed_asset(path: &str) -> bool {
@@ -189,9 +226,12 @@ async fn cache_hashed(req: axum::extract::Request, next: middleware::Next) -> Re
 
 pub fn router(st: AppState, dist: &str) -> Router {
     let g = "/api/guilds/{guild}";
-    let page = std::fs::read_to_string(std::path::Path::new(dist).join("index.html"))
+    let html = std::fs::read_to_string(std::path::Path::new(dist).join("index.html"))
         .ok()
-        .map(|h| axum::response::Html(site_page(&h, &st.discord.redirect_uri)));
+        .map(|h| site_page(&h, &st.discord.redirect_uri));
+    let csp = HeaderValue::from_str(&script_csp(html.as_deref()))
+        .expect("hashes and keywords are header-safe");
+    let page = html.map(axum::response::Html);
     let root = Router::new();
     // Without a built UI the fallback below answers / with its "not built" message.
     let root = match page {
@@ -275,11 +315,11 @@ pub fn router(st: AppState, dist: &str) -> Router {
             X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),
         ))
-        // Only frame-ancestors: a full policy would have to allow the WASM UI and Turnstile.
-        // if_not_present: /media sets its own stricter policy.
+        // Scripts only; images, styles and frames stay open for the message previews. if_not_present:
+        // /media, the verify page and the raid page set their own.
         .layer(SetResponseHeaderLayer::if_not_present(
             CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("frame-ancestors 'none'"),
+            csp,
         ))
         .layer(SetResponseHeaderLayer::overriding(
             X_CONTENT_TYPE_OPTIONS,
@@ -326,7 +366,6 @@ async fn main() -> anyhow::Result<()> {
     let st = AppState {
         db,
         secure,
-        totp: Default::default(),
         rate: Default::default(),
         ips: Default::default(),
         vpn_logged: Default::default(),
@@ -397,6 +436,22 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn the_script_rule_allows_only_the_page_own_inline_scripts() {
+        let html = r#"<script type="module">init('/a.wasm')</script><script src="/x.js"></script><p></p><script>
+  var a = 1;
+</script>"#;
+        assert_eq!(
+            inline_scripts(html),
+            ["init('/a.wasm')", "\n  var a = 1;\n"]
+        );
+        let csp = script_csp(Some(html));
+        assert_eq!(csp.matches("'sha256-").count(), 2, "{csp}");
+        assert!(csp.starts_with("script-src 'self' 'wasm-unsafe-eval' 'sha256-"));
+        assert!(!csp.contains("unsafe-inline"));
+        assert_eq!(script_csp(None).matches("'sha256-").count(), 0);
+    }
+
     #[tokio::test]
     async fn internal_error_shows_only_a_code_that_is_in_the_log() {
         let r = ApiError::Internal(anyhow::anyhow!("secret cause 404 Not Found")).into_response();
@@ -436,7 +491,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -477,7 +531,7 @@ mod tests {
         assert_eq!(asset.status(), 404, "static files are not rate limited");
         assert_eq!(
             asset.headers()["content-security-policy"],
-            "frame-ancestors 'none'"
+            script_csp(None).as_str()
         );
         assert_eq!(asset.headers()["x-content-type-options"], "nosniff");
         assert_eq!(asset.headers()["referrer-policy"], "same-origin");

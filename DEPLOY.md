@@ -370,7 +370,7 @@ There is no second person who can take over, so these steps are yours alone. The
 2. **(server)** Log out every dashboard session, cancel a queued update, revoke every MCP token (this also closes the changes waiting for a code) and remove your dashboard 2FA, which someone with your session may have set up again. Replace `<your id>` with your Discord user id:
 
    ```bash
-   docker compose exec postgres psql -U brim -d brim -c "delete from dash_session; update update_runs set status = 'failed' where status = 'queued'; update mcp_tokens set revoked_at = now where revoked_at is null; update mcp_writes set status = 'revoked', body = null where status = 'pending'; delete from dash_totp where user_id = <your id>;"
+   docker compose exec postgres psql -U brim -d brim -c "delete from dash_session; update update_runs set status = 'failed' where status = 'queued'; update mcp_tokens set revoked_at = now where revoked_at is null; update mcp_writes set status = 'revoked', body = null where status = 'pending'; delete from dash_totp where user_id = <your id>; delete from dash_fails where user_id = <your id>;"
    ```
 
 3. **(server)** Log every OAuth login out: run `nano .env`, replace the value after `MCP_OAUTH_SECRET=` with the output of `openssl rand -hex 32`, save and close.

@@ -2032,7 +2032,6 @@ pub(crate) mod g3_handler_tests {
             db,
             discord,
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),

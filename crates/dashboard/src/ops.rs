@@ -23,11 +23,6 @@ use reqwest::Method;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{
-    collections::HashMap,
-    sync::{LazyLock, Mutex},
-    time::{Duration, Instant},
-};
 
 type ActionRow = (
     i64,
@@ -2064,23 +2059,23 @@ struct Claim {
     code: Option<String>,
 }
 
-/// Claim attempts per user in the last 10 minutes.
-static CLAIMS: LazyLock<Mutex<HashMap<i64, Vec<Instant>>>> = LazyLock::new(Default::default);
-const MAX_CLAIMS: usize = 5;
+/// Claim tries per user in 10 minutes; Secure my account presses are counted apart.
+const MAX_CLAIMS: i64 = 5;
 /// Wrong authenticator codes one rescue key takes in an hour (owner decision 2026-11-18).
 pub(crate) const MAX_CODE_FAILS: i32 = 10;
 
-pub(crate) fn claim_allowed(user: i64) -> bool {
-    within_limit(&CLAIMS, user)
-}
-
-/// At most `MAX_CLAIMS` tries per user in 10 minutes, counted in `m`.
-pub(crate) fn within_limit(m: &Mutex<HashMap<i64, Vec<Instant>>>, user: i64) -> bool {
-    let mut m = m.lock().unwrap();
-    let v = m.entry(user).or_default();
-    v.retain(|t| t.elapsed() < Duration::from_secs(600));
-    v.push(Instant::now());
-    v.len() <= MAX_CLAIMS
+/// At most `MAX_CLAIMS` tries of `kind` per user in 10 minutes, counted in the database so a
+/// dashboard restart does not reset them.
+pub(crate) async fn within_limit(
+    db: &sqlx::PgPool,
+    kind: &str,
+    user: i64,
+) -> Result<bool, ApiError> {
+    let mut tx = db.begin().await?;
+    let n = crate::auth::tries(&mut tx, (kind, user), 10, true).await?;
+    tx.commit().await?;
+    crate::auth::prune_tries(db).await;
+    Ok(n <= MAX_CLAIMS)
 }
 
 async fn claim_key(
@@ -2228,7 +2223,7 @@ async fn rescue_claim(State(st): State<AppState>, s: Sess, Json(b): Json<Claim>)
         .trim()
         .parse()
         .map_err(|_| ApiError::BadRequest("bad guild id".into()))?;
-    if !claim_allowed(s.user_id) {
+    if !within_limit(&st.db, "claim", s.user_id).await? {
         return Err(ApiError::Forbidden(
             "too many attempts, try again in 10 minutes",
         ));
@@ -2361,6 +2356,7 @@ async fn let_in(st: &AppState, guild: i64, user: i64) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn bot_role_permissions_are_restored_on_the_role() {
@@ -2435,7 +2431,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -3085,7 +3080,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),

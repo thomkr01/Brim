@@ -77,11 +77,6 @@ pub(crate) struct Press {
     code: Option<String>,
 }
 
-/// Press attempts per user in the last 10 minutes.
-static PRESSES: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<i64, Vec<std::time::Instant>>>,
-> = std::sync::LazyLock::new(Default::default);
-
 const BAD: &str = "invalid rescue key or code";
 
 async fn press(
@@ -101,7 +96,7 @@ async fn press(
     }
     // The claim's limit, counted apart: a claim needs no step-up, so whoever holds only the
     // Discord account could otherwise use up the owner's presses (security pass).
-    if !ops::within_limit(&PRESSES, s.user_id) {
+    if !ops::within_limit(&st.db, "press", s.user_id).await? {
         return Err(ApiError::Forbidden(
             "too many attempts, try again in 10 minutes",
         ));
@@ -278,7 +273,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -353,10 +347,13 @@ mod tests {
                 .unwrap()
         };
         let code = crate::otp::current(&secret);
-        PRESSES.lock().unwrap().clear();
+        q("delete from dash_fails where kind = 'press'")
+            .execute(&db)
+            .await
+            .unwrap();
         // Claims used up by whoever holds only the Discord account do not block the press.
         for _ in 0..6 {
-            ops::claim_allowed(owner);
+            ops::within_limit(&db, "claim", owner).await.unwrap();
         }
         // Not the bot owner: refused before anything, no try used.
         assert_eq!(go(&st, sess(owner + 1, true), "k", &code).await.0, 403);
@@ -423,7 +420,10 @@ mod tests {
         assert_eq!(c, 403);
         assert_eq!(fails().await, 2);
         // The press shares the claim's per-user limit (5 in 10 minutes).
-        PRESSES.lock().unwrap().clear();
+        q("delete from dash_fails where kind = 'press'")
+            .execute(&db)
+            .await
+            .unwrap();
         // A key made before the server's last change of owner never presses.
         q("update rescue_key set last_step = null where guild_id = 9700000001")
             .execute(&db)

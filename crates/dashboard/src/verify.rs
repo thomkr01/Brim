@@ -59,24 +59,27 @@ async fn page(
         Ok(c) => c,
         Err(m) => return Ok(shell(&format!("<p>{m}</p>")).into_response()),
     };
+    // The page's own scripts carry a new nonce each time (security review 2026-11-22).
+    let nonce = crate::auth::token();
     let widget = match (&keys, captcha) {
         (Some((site, _)), true) => format!(
-            r#"<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="{site}"></div>"#
+            r#"<script nonce="{nonce}" src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script><div class="cf-turnstile" data-sitekey="{site}"></div>"#
         ),
         _ => String::new(),
     };
-    Ok(shell(&format!(
+    let page = shell(&format!(
         r#"<span class="tag">Brim</span><h1>VERIFICATION</h1><p class="sub">You are required to pass the captcha to get access to the server.</p><p>Signed in as {}.</p>{widget}<p><button id="go">&#10003; Verify</button></p><p id="msg" role="alert"></p>
-<script>go.onclick=async()=>{{go.disabled=true;
+<script nonce="{nonce}">go.onclick=async()=>{{go.disabled=true;
 const t=document.querySelector('[name=cf-turnstile-response]');
 const r=await fetch(location.pathname,{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':'{}'}},body:JSON.stringify({{token:t?t.value:''}})}});
 const j=await r.json().catch(()=>({{}}));
-if(r.ok){{document.querySelector('main').innerHTML='<div class="ok">&#10003;</div><h1>VERIFIED!</h1><p class="sub">Your roles arrive in a few seconds.</p><button id="close" onclick="window.close()">Close</button>'}}
+if(r.ok){{document.querySelector('main').innerHTML='<div class="ok">&#10003;</div><h1>VERIFIED!</h1><p class="sub">Your roles arrive in a few seconds.</p><button id="close">Close</button>';document.getElementById('close').onclick=()=>window.close()}}
 else if(r.status===401){{location.href='/auth/login?next='+location.pathname}}else{{msg.textContent=j.error||'Something went wrong.';go.disabled=false;window.turnstile&&turnstile.reset()}}}}</script>"#,
         s.username.replace('&', "&amp;").replace('<', "&lt;"),
         s.csrf
-    ))
-    .into_response())
+    ));
+    let csp = crate::nonce_csp(&nonce, " https://challenges.cloudflare.com");
+    Ok(([(axum::http::header::CONTENT_SECURITY_POLICY, csp)], page).into_response())
 }
 
 #[derive(Deserialize)]

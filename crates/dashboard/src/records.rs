@@ -195,7 +195,10 @@ fn esc(s: &str) -> String {
 }
 
 /// The public report of one join raid, open to anyone who has its code.
-async fn raid_page(State(st): State<AppState>, Path(code): Path<String>) -> Html<String> {
+async fn raid_page(
+    State(st): State<AppState>,
+    Path(code): Path<String>,
+) -> axum::response::Response {
     let rows: Vec<(i64, i64, String, Option<String>, i64)> = sqlx::query_as(
         // A member's own /invites create link may still work: the public page leaves its code out.
         "select guild_id, user_id, name,
@@ -229,7 +232,7 @@ async fn raid_page(State(st): State<AppState>, Path(code): Path<String>) -> Html
                 .collect();
             format!(
                 "<h1>Join Raid Report</h1><p><code>{}</code></p><p>Server <code>{}</code> &middot; {}</p>\
-                 <h2>{} flagged accounts</h2><button onclick=\"navigator.clipboard.writeText(this.dataset.ids)\" data-ids=\"{ids}\">Copy IDs</button><ul>{list}</ul>",
+                 <h2>{} flagged accounts</h2><button id=\"copy\" data-ids=\"{ids}\">Copy IDs</button><ul>{list}</ul>",
                 esc(&code),
                 first.0,
                 chrono::DateTime::from_timestamp_millis(first.4).map_or_else(String::new, |d| d.format("%Y-%m-%d %H:%M UTC").to_string()),
@@ -237,10 +240,16 @@ async fn raid_page(State(st): State<AppState>, Path(code): Path<String>) -> Html
             )
         }
     };
-    Html(format!(
+    // The copy button's script carries a new nonce each time (security review 2026-11-22).
+    let nonce = crate::auth::token();
+    let page = Html(format!(
         r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Join Raid Report</title><style>body{{background:#1c1c1c;color:#eee;font:16px system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}code{{background:#2f2f2f;padding:.1rem .4rem;border-radius:.3rem}}li{{margin:.3rem 0}}button{{background:#1be725;border:0;border-radius:.5rem;padding:.5rem 1rem;font-weight:600;cursor:pointer}}</style>{body}"#
-    ))
+<title>Join Raid Report</title><style>body{{background:#1c1c1c;color:#eee;font:16px system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}code{{background:#2f2f2f;padding:.1rem .4rem;border-radius:.3rem}}li{{margin:.3rem 0}}button{{background:#1be725;border:0;border-radius:.5rem;padding:.5rem 1rem;font-weight:600;cursor:pointer}}</style>{body}
+<script nonce="{nonce}">var c=document.getElementById('copy');if(c)c.onclick=function(){{navigator.clipboard.writeText(c.dataset.ids)}}</script>"#
+    ));
+    use axum::response::IntoResponse;
+    let csp = crate::nonce_csp(&nonce, "");
+    ([(axum::http::header::CONTENT_SECURITY_POLICY, csp)], page).into_response()
 }
 
 /// Lists come in pages of 50 (the dashboard's `Pager`).

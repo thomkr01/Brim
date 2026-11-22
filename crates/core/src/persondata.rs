@@ -98,6 +98,11 @@ pub const PLACES: &[Place] = &[
         show: false,
         ..p("dash_session", "user_id", &[])
     },
+    // Recent wrong 2FA codes and rescue claim tries (an hour at most): deleting them lifts a lockout.
+    Place {
+        show: false,
+        ..kept("dash_fails", "user_id", &[])
+    },
     // A credential, not member data: deleting it would let whoever holds the Discord account
     // enrol a new authenticator by DM code and pass 2FA (security pass, batch 8).
     Place {

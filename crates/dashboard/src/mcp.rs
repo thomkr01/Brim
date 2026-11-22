@@ -978,7 +978,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -1189,10 +1188,14 @@ mod tests {
         )
         .await;
         assert_eq!(code, 400);
-        assert!(
-            !st.totp.lock().unwrap().contains_key(&owner),
-            "2FA attempts untouched"
-        );
+        let misses: i64 = sqlx::query_scalar(
+            "select count(*) from dash_fails where kind like 'totp%' and user_id = $1",
+        )
+        .bind(owner)
+        .fetch_one(&st.db)
+        .await
+        .unwrap();
+        assert_eq!(misses, 0, "2FA attempts untouched");
         // A right DM code with a wrong authenticator code costs a try, so the DM code cannot be replayed
         // with endless authenticator guesses.
         let tried = || {
@@ -1498,7 +1501,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),

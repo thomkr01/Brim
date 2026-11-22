@@ -71,7 +71,6 @@ async fn review_report_and_appeal() {
             limits: Default::default(),
         },
         secure: false,
-        totp: Default::default(),
         rate: Default::default(),
         ips: Default::default(),
         vpn_logged: Default::default(),

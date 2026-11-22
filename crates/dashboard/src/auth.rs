@@ -21,52 +21,13 @@ use std::time::{Duration as StdDuration, Instant};
 const STEP_UP_MINUTES: i64 = 10;
 /// A session nobody used for this long has ended.
 const IDLE_HOURS: i32 = 24;
-/// Wrong TOTP codes allowed per user within `TOTP_WINDOW`.
-const TOTP_FAILS: usize = 5;
-const TOTP_WINDOW: StdDuration = StdDuration::from_secs(600);
+/// Wrong TOTP codes allowed per user within `TOTP_WINDOW_MINUTES`.
+const TOTP_FAILS: i64 = 5;
+const TOTP_WINDOW_MINUTES: i32 = 10;
 /// Requests a session may make at once, refilled at `RATE` per second. Two page loads in a row
 /// (the Tickets tab alone sends about 12) must fit, or the second page shows nothing.
 pub(crate) const BURST: f64 = 40.0;
 const RATE: f64 = 20.0;
-
-#[derive(Default)]
-pub struct TotpAttempts {
-    fails: Vec<Instant>,
-    /// Misses sent through MCP have their own lockout, so an AI client cannot lock the owner out of the
-    /// dashboard. The replay guard (`last_step`) stays shared: a code used on one path is spent on both.
-    mcp_fails: Vec<Instant>,
-    last_step: u64,
-}
-
-impl TotpAttempts {
-    fn fails(&mut self, mcp: bool) -> &mut Vec<Instant> {
-        if mcp {
-            &mut self.mcp_fails
-        } else {
-            &mut self.fails
-        }
-    }
-
-    fn locked(&mut self, now: Instant, mcp: bool) -> bool {
-        let f = self.fails(mcp);
-        f.retain(|t| now.duration_since(*t) < TOTP_WINDOW);
-        f.len() >= TOTP_FAILS
-    }
-
-    /// Accepts `step` (the time step the code matched) once; a miss or a replay counts as a failure.
-    fn accept(&mut self, step: Option<u64>, now: Instant, mcp: bool) -> bool {
-        match step.filter(|s| *s > self.last_step) {
-            Some(s) => {
-                self.last_step = s;
-                true
-            }
-            None => {
-                self.fails(mcp).push(now);
-                false
-            }
-        }
-    }
-}
 
 pub use brim_core::ratelimit::Bucket;
 
@@ -505,7 +466,7 @@ pub async fn totp_verify(
     let step = crate::otp::step(&secret, &c.code)?;
     // A wrong DM code counts as a miss, so it shares the TOTP lockout.
     let step = step.filter(|_| confirmed || dm_code.as_deref() == Some(c.dm_code.as_str()));
-    attempt(&st, s.user_id, step, false)?;
+    attempt(&st, s.user_id, step, false).await?;
     // Only the secret just checked: a new enrollment that landed meanwhile must not be confirmed by this code.
     let kept = sqlx::query(
         "update dash_totp set confirmed = true, dm_code = null where user_id = $1 and secret = $2",
@@ -585,20 +546,80 @@ fn xor_stream(st: &AppState, sid: &str, data: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Counts a TOTP attempt: refuses while locked out, and refuses a miss or a replayed step.
-fn attempt(st: &AppState, user: i64, step: Option<u64>, mcp: bool) -> Result<(), ApiError> {
-    let mut m = st.totp.lock().unwrap();
-    let a = m.entry(user).or_default();
-    if a.locked(Instant::now(), mcp) {
+/// Counts a try of `kind` by `user` in the database, so a dashboard restart keeps it, and says how
+/// many such tries came in the last `minutes`, this one included. `add` false only counts.
+/// The advisory lock makes parallel tries of one counter wait, so none passes the limit unseen.
+pub(crate) async fn tries(
+    tx: &mut sqlx::PgConnection,
+    (kind, user): (&str, i64),
+    minutes: i32,
+    add: bool,
+) -> Result<i64, ApiError> {
+    sqlx::query("select pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))")
+        .bind(kind)
+        .bind(user)
+        .execute(&mut *tx)
+        .await?;
+    if add {
+        sqlx::query("insert into dash_fails (kind, user_id) values ($1, $2)")
+            .bind(kind)
+            .bind(user)
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(sqlx::query_scalar(
+        "select count(*) from dash_fails where kind = $1 and user_id = $2 and at > now() - make_interval(mins => $3)",
+    )
+    .bind(kind)
+    .bind(user)
+    .bind(minutes)
+    .fetch_one(&mut *tx)
+    .await?)
+}
+
+/// Deletes tries older than any window, outside the counters' locks (no lock waits between users).
+pub(crate) async fn prune_tries(db: &sqlx::PgPool) {
+    if let Err(e) = sqlx::query("delete from dash_fails where at < now() - interval '1 hour'")
+        .execute(db)
+        .await
+    {
+        tracing::warn!(?e, "old dashboard tries not deleted");
+    }
+}
+
+/// Counts a TOTP attempt: refuses while locked out, and refuses a miss or a replayed step. Misses
+/// sent through MCP have their own lockout, so an AI client cannot lock the owner out of the
+/// dashboard. The replay guard (`dash_totp.last_step`) is shared: a code used on one path is spent on both.
+async fn attempt(st: &AppState, user: i64, step: Option<u64>, mcp: bool) -> Result<(), ApiError> {
+    let key = (if mcp { "totp-mcp" } else { "totp" }, user);
+    let mut tx = st.db.begin().await?;
+    if tries(&mut tx, key, TOTP_WINDOW_MINUTES, false).await? >= TOTP_FAILS {
         tracing::warn!(user, mcp, "dashboard 2FA locked after too many wrong codes");
-        let mins = TOTP_WINDOW.as_secs() / 60;
+        let mins = TOTP_WINDOW_MINUTES;
         return Err(ApiError::TooMany(if mcp {
             format!("Too many wrong authenticator codes through MCP. MCP changes that need one are locked for up to {mins} minutes; the dashboard is not locked.")
         } else {
             format!("Too many wrong codes. You are locked out for up to {mins} minutes.")
         }));
     }
-    if !a.accept(step, Instant::now(), mcp) {
+    let fresh = match step {
+        Some(n) => {
+            sqlx::query("update dash_totp set last_step = $2 where user_id = $1 and (last_step is null or last_step < $2)")
+                .bind(user)
+                .bind(n as i64)
+                .execute(&mut *tx)
+                .await?
+                .rows_affected()
+                > 0
+        }
+        None => false,
+    };
+    if !fresh {
+        tries(&mut tx, key, TOTP_WINDOW_MINUTES, true).await?;
+    }
+    tx.commit().await?;
+    if !fresh {
+        prune_tries(&st.db).await;
         tracing::warn!(user, mcp, "dashboard 2FA code rejected");
         return Err(ApiError::Forbidden(WRONG_CODE));
     }
@@ -606,7 +627,7 @@ fn attempt(st: &AppState, user: i64, step: Option<u64>, mcp: bool) -> Result<(),
 }
 
 /// A code sent through MCP, from a confirmed enrollment: the replay guard of `totp_verify`, but its own
-/// lockout (see [`TotpAttempts`]).
+/// lockout (see [`attempt`]).
 pub async fn check_totp(st: &AppState, user: i64, code: &str) -> Result<(), ApiError> {
     let secret = sqlx::query_scalar::<_, String>(
         "select secret from dash_totp where user_id = $1 and confirmed",
@@ -615,7 +636,7 @@ pub async fn check_totp(st: &AppState, user: i64, code: &str) -> Result<(), ApiE
     .fetch_optional(&st.db)
     .await?
     .ok_or(ApiError::Forbidden(NOT_SET_UP_MCP))?;
-    attempt(st, user, crate::otp::step(&secret, code)?, true)
+    attempt(st, user, crate::otp::step(&secret, code)?, true).await
 }
 
 #[cfg(test)]
@@ -727,7 +748,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -803,7 +823,6 @@ mod tests {
                 limits: Default::default(),
             },
             secure: false,
-            totp: Default::default(),
             rate: Default::default(),
             ips: Default::default(),
             vpn_logged: Default::default(),
@@ -963,27 +982,67 @@ mod tests {
         assert!(csrf_ok(&Method::GET, None, "t"));
     }
 
-    #[test]
-    fn totp_locks_after_five_misses_and_refuses_replay() {
-        let now = Instant::now();
-        let mut a = TotpAttempts::default();
-        assert!(a.accept(Some(100), now, false));
-        assert!(!a.accept(Some(100), now, false), "same step twice");
-        assert!(!a.accept(Some(99), now, false), "older step");
-        assert!(a.accept(Some(101), now, false));
+    /// Runs only on a scratch Postgres. The lockout and the replay guard live in the database, so a
+    /// dashboard restart keeps them (security review 2026-11-22).
+    #[tokio::test]
+    async fn totp_locks_after_five_misses_and_refuses_replay() {
+        let Some((st, _, _)) = crate::api::g3_handler_tests::setup(9_497_000_000).await else {
+            return;
+        };
+        let u = 9_498_000_000 + std::process::id() as i64;
+        sqlx::query("delete from dash_fails where user_id = $1")
+            .bind(u)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        sqlx::query("insert into dash_totp (user_id, secret, confirmed) values ($1, 'x', true) on conflict (user_id) do update set last_step = null")
+            .bind(u)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let wrong =
+            |r: Result<(), ApiError>| matches!(r, Err(ApiError::Forbidden(m)) if m == WRONG_CODE);
+        let locked = |r: Result<(), ApiError>| matches!(r, Err(ApiError::TooMany(_)));
+        assert!(attempt(&st, u, Some(100), false).await.is_ok());
+        assert!(
+            wrong(attempt(&st, u, Some(100), false).await),
+            "same step twice"
+        );
+        assert!(wrong(attempt(&st, u, Some(99), false).await), "older step");
+        assert!(attempt(&st, u, Some(101), false).await.is_ok());
         for _ in 0..3 {
-            assert!(!a.locked(now, false));
-            a.accept(None, now, false);
+            assert!(wrong(attempt(&st, u, None, false).await));
         }
-        assert!(a.locked(now, false));
-        assert!(!a.locked(now + TOTP_WINDOW, false), "misses expire");
-        // MCP misses lock MCP only, and a step used on the dashboard is spent for MCP too.
-        let mut a = TotpAttempts::default();
-        for _ in 0..TOTP_FAILS {
-            a.accept(None, now, true);
+        assert!(locked(attempt(&st, u, Some(102), false).await));
+        sqlx::query("update dash_fails set at = now() - interval '11 minutes' where kind = 'totp' and user_id = $1")
+            .bind(u)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        assert!(
+            attempt(&st, u, Some(102), false).await.is_ok(),
+            "misses expire"
+        );
+        // A step used on the dashboard is spent for MCP too; MCP misses lock MCP only.
+        assert!(attempt(&st, u, Some(103), false).await.is_ok());
+        assert!(
+            wrong(attempt(&st, u, Some(103), true).await),
+            "replay across paths"
+        );
+        for _ in 1..TOTP_FAILS {
+            assert!(wrong(attempt(&st, u, None, true).await));
         }
-        assert!(a.locked(now, true) && !a.locked(now, false));
-        assert!(a.accept(Some(7), now, false));
-        assert!(!a.accept(Some(7), now, true), "replay across paths");
+        assert!(locked(attempt(&st, u, Some(104), true).await));
+        assert!(attempt(&st, u, Some(104), false).await.is_ok());
+        sqlx::query("delete from dash_fails where user_id = $1")
+            .bind(u)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        sqlx::query("delete from dash_totp where user_id = $1")
+            .bind(u)
+            .execute(&st.db)
+            .await
+            .unwrap();
     }
 }

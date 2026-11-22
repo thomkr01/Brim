@@ -590,7 +590,8 @@ async fn add_blacklist(
 }
 
 async fn blacklist(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
-    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    // The page is hidden without the appeals permit perm, so the list needs it too.
+    reviewer(&st, &s, guild).await?;
     let rows: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as("select user_id::text, added_at from appeal_blacklist where guild_id = $1 order by added_at desc")
         .bind(guild).fetch_all(&st.db).await?;
     Ok(Json(json!(rows
@@ -729,6 +730,42 @@ mod tests {
             .execute(&mut *c)
             .await
             .unwrap();
+    }
+
+    /// Runs only on a scratch Postgres. The appeal blacklist needs the appeals permit perm, as its page does.
+    #[tokio::test]
+    async fn the_blacklist_needs_the_appeals_permit_perm() {
+        let Some((st, mut s, g)) = crate::api::g3_handler_tests::setup(9_851_000_000).await else {
+            return;
+        };
+        s.user_id = 8;
+        st.discord.memo.lock().unwrap().insert(
+            format!("/guilds/{g}/members/8"),
+            (
+                std::time::Instant::now() + std::time::Duration::from_secs(60),
+                Some(json!({"roles": []})),
+            ),
+        );
+        for (perms, ok) in [
+            (vec!["dashboard_view"], false),
+            (vec!["dashboard_view", "appeals"], true),
+        ] {
+            sqlx::query("delete from permits where guild_id = $1")
+                .bind(g)
+                .execute(&st.db)
+                .await
+                .unwrap();
+            sqlx::query("with p as (insert into permits (guild_id, name, rank, perms) values ($1, 'P', 1, $2) returning id)
+                         insert into permit_members (permit_id, guild_id, user_id) select id, $1, 8 from p")
+                .bind(g)
+                .bind(&perms)
+                .execute(&st.db)
+                .await
+                .unwrap();
+            let r = blacklist(State(st.clone()), s.clone(), Path(g)).await;
+            assert_eq!(r.is_ok(), ok, "{perms:?}");
+        }
+        brim_core::db::purge_guild(&st.db, g).await.unwrap();
     }
 
     fn field(options: &[&str], multi: bool, required: bool) -> AppealField {
