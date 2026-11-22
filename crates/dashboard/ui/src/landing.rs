@@ -116,17 +116,13 @@ fn effects() -> impl IntoView {
         shapes.push((small, cx + sx * (6.0 + r() * 4.0), cy + sy * (6.0 + r() * 6.0)));
     }
     shapes.push(("spark", if r() < 0.5 { -2.0 } else { 100.0 }, 30.0 + r() * 40.0));
-    let mut out = shapes
+    let out = shapes
         .into_iter()
         .map(|(class, x, y)| {
-            let style = format!("left:{x:.0}%;top:{y:.0}%;--dl:-{:.1}s;--td:{:.1}s;--wd:{:.1}s;--wx:{:.1}rem;--wy:{:.1}rem;--wr:{:.0}deg", r() * 6.0, 2.0 + r() * 3.0, 6.0 + r() * 8.0, -1.5 + r() * 3.0, -1.5 + r() * 3.0, -60.0 + r() * 120.0);
+            let style = format!("left:{x:.0}%;top:{y:.0}%;rotate:{:.0}deg", -60.0 + r() * 120.0);
             view! { <i class=class style=style aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>();
-    out.extend((0..5).map(|_| {
-        let style = format!("left:{:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s;--sx:{:.0}%;--sy:{:.0}%", r() * 100.0, r() * 100.0, r() * 8.0, 4.0 + r() * 6.0, -40.0 + r() * 80.0, -120.0 + r() * 160.0);
-        view! { <i class="mote" style=style aria-hidden="true"></i> }
-    }));
     out
 }
 
@@ -233,8 +229,8 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot">
-                                {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{effects()}{move || tab.2.iter().map(|it| match *it {
+                            <div class="feat-shot"><div class="fx">{effects()}</div>
+                                {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{move || tab.2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{shown(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
