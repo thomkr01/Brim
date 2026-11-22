@@ -9,8 +9,10 @@ enum Item {
     E(&'static str),
     P(&'static str, &'static [&'static str]),
     N(&'static str),
+    /// A dashboard table: title and (name, state) rows.
+    T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{E, N, P};
+use Item::{E, N, P, T};
 
 type Scene = (&'static str, &'static [Item]);
 /// Feature sections: title and clickable lines; each line shows its own scene of overlapping windows.
@@ -22,12 +24,12 @@ const SECTIONS: [(&str, &[Scene]); 7] = [
         ("Warn for blocked words", &[P("Blocked words", &["Filter on", "Action: Warn", "Strikes on"]), E("automod_warn")]),
         ("Kick for invite links", &[P("Invite links", &["Filter on", "Action: Kick", "Allow list"]), E("automod_kick")]),
         ("Time out spammers", &[P("Spam", &["Filter on", "Action: Timeout", "Strikes on"]), E("automod_timeout")])]),
-    ("Moderation.", &[("Ban with a reason", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", &[E("ban_result"), E("ban_compact")]), ("Notes your whole team can see", &[E("note_modified")])]),
+    ("Moderation.", &[("Ban with a reason", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", &[E("ban_result"), E("ban_compact")]), ("Cases your whole team can see", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
         ("Monitor every action on your server", &[P("Log channels", &["# mod-log", "# message-log", "# member-log", "# server-log"]), E("mod_log")]),
         ("Make use of 62 log types", &[N("62"), P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("automod_warn")]),
         ("Ignore users, roles or channels", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
-    ("Tickets.", &[("Members open a private ticket", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", &[E("ticket_received")]), ("Replies reach the member", &[E("ticket_reply"), E("ticket_intro")])]),
+    ("Tickets.", &[("Members open a private ticket", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]), ("Replies reach the member", &[E("ticket_reply"), E("ticket_intro")])]),
 ];
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -141,10 +143,11 @@ pub fn Landing(
                                 </div>
                             </div>
                             <div class="feat-shot" aria-live="polite">
-                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i>
-                                {move || view! { <div class="scene">{tabs[on.get()].1.iter().map(|it| match *it {
+                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i>
+                                {move || view! { <div class="scene"><i class="burst" aria-hidden="true"></i>{tabs[on.get()].1.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show(key)}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| view! { <span class:on=(r == 0)>{*row}</span> }).collect_view()}</div> }.into_any(),
+                                    T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td><span class="chip">{*b}</span></td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                     N(n) => view! { <div class="badge" aria-hidden="true">{n}</div> }.into_any(),
                                 }).collect_view()}</div> }}
                             </div>
