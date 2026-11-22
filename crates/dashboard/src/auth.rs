@@ -593,7 +593,7 @@ pub(crate) async fn prune_tries(db: &sqlx::PgPool) {
 }
 
 /// Counts a TOTP attempt: refuses while locked out, and refuses a miss or a replayed step. Misses
-/// sent through MCP have their own lockout, so an AI client cannot lock the owner out of the
+/// sent through MCP have their own lockout, so an MCP client cannot lock the owner out of the
 /// dashboard. The replay guard (`dash_totp.last_step`) is shared: a code used on one path is spent on both.
 async fn attempt(st: &AppState, user: i64, step: Option<u64>, mcp: bool) -> Result<(), ApiError> {
     let key = (if mcp { "totp-mcp" } else { "totp" }, user);

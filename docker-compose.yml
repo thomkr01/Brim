@@ -1,7 +1,7 @@
 name: brim
 
 # The Brim names (database brim, roles brim_*, volumes brim_*). A server set up before the rename to
-# Brim ran this project as tommybot: a git pull there would start it on new, empty volumes. BRIM_NAMES
+# Brim ran this project under its old name: a git pull there would start it on new, empty volumes. BRIM_NAMES
 # in .env (see .env.example) says this server is set up for these names; without it nothing starts.
 x-names: ${BRIM_NAMES:?this compose file uses the Brim names. New install - add BRIM_NAMES=1 to .env. A server set up before the rename (folder ~/tommybot) - run git checkout HEAD@{1} to go back to the compose file it runs on}
 
