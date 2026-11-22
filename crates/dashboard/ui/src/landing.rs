@@ -65,30 +65,21 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
 
 /// Each scene is drawn 616 wide and scaled to fit its box (at most 0.85), so it keeps every window.
 /// shortcut: polled twice a second, because the samples and tab changes alter a scene's height.
-/// Ends a tall message at a whole line: the card keeps its solid look and shows only lines that fit under `limit` (design px).
+/// Shortens a tall message to whole fields: later lines of the embed are hidden until the card fits under `limit` (design px),
+/// and a heading is never the last visible line. The card and its embed box keep their normal padding.
 fn cap_message(scene: &web_sys::HtmlElement, limit: f64) {
     use wasm_bindgen::JsCast;
     let Ok(Some(win)) = scene.query_selector(":scope > div:nth-of-type(3):not(.pane):not(.xs)") else { return };
-    let Ok(Some(_)) = scene.query_selector(".feat-skel").map(|e| e.map_or(Some(()), |_| None)) else { return };
-    if win.get_attribute("data-cap").is_some() { return }
+    if scene.query_selector(".feat-skel").ok().flatten().is_some() || win.get_attribute("data-cap").is_some() { return }
     let _ = win.set_attribute("data-cap", "1");
-    let Ok(win) = win.dyn_into::<web_sys::HtmlElement>() else { return };
-    if f64::from(win.offset_height()) <= limit + 8.0 { return }
-    let ratio = win.get_bounding_client_rect().height() / f64::from(win.offset_height());
-    let top = win.get_bounding_client_rect().top();
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
-    let Ok(walker) = doc.create_tree_walker_with_what_to_show(&win, 4) else { return };
-    let (mut best, range) = (0.0_f64, doc.create_range().ok());
-    // Every line of text has a rect; the card ends under the last line that fits whole.
-    while let (Ok(Some(node)), Some(r)) = (walker.next_node(), range.as_ref()) {
-        if r.select_node_contents(&node).is_err() { continue }
-        let rects = r.get_client_rects();
-        for k in 0..rects.map_or(0, |l| l.length()) {
-            let bottom = (r.get_client_rects().and_then(|l| l.item(k)).map_or(0.0, |x| x.bottom()) - top) / ratio;
-            if bottom <= limit - 6.0 && bottom > best { best = bottom }
-        }
+    let (Ok(win), Ok(items)) = (win.clone().dyn_into::<web_sys::HtmlElement>(), win.query_selector_all(".embed .md > div")) else { return };
+    let line = |i| items.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
+    let mut keep = items.length();
+    let heading = |k: u32| line(k - 1).is_some_and(|l| l.text_content().unwrap_or_default().trim_end().ends_with(':'));
+    while keep > 1 && (f64::from(win.offset_height()) > limit || heading(keep)) {
+        keep -= 1;
+        if let Some(l) = line(keep) { let _ = l.style().set_property("display", "none"); }
     }
-    if best > 0.0 { let _ = win.style().set_property("max-height", &format!("{}px", best + 4.0)); }
 }
 
 fn fit() {
@@ -111,6 +102,8 @@ fn fit() {
             if s.class_list().contains("on") {
                 let _ = b.style().set_property("--k", &k.to_string());
                 let _ = b.style().set_property("--sh", &format!("{}px", s.offset_height()));
+                let _ = b.style().set_property("--fxl", &format!("{}px", (w - nat * k) / 2.0));
+                let _ = b.style().set_property("--fxw", &format!("{}px", nat * k));
             }
         }
     }

@@ -685,7 +685,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .tbl table { margin:0; width:100%; } .land .tbl td { padding:var(--space-4) var(--space-8); border-top:0; }
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
-.land .fx { position:absolute; inset:0; z-index:0; pointer-events:none; }
+.land .fx { position:absolute; inset:0 auto 0 var(--fxl, 0px); width:var(--fxw, 100%); z-index:0; pointer-events:none; }
 .land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
 .land .spark { width:var(--space-32); height:var(--space-32); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark { width:var(--space-24); height:var(--space-24); } .land .spark.lg { width:var(--space-32); height:var(--space-32); }
