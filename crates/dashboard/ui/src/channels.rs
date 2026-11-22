@@ -375,12 +375,12 @@ fn grid_view(
         .unwrap_or_else(|| id.to_string())
     };
     let shown: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
-    let add = NodeRef::<html::Select>::new();
+    let add = RwSignal::new(String::new());
     let options: Vec<_> = dc
         .with(|d| arr(&d["roles"]))
         .into_iter()
         .filter(|r| grid_roles.contains(&s(&r["id"])) && !shown.contains(&s(&r["id"])))
-        .map(|r| view! { <option value=s(&r["id"])>{s(&r["name"])}</option> })
+        .map(|r| (s(&r["id"]), s(&r["name"])))
         .collect();
     let head = cols.iter().map(|(_, c)| view! { <th scope="col">{*c}</th> }).collect_view();
     let body = rows
@@ -410,8 +410,8 @@ fn grid_view(
             <p class="muted">"Each role's Discord permissions here: ✓ allow, ✗ deny, – neutral. Dangerous Discord permissions are not here: Brim does those with permits."</p>
             <div class="gridwrap"><table class="data matrix"><thead><tr><th></th>{head}</tr></thead><tbody>{body}</tbody></table></div>
             <div class="row2">
-                <select node_ref=add aria-label="role to add to the grid"><option value="">"Add a role"</option>{options}</select>
-                <button class="ghost" aria-label="add the role to the grid" on:click=move |_| { let Some(r) = add.get_untracked().map(|x| x.value()).filter(|r| !r.is_empty()) else { return }; added.update(|a| a.push(format!("{} {r}", sid.get_value()))) }>"Add"</button>
+                <crate::form::ListPick items=Signal::derive(move || options.clone()) get=add set=Callback::new(move |v| add.set(v)) none="Add a role" label="role to add to the grid" />
+                <button class="ghost" aria-label="add the role to the grid" on:click=move |_| { let r = add.get_untracked(); if r.is_empty() { return } added.update(|a| a.push(format!("{} {r}", sid.get_value()))) }>"Add"</button>
             </div>
         </details>
     }
@@ -944,7 +944,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         let sid = StoredValue::new(id.clone());
         let pv = StoredValue::new(p.clone());
         let cur = StoredValue::new((picked.clone(), staff));
-        let role_pick = NodeRef::<html::Select>::new();
+        let role_pick = RwSignal::new(String::new());
         let role_chips = picked.iter().map(|r| {
             let (role, r2) = (role_of(r), r.clone());
             let name = role["name"].as_str().unwrap_or(r).to_string();
@@ -954,7 +954,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
             .with(|d| arr(&d["roles"]))
             .into_iter()
             .filter(|r| pickable.contains(&s(&r["id"])) && !picked.contains(&s(&r["id"])))
-            .map(|r| view! { <option value=s(&r["id"])>{s(&r["name"])}</option> })
+            .map(|r| (s(&r["id"]), s(&r["name"])))
             .collect();
         let none_left = options.is_empty();
         // Owner decision 11-18: Information reads as "Everyone" but members only read there.
@@ -1034,10 +1034,8 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                 <div class="chips">{role_chips}
                     // One control in two parts: pick, then Add. Not on change (see the channel kind pick).
                     {none_left.then(|| view! { <span class="muted">"No other roles to add. Staff, member, bot and quarantine roles are set elsewhere."</span> })}
-                    <select class="add" node_ref=role_pick aria-label="role to add" hidden=none_left>
-                        <option value="">"Choose a role to add"</option>{options}
-                    </select>
-                    <button class="ghost" aria-label="add the chosen role" hidden=none_left on:click=move |_| { let Some(r) = role_pick.get_untracked().map(|s| s.value()).filter(|r| !r.is_empty()) else { return }; let (mut roles, st) = cur.get_value(); roles.push(r); set_access(sid.get_value(), access(&roles, st, true)) }>"Add"</button>
+                    <span hidden=none_left><crate::form::ListPick items=Signal::derive(move || options.clone()) get=role_pick set=Callback::new(move |v| role_pick.set(v)) none="Choose a role to add" label="role to add" /></span>
+                    <button class="ghost" aria-label="add the chosen role" hidden=none_left on:click=move |_| { let r = role_pick.get_untracked(); if r.is_empty() { return } let (mut roles, st) = cur.get_value(); roles.push(r); set_access(sid.get_value(), access(&roles, st, true)) }>"Add"</button>
                 </div>
                 <div class="row2">
                     <input type="checkbox" class="sw" aria-label="staff can see it" prop:checked=staff disabled={ !can } title=(!can).then_some("Only the owner or an extra owner can change this")

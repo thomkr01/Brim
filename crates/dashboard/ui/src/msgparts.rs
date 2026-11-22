@@ -638,10 +638,7 @@ fn vars_body(p: Parts, brace: bool) -> AnyView {
         {head(p, "code", "Variables".into())}
         <input node_ref=search placeholder="Search variables" aria-label="search variables" prop:value=move || q.get() on:input=move |e| q.set(event_target_value(&e)) />
         {move || role_for.get().map(|tok| view! {
-            <div class="row"><select aria-label="role" on:change=move |e| { let id = event_target_value(&e); if !id.is_empty() { pick(format!("{{{tok}:{id}}}")) } }>
-                <option value="">"Pick the role..."</option>
-                {p.roles.get().into_iter().map(|(id, n)| view! { <option value=id>{n}</option> }).collect_view()}
-            </select></div>
+            <div class="row"><crate::form::ListPick items=p.roles get=Signal::derive(String::new) set=Callback::new(move |id: String| if !id.is_empty() { pick(format!("{{{tok}:{id}}}")) }) none="Pick the role..." label="role" /></div>
         })}
         <div class="vlist">{list}</div>
         <p class="muted small">"Brim fills these in when it sends the message."</p>
@@ -662,9 +659,7 @@ fn var_body(p: Parts, tok: String) -> AnyView {
     view! {
         {head(p, "code", v.1.into())}
         <p class="muted small">{what}" Example: "{ex}</p>
-        {arg.map(|id| view! { <div class="row"><label>"Role"</label><select aria-label="role" on:change=move |e| { let r = event_target_value(&e); p.sub.set(None); insert(&chip(&format!("{{{name}:{r}}}")), false) }>
-            {p.roles.get_untracked().into_iter().map(|(i, n)| { let on = i == id; view! { <option value=i prop:selected=on>{n}</option> } }).collect_view()}
-        </select></div> })}
+        {arg.map(|id| view! { <div class="row"><label>"Role"</label><crate::form::ListPick items=p.roles get=Signal::derive(move || id.clone()) set=Callback::new(move |r: String| { p.sub.set(None); insert(&chip(&format!("{{{name}:{r}}}")), false) }) none="" label="role" /></div> })}
         <div class="row"><button class="ghost" on:click=move |_| { p.sub.set(None); insert("", false) }>"Remove"</button><span class="sp"></span>
             <button class="ghost" on:click=move |_| p.open(Sub::Vars(false), None)>"Change"</button></div>
     }.into_any()

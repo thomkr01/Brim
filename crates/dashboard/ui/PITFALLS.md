@@ -695,3 +695,6 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 - One guard for the whole dashboard: `guard::guard(dirty, busy, problem, save)` in the page, `guard::leave(then)` for a page's own Back button. Never write a page-local "Leave without saving?" ask. `problem` is the text of what must be fixed first (a missing `{text}`, a JSON error); the dialog then has no Save button.
 - A page change is held in `guard::hold` (main.rs router): the address is put back with `replaceState`, the dialog opens one tick later (the dialog closes itself on a hash change). Do not create an `Effect` in a dialog answer: the dialog's view owns it and drops it when the dialog closes; wait with a timeout loop (`settle`).
 - Tickets and Logging are hubs like the other modules: parts are NAV keys like `tickets/publish`; `Access::of` reads the part before the `/`.
+
+## One searchable picker for channels and roles (2026-11-22)
+- A role or channel is chosen with `form::ListPick` (type to search, or open the list), never a native `<select>`; many of them are chips plus search (`channels`/`roles` kinds). Focus empties the box so the whole list shows; leaving puts the pick back. "Pick, then Add" controls keep the pick in a signal, not a `NodeRef` to a select.

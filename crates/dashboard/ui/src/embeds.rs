@@ -1958,10 +1958,7 @@ fn channel_picker(
                         <div class="chnew">
                             <div class="row"><label>"Name"</label><input aria-label="new channel name" maxlength="100" prop:value=name on:input=move |e| name.set(event_target_value(&e)) /></div>
                             <div class="row"><label>"Category"</label>
-                                <select aria-label="new channel category" on:change=move |e| parent.set(event_target_value(&e))>
-                                    <option value="">"No category"</option>
-                                    {move || cats().into_iter().map(|c| view! { <option value=c["id"].as_str().unwrap_or("").to_string()>{c["name"].as_str().unwrap_or("?").to_string()}</option> }).collect_view()}
-                                </select>
+                                <crate::form::ListPick items=Signal::derive(move || cats().into_iter().map(|c| (c["id"].as_str().unwrap_or("").to_string(), c["name"].as_str().unwrap_or("?").to_string())).collect()) get=parent set=Callback::new(move |v| parent.set(v)) none="No category" label="new channel category" />
                             </div>
                             <div class="row"><label>"Who can see it"</label>
                                 <div class="seg" role="group" aria-label="who can see the new channel">

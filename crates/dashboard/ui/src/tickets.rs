@@ -109,10 +109,7 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
         <h2>"Publish panels"</h2>
         <p class="muted">"Posts one message in the channel with the panels you tick. Members open a ticket from it. Save your panel changes first."</p>
         <div class="row" role="group" aria-label="Channel"><label>"Channel"</label>
-            <select aria-label="channel" on:change=move |e| channel.set(event_target_value(&e))>
-                <option value="" prop:selected=move || channel.get().is_empty()>"choose a channel"</option>
-                {move || items(&dc.get(), "channels").into_iter().map(|(id, l)| view! { <option value=id.clone() prop:selected=move || channel.get() == id>{l}</option> }).collect_view()}
-            </select>
+            <crate::form::ListPick items=Signal::derive(move || items(&dc.get(), "channels")) get=channel set=Callback::new(move |v| channel.set(v)) none="choose a channel" label="channel" />
         </div>
         <div class="row" role="group" aria-label="Panels"><label>"Panels"</label>
             <div class="pick">

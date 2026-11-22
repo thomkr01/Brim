@@ -604,14 +604,14 @@ fs.mkdirSync(out, { recursive: true });
   if (psql(`select count(*) from case_edits where guild_id = ${cg} and (old_value like '%example.com%' or new_value like '%example.com%')`) !== '0') failed.push('cases: the history kept a removed proof');
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1logging')}`);
   // No wait here on purpose: a change made right after the page loaded once got its bar hidden again (ui/PITFALLS.md #3).
-  const drop = page.locator('select:has(option[value=""]:text-is("none"))').first();
-  // Wait for the channel options too: the select shows with only "none" until the channel list arrives.
-  await drop.locator('option:nth-child(2)').waitFor({ state: 'attached', timeout: 5000 }).catch(() => failed.push('cancel: no channel dropdown on logging'));
+  const drop = page.locator('input[list^="lp-"]').first();
+  // Wait for the channel options too: the list has only "none" until the channel list arrives.
+  await page.locator('datalist option:nth-child(2)').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => failed.push('cancel: no channel dropdown on logging'));
   const was = await drop.inputValue();
-  const other = await drop.locator('option').evaluateAll((os, w) => os.map((o) => o.value).find((v) => v !== w), was);
-  if (other !== undefined) await drop.selectOption(other);
+  const other = await page.locator('datalist').first().locator('option').evaluateAll((os, w) => os.map((o) => o.value).find((v) => v !== w), was);
+  if (other !== undefined) { await drop.fill(other); await drop.blur(); }
   await page.click('.bar >> text=Cancel', { timeout: 5000 }).catch(() => failed.push('cancel: no Changes detected bar'));
-  if ((await drop.inputValue()) !== was) failed.push(`cancel: dropdown kept ${other}, saved is ${was || 'none'}`);
+  if ((await drop.inputValue()) !== was) failed.push(`cancel: dropdown kept ${other}, saved is ${was}`);
   // Leaving a page while its requests run (or fail, as while the dashboard restarts) must not read disposed signals.
   for (const mode of ['slow', 'fail']) {
     errors.length = 0;

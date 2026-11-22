@@ -248,10 +248,7 @@ pub fn triggers(
                         <button class:on=move || r.with(|v| v["spec"]["roles"]["mode"] != "only") disabled=locked on:click=move |_| r.update(|v| v["spec"]["roles"]["mode"] = json!("skip"))>"Skip members with"</button>
                         <button class:on=move || r.with(|v| v["spec"]["roles"]["mode"] == "only") disabled=locked on:click=move |_| r.update(|v| v["spec"]["roles"]["mode"] = json!("only"))>"Only members with"</button>
                     </div>
-                    <select aria-label="add a role" disabled=locked on:change=move |e| { let id = event_target_value(&e); if !id.is_empty() { r.update(|v| if let Some(l) = v["spec"]["roles"]["ids"].as_array_mut() { if !l.iter().any(|x| x == id.as_str()) && l.len() < 25 { l.push(json!(id)) } }) } }>
-                        <option value="" selected=true>"+ Role"</option>
-                        {move || roles.map(|r| r.get()).unwrap_or_default().into_iter().map(|(id, n)| view! { <option value=id>{n}</option> }).collect_view()}
-                    </select>
+                    <crate::form::ListPick items=Signal::derive(move || roles.map(|r| r.get()).unwrap_or_default()) get=Signal::derive(String::new) set=Callback::new(move |id: String| { if !id.is_empty() { r.update(|v| if let Some(l) = v["spec"]["roles"]["ids"].as_array_mut() { if !l.iter().any(|x| x == id.as_str()) && l.len() < 25 { l.push(json!(id)) } }) } }) none="+ Role" label="add a role" disabled=locked />
                 </div>
                 <div class="chipset">
                     {move || r.with(|v| v["spec"]["roles"]["ids"].as_array().cloned().unwrap_or_default()).into_iter().enumerate().map(|(i, id)| {

@@ -208,6 +208,43 @@ const NUKE_WORDS: [(&str, &str, &str, &str); 17] = [
     ),
 ];
 
+/// Pick one of (id, label): type to search the list, or open it. `none` is the label of "nothing" (id "").
+#[component]
+pub fn ListPick(
+    #[prop(into)] items: Signal<Vec<(String, String)>>,
+    #[prop(into)] get: Signal<String>,
+    set: Callback<String>,
+    none: &'static str,
+    label: &'static str,
+    #[prop(optional, into)] disabled: Signal<bool>,
+) -> impl IntoView {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let list = format!("lp-{}", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let name = move |v: &str| {
+        if v.is_empty() {
+            return none.to_string();
+        }
+        items.with(|l| l.iter().find(|(i, _)| i == v).map(|(_, n)| n.clone())).unwrap_or_else(|| "not found (deleted, or not loaded)".into())
+    };
+    let input = |e: &web_sys::Event| event_target::<web_sys::HtmlInputElement>(e);
+    view! {
+        // Focus empties the box so the whole list shows; leaving puts the pick back.
+        <input list=list.clone() aria-label=label prop:disabled=disabled prop:value=move || name(&get.get())
+            on:focus=move |e| input(&e).set_value("")
+            on:blur=move |e| input(&e).set_value(&name(&get.get_untracked()))
+            on:change=move |e| {
+                let q = event_target_value(&e);
+                let q = q.trim();
+                let hit = if q.eq_ignore_ascii_case(none) { Some(String::new()) } else { items.with(|l| l.iter().find(|(_, n)| n.eq_ignore_ascii_case(q)).map(|(i, _)| i.clone())) };
+                if let Some(id) = hit { set.run(id) }
+            } />
+        <datalist id=list>
+            <option value=none></option>
+            {move || items.get().into_iter().map(|(_, n)| view! { <option value=n></option> }).collect_view()}
+        </datalist>
+    }
+}
+
 /// (id, label) pairs from `/discord` for `key`: "channels" (no categories), "categories" or "roles".
 pub(crate) fn items(dc: &Value, key: &str) -> Vec<(String, String)> {
     let (list, pre) = match key {
@@ -441,10 +478,7 @@ fn RoutePick(
         <Show when=move || target.get().is_some()>
             <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Pick a channel" on:keydown=move |e| dialog_keys(&e, close)><div class="card">
                 <b>{move || { let t = target.get().unwrap_or_default(); if t.len() <= 3 { t.iter().map(|k| title(k)).collect::<Vec<_>>().join(", ") } else { format!("{} types", t.len()) } }}</b>
-                <div class="row"><label>"Pick a channel"</label><select aria-label="channel" on:change=move |e| channel.set(event_target_value(&e))>
-                    <option value="" prop:selected=move || channel.get().is_empty()>"choose a channel"</option>
-                    {move || items(&dc.get(), "channels").into_iter().map(|(id, l)| view! { <option value=id.clone() prop:selected=move || channel.get() == id>{l}</option> }).collect_view()}
-                </select></div>
+                <div class="row"><label>"Pick a channel"</label><ListPick items=Signal::derive(move || items(&dc.get(), "channels")) get=channel set=Callback::new(move |v| channel.set(v)) none="choose a channel" label="channel" /></div>
                 <div class="row"><button class="ghost" on:click=move |_| close()>"Abort"</button><button disabled=move || channel.get().is_empty() on:click=apply>"Apply"</button></div>
             </div></div>
         </Show>
@@ -775,10 +809,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                         } /> {label}</label> }
                     }).collect_view();
                     view! { <div class="row">
-                        <select aria-label="channel" on:change=move |e| { let mut cur = get(); cur[i]["channel"] = json!(event_target_value(&e)); set(cur) }>
-                            <option value="" prop:selected=move || get()[i]["channel"].is_null()>"choose a channel"</option>
-                            {move || items(&dc.get(), "channels").into_iter().map(|(id, l)| view! { <option value=id.clone() prop:selected=move || get()[i]["channel"].as_str() == Some(id.as_str())>{l}</option> }).collect_view()}
-                        </select>
+                        <ListPick items=Signal::derive(move || items(&dc.get(), "channels")) get=Signal::derive(move || get()[i]["channel"].as_str().unwrap_or("").to_string()) set=Callback::new(move |v: String| { let mut cur = get(); cur[i]["channel"] = json!(v); set(cur) }) none="choose a channel" label="channel" />
                         <div class="pick">{boxes}</div>
                         <button class="ghost" on:click=move |_| { let mut cur = get(); if let Some(a) = cur.as_array_mut() { a.remove(i); } set(cur) }>"Remove"</button>
                     </div> }
@@ -791,15 +822,11 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             let key = match kind.as_str() { "channel" => "channels", "category" => "categories", _ => "roles" };
             // A log route/event entry is unset by dropping its key: the bot cannot parse a null channel there.
             let entry = path.rsplit_once('.').filter(|(m, _)| m.ends_with(".routes") || m.ends_with(".events")).map(|(m, k)| (m.to_string(), k.to_string()));
-            view! { <select on:change=move |e| { let s = event_target_value(&e); match (&entry, s.is_empty()) {
-                (Some((m, k)), true) => val.update(|v| { let mut o = get_path(v, m); if let Some(o) = o.as_object_mut() { o.remove(k); } set_path(v, m, o) }),
-                _ => set(if s.is_empty() { Value::Null } else { json!(s) }),
-            } }>
-                <option value="" prop:selected=move || get().is_null()>"none"</option>
-                // A set id missing from the list (deleted, or the list did not load) is shown, not "none".
-                {move || get().as_str().filter(|id| !items(&dc.get(), key).iter().any(|(i, _)| i == id)).map(|id| view! { <option value=id.to_string() selected>"not found (deleted, or not loaded)"</option> })}
-                {move || items(&dc.get(), key).into_iter().map(|(id, l)| view! { <option value=id.clone() prop:selected=move || get().as_str() == Some(id.as_str())>{l}</option> }).collect_view()}
-            </select> }.into_any()
+            view! { <ListPick items=Signal::derive(move || items(&dc.get(), key)) get=Signal::derive(move || get().as_str().unwrap_or("").to_string())
+                set=Callback::new(move |s: String| match (&entry, s.is_empty()) {
+                    (Some((m, k)), true) => val.update(|v| { let mut o = get_path(v, m); if let Some(o) = o.as_object_mut() { o.remove(k); } set_path(v, m, o) }),
+                    _ => set(if s.is_empty() { Value::Null } else { json!(s) }),
+                }) none="none" label=if kind == "role" { "role" } else { "channel" } /> }.into_any()
         }
         "users" => {
             let cap = f["cap"].as_u64();

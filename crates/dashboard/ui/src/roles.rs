@@ -399,28 +399,17 @@ where
                 .filter(|c| {
                     c["kind"].as_u64() == Some(kind) && c["new"] != true && c["deleted"] != true
                 })
-                .map(|c| {
-                    let id = s(&c["id"]);
-                    let on = cur.as_deref() == Some(id.as_str());
-                    view! { <option value=id prop:selected=on>{s(&c["name"])}</option> }
-                })
-                .collect_view();
-            (opts, cur.is_none())
+                .map(|c| (s(&c["id"]), s(&c["name"])))
+                .collect::<Vec<_>>();
+            (opts, cur.unwrap_or_default())
         };
-        let (sys, sys_none) = pick_list(0, &want["system_channel"]);
-        let (afk, afk_none) = pick_list(2, &want["afk_channel"]);
+        let (sys, sys_now) = pick_list(0, &want["system_channel"]);
+        let (afk, afk_now) = pick_list(2, &want["afk_channel"]);
         let opt = |list: &'static [(u64, &'static str)], cur: u64| {
             list.iter().map(|&(v, n)| view! { <option value=v.to_string() prop:selected={v == cur}>{n}</option> }).collect_view()
         };
         let num = |e: &leptos::ev::Event| event_target_value(e).parse::<u64>().unwrap_or(0);
-        let chan = |e: &leptos::ev::Event| {
-            let v = event_target_value(e);
-            if v.is_empty() {
-                Value::Null
-            } else {
-                json!(v)
-            }
-        };
+        let chan = |v: String| if v.is_empty() { Value::Null } else { json!(v) };
         let img = match icon_draft {
             Some(Value::String(uri)) => Some(uri),
             Some(Value::Null) => None,
@@ -450,9 +439,9 @@ where
                 {opt(&[(0, "Off"), (1, "Members without roles"), (2, "Everyone")], want["content_filter"].as_u64().unwrap_or(0))}
             </select>
             <label class="lbl" for="srv-sys">"System messages channel"</label>
-            <select id="srv-sys" on:change=move |e| set("system_channel", chan(&e))><option value="" prop:selected=sys_none>"None"</option>{sys}</select>
+            <crate::form::ListPick items=Signal::derive(move || sys.clone()) get=Signal::derive(move || sys_now.clone()) set=Callback::new(move |v: String| set("system_channel", chan(v))) none="None" label="system messages channel" />
             <label class="lbl" for="srv-afk">"AFK channel"</label>
-            <select id="srv-afk" on:change=move |e| set("afk_channel", chan(&e))><option value="" prop:selected=afk_none>"None"</option>{afk}</select>
+            <crate::form::ListPick items=Signal::derive(move || afk.clone()) get=Signal::derive(move || afk_now.clone()) set=Callback::new(move |v: String| set("afk_channel", chan(v))) none="None" label="AFK channel" />
             <label class="lbl" for="srv-afkt">"AFK timeout"</label>
             <select id="srv-afkt" on:change=move |e| set("afk_timeout", json!(num(&e)))>
                 {opt(&[(60, "1 minute"), (300, "5 minutes"), (900, "15 minutes"), (1800, "30 minutes"), (3600, "1 hour")], want["afk_timeout"].as_u64().unwrap_or(300))}

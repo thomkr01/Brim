@@ -196,14 +196,10 @@ pub fn LockdownManage(guild: String) -> impl IntoView {
         <Show when=move || single.get()>
             <div class="card row">
                 <label>"Lock a single channel"</label>
-                <select aria-label="channel to lock" on:change=move |e| channel.set(event_target_value(&e))>
-                    <option value="">"Choose a channel"</option>
-                    {move || chans.get().into_iter().map(|c| {
-                        let flags = [("locked", "locked"), ("private", "private")].iter().filter(|(k, _)| c[*k] == true).map(|(_, t)| *t).collect::<Vec<_>>().join(", ");
-                        let label = if flags.is_empty() { format!("#{}", s(&c["name"])) } else { format!("#{} ({flags})", s(&c["name"])) };
-                        view! { <option value=s(&c["id"]) disabled=c["locked"] == true>{label}</option> }
-                    }).collect_view()}
-                </select>
+                <crate::form::ListPick items=Signal::derive(move || chans.get().into_iter().filter(|c| c["locked"] != true).map(|c| {
+                    let flags = if c["private"] == true { " (private)" } else { "" };
+                    (s(&c["id"]), format!("#{}{flags}", s(&c["name"])))
+                }).collect()) get=channel set=Callback::new(move |v| channel.set(v)) none="Choose a channel" label="channel to lock" />
                 <button class="danger" disabled=move || channel.get().is_empty() on:click=move |_| lock("channel", Some(channel.get_untracked()))>"Lock"</button>
             </div>
         </Show>

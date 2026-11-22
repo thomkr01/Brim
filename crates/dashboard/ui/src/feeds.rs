@@ -579,15 +579,9 @@ pub fn Feeds(guild: String) -> impl IntoView {
                         <p class="muted small hint">{seen}</p>
                     })}
                     <div class="row"><label for="feed-channel">"Channel"</label>
-                        <select id="feed-channel" on:change=text("channel")>
-                            <option value="" prop:selected=move || d.with(|v| s(&v["channel"]).is_empty())>"choose a channel"</option>
-                            {move || items(&dc.get(), "channels").into_iter().map(|(id, l)| { let i = id.clone(); view! { <option value=id prop:selected=move || d.with(|v| s(&v["channel"]) == i)>{l}</option> } }).collect_view()}
-                        </select></div>
+                        <crate::form::ListPick items=Signal::derive(move || items(&dc.get(), "channels")) get=Signal::derive(move || d.with(|v| s(&v["channel"]))) set=Callback::new(move |x: String| d.update(|v| v["channel"] = json!(x))) none="choose a channel" label="channel" /></div>
                     <div class="row"><label for="feed-role">"Ping role"</label>
-                        <select id="feed-role" on:change=move |e| { let x = event_target_value(&e); d.update(|v| v["ping_role"] = if x.is_empty() { Value::Null } else { json!(x) }) }>
-                            <option value="" prop:selected=move || d.with(|v| v["ping_role"].is_null())>"no ping"</option>
-                            {move || { let gid = g.get_value(); items(&dc.get(), "roles").into_iter().filter(|(id, _)| *id != gid).map(|(id, l)| { let i = id.clone(); view! { <option value=id prop:selected=move || d.with(|v| s(&v["ping_role"]) == i)>{l}</option> } }).collect_view() }}
-                        </select></div>
+                        <crate::form::ListPick items=Signal::derive(move || { let gid = g.get_value(); items(&dc.get(), "roles").into_iter().filter(|(id, _)| *id != gid).collect() }) get=Signal::derive(move || d.with(|v| s(&v["ping_role"]))) set=Callback::new(move |x: String| d.update(|v| v["ping_role"] = if x.is_empty() { Value::Null } else { json!(x) })) none="no ping" label="ping role" /></div>
                     <p class="muted small hint">"Only this role is pinged. A feed never pings @everyone, @here or members."</p>
                     <details class="more"><summary>"More options"</summary>
                         {new.then(|| view! {
