@@ -622,24 +622,45 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat-head { margin:0; font-size:var(--fs-h1,2.4em); }
 .land .feat-line { width:min(160px,40%); height:var(--stroke-2); margin:var(--space-8) auto var(--space-12); background:var(--copper); }
 .land .feat-sub { margin:0; color:var(--text-secondary); }
-.land .feats { display:flex; flex-direction:column; width:min(var(--w-wide),100%); margin:var(--space-56) auto 0; }
-.land .feat { display:flex; align-items:center; justify-content:center; gap:var(--space-48); padding:var(--space-48) 0; text-align:left; }
+.land .land-rest { overflow-x:clip; } .land .feats { display:flex; flex-direction:column; row-gap:calc(var(--space-48) * 2); width:min(var(--w-wide),100%); margin:var(--space-56) auto 0; }
+.land .feat { display:flex; align-items:center; justify-content:center; gap:calc(var(--space-48) * 3); padding:0; text-align:left; }
 .land .feat.flip { flex-direction:row-reverse; }
 .land .feat-copy { flex:1 1 0; min-width:0; }
 .land .feat-copy h3 { margin:0; font-size:1.6em; font-weight:800; background:linear-gradient(to right,var(--accent),var(--copper)); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-.land .feat-tabs { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-12); margin-top:var(--space-20); }
+.land .feat-tabs { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-16); margin-top:var(--space-20); }
 .land .feat-tab { display:flex; align-items:center; gap:var(--space-8); padding:0; border:0; background:none; color:inherit; font:inherit; font-size:1.1em; font-weight:500; text-align:left; opacity:.7; cursor:pointer; transition:opacity .2s ease; }
 .land .feat-tab:hover, .land .feat-tab[aria-pressed="true"] { opacity:1; }
 .land .feat-dot { width:var(--space-12); height:var(--space-12); flex:none; border-radius:50%; border:var(--stroke-2) solid var(--copper); }
 .land .feat-tab[aria-pressed="true"] .feat-dot { background:var(--copper); }
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
-.land .feat-shot { flex:1.2 1 0; min-width:0; mask-image:radial-gradient(ellipse at center,#000 55%,#0000 100%); }
-.land .feat-shot .dmsg { background:none; animation:feat-in .35s ease; }
-.land .feat-shot .embed { background:var(--surface); border-color:#0000; }
-@keyframes feat-in { from { opacity:0; } }
+.land .feat-shot { position:relative; flex:1.2 1 0; min-width:0; isolation:isolate; }
+.land .feat-shot::before { content:""; position:absolute; inset:-15% -5%; z-index:-1; background:radial-gradient(closest-side,#f07f2230,#0000); }
+.land .scene { position:relative; display:grid; padding:var(--space-8) var(--space-32) var(--space-56) 0; animation:feat-in .4s ease; }
+.land .feat.flip .scene { padding:var(--space-8) 0 var(--space-48) var(--space-32); }
+.land .win { grid-area:1/1; align-self:start; border-radius:var(--radius-card); background:var(--surface); box-shadow:0 var(--space-24) var(--space-48) #0007; transition:transform .4s cubic-bezier(.34,1.56,.64,1), opacity .3s ease; }
+.land .win .dmsg { background:none; margin:0; }
+.land .win .embed { background:var(--page); border-color:#0000; }
+.land .scene > .win:nth-child(1) { z-index:3; }
+.land .scene > .win:nth-child(2) { z-index:2; opacity:.85; transform:translate(8%,48%) scale(.95) rotate(1.5deg); }
+.land .scene > .win:nth-child(3) { z-index:1; opacity:.6; transform:translate(16%,92%) scale(.9) rotate(3deg); }
+.land .scene > .win:hover { transform:translateY(-2%); }
+.land .pane { z-index:4 !important; justify-self:start; width:46%; padding:var(--space-12); display:flex; flex-direction:column; gap:var(--space-4); transform:translate(-4%,-6%) rotate(-1.5deg) !important; }
+.land .pane b { margin-bottom:var(--space-4); }
+.land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
+.land .pane span.on { background:#f07f2226; color:var(--accent); }
+.land .pane ~ .win { width:80%; justify-self:end; transform:translateY(32%) !important; z-index:3 !important; }
+.land .badge { position:absolute; z-index:5; right:0; top:0; min-width:var(--space-56); padding:var(--space-8) var(--space-16); border-radius:var(--radius-button); background:linear-gradient(135deg,var(--accent),var(--copper)); color:var(--on-primary); font-size:2em; font-weight:800; text-align:center; box-shadow:0 0 var(--space-32) #f07f2299; }
+.land .spark, .land .hex { position:absolute; z-index:6; pointer-events:none; background:var(--accent); animation:feat-float 5s ease-in-out infinite; }
+.land .spark { width:var(--space-28); height:var(--space-28); left:-3%; top:-6%; clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) #f07f22); }
+.land .hex { width:var(--space-16); height:var(--space-16); right:2%; bottom:6%; background:var(--copper); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); animation-delay:-2s; }
+@keyframes feat-float { 50% { transform:translateY(calc(-1 * var(--space-8))); } }
+.land .feat-tab[aria-pressed="true"] { text-shadow:0 0 var(--space-16) #f07f2299; }
+.land .feat-copy h3 { filter:drop-shadow(0 0 var(--space-12) #f07f2255); }
+@media (prefers-reduced-motion:reduce) { .land .win, .land .feat, .land .scene, .land .spark, .land .hex { transition:none; animation:none; } }
 @media (max-width:760px) {
   .land .feat, .land .feat.flip { flex-direction:column; gap:var(--space-16); padding:var(--space-32) 0; text-align:center; border-bottom:1px solid var(--surface); }
   .land .feat-tabs { align-items:center; }
+  .land .feat-shot { width:100%; } .land .scene, .land .feat.flip .scene { padding:0; } .land .scene > .win:nth-child(n+2), .land .badge { display:none; } .land .pane { width:auto; transform:none !important; } .land .pane ~ .win { display:block !important; transform:none !important; margin-top:var(--space-12); grid-area:2/1; }
 }
 .land .land-err { min-height:1.4em; margin:var(--space-8) 0 0; color:var(--bad); font-size:var(--fs-ui); }
 .land .land-help { margin:var(--space-4) 0 0; color:var(--text-secondary); font-size:var(--fs-caption); line-height:1.5; }

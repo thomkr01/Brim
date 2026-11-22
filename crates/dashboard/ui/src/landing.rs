@@ -3,14 +3,31 @@
 
 use leptos::{html, prelude::*};
 
-/// Feature sections: title and clickable lines; each line shows one of the bot's sample messages.
-const SECTIONS: [(&str, &[(&str, &str)]); 6] = [
-    ("Verification.", &[("Members solve a captcha before they talk", "verify_captcha"), ("A panel they press to start", "verify_panel"), ("Help for members who get stuck", "verify_help")]),
-    ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", "raid"), ("Newcomers wait in quarantine", "raid_report"), ("Known raiders are flagged on arrival", "raider_alert")]),
-    ("Anti-nuke.", &[("Mass bans and deletes are stopped", "nuke_quarantined"), ("Rogue bots are kicked", "nuke_bot_kicked"), ("A panic report shows what was restored", "panic_report_loaded")]),
-    ("Auto Mod.", &[("Warn for blocked words", "automod_warn"), ("Kick for invite links", "automod_kick"), ("Time out spammers", "automod_timeout")]),
-    ("Moderation.", &[("Ban with a reason", "ban_result"), ("Every action is logged as a case", "mod_log"), ("Notes your whole team can see", "note_modified")]),
-    ("Tickets.", &[("Members open a private ticket", "ticket_intro"), ("Staff see the new ticket", "ticket_received"), ("Replies reach the member", "ticket_reply")]),
+/// One piece of a scene: a sample message from the bot (E), a small mock panel (P: title and rows) or a number badge (N).
+#[derive(Clone, Copy)]
+enum Item {
+    E(&'static str),
+    P(&'static str, &'static [&'static str]),
+    N(&'static str),
+}
+use Item::{E, N, P};
+
+type Scene = (&'static str, &'static [Item]);
+/// Feature sections: title and clickable lines; each line shows its own scene of overlapping windows.
+const SECTIONS: [(&str, &[Scene]); 7] = [
+    ("Verification.", &[("Members solve a captcha before they talk", &[E("verify_captcha"), E("verify_panel")]), ("A panel they press to start", &[E("verify_panel"), E("verify_help"), E("verify_captcha")]), ("Help for members who get stuck", &[E("verify_help")])]),
+    ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", &[E("raid"), E("raid_report")]), ("Newcomers wait in quarantine", &[E("raid_report")]), ("Known raiders are flagged on arrival", &[E("raider_alert"), E("raid")])]),
+    ("Anti-nuke.", &[("Mass bans and deletes are stopped", &[E("nuke_quarantined"), E("panic_report_loaded")]), ("Rogue bots are kicked", &[E("nuke_bot_kicked")]), ("A panic report shows what was restored", &[E("panic_report_loaded"), E("nuke_quarantined"), E("nuke_bot_kicked")])]),
+    ("Auto Mod.", &[
+        ("Warn for blocked words", &[P("Blocked words", &["Filter on", "Action: Warn", "Strikes on"]), E("automod_warn")]),
+        ("Kick for invite links", &[P("Invite links", &["Filter on", "Action: Kick", "Allow list"]), E("automod_kick")]),
+        ("Time out spammers", &[P("Spam", &["Filter on", "Action: Timeout", "Strikes on"]), E("automod_timeout")])]),
+    ("Moderation.", &[("Ban with a reason", &[P("Command", &["/ban @member DM ads"]), E("ban_result")]), ("Short or full replies, your choice", &[E("ban_result"), E("ban_compact")]), ("Notes your whole team can see", &[E("note_modified")])]),
+    ("Logging.", &[
+        ("Monitor every action on your server", &[P("Log channels", &["# mod-log", "# message-log", "# member-log", "# server-log"]), E("mod_log")]),
+        ("Make use of 62 log types", &[N("62"), P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("automod_warn")]),
+        ("Ignore users, roles or channels", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
+    ("Tickets.", &[("Members open a private ticket", &[E("ticket_intro"), E("ticket_received")]), ("Staff see the new ticket", &[E("ticket_received")]), ("Replies reach the member", &[E("ticket_reply"), E("ticket_intro")])]),
 ];
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -105,7 +122,7 @@ pub fn Landing(
             </section>
             <div class="land-rest">
                 <p class="tb-tagline">"Built in Rust: fast, light and hard to break."</p>
-                                <h2 class="feat-head">"Features that do the work."</h2>
+                <h2 class="feat-head">"Features that do the work."</h2>
                 <div class="feat-line" aria-hidden="true"></div>
                 <p class="feat-sub">"Free, with every feature."</p>
                 <div class="feats">
@@ -123,7 +140,14 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot" aria-live="polite">{move || crate::discord::show(tabs[on.get()].1)}</div>
+                            <div class="feat-shot" aria-live="polite">
+                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i>
+                                {move || view! { <div class="scene">{tabs[on.get()].1.iter().map(|it| match *it {
+                                    E(key) => view! { <div class="win">{crate::discord::show(key)}</div> }.into_any(),
+                                    P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| view! { <span class:on=(r == 0)>{*row}</span> }).collect_view()}</div> }.into_any(),
+                                    N(n) => view! { <div class="badge" aria-hidden="true">{n}</div> }.into_any(),
+                                }).collect_view()}</div> }}
+                            </div>
                         </section>
                     }
                 }).collect_view()}
