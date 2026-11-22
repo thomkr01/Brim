@@ -461,7 +461,7 @@ def restart():
     time.sleep(15)  # the unlock comes due while the bot is down
     held = int(sql(locks))
     log = open("target/live-bot.log", "a")
-    bot = subprocess.Popen([os.environ.get("BRIM_BIN") or os.environ.get("TOMMYBOT_BIN", "./target/release/brim")], stdout=log, stderr=log)
+    bot = subprocess.Popen([os.environ.get("BRIM_BIN", "./target/release/brim")], stdout=log, stderr=log)
     open(pid_file, "w").write(str(bot.pid))
     unlocked = wait_for(locks, lambda n: n == 0, 30)
     back = can_send(chan)
@@ -1201,7 +1201,7 @@ def h_d20():
     took = round(time.time() - t0, 1)
     time.sleep(5)
     log = open("target/live-bot.log", "a")
-    bot = subprocess.Popen([os.environ.get("BRIM_BIN") or os.environ.get("TOMMYBOT_BIN", "./target/release/brim")], stdout=log, stderr=log)
+    bot = subprocess.Popen([os.environ.get("BRIM_BIN", "./target/release/brim")], stdout=log, stderr=log)
     open(pid_file, "w").write(str(bot.pid))
     try:
         q = wait_for(f"select count(*) from quarantines where guild_id = {GUILD} and user_id = {user}",

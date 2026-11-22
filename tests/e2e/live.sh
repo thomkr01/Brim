@@ -9,8 +9,8 @@ export DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@localhost:5432/
 pg_lsclusters | grep -q online || { pg_ctlcluster 16 main start; sleep 3; }
 su postgres -c "psql -qc \"alter user postgres password 'postgres'\""
 
-# BRIM_BIN (old name TOMMYBOT_BIN): an already built binary (say a debug build in another target dir) instead of the release build.
-export BRIM_BIN=${BRIM_BIN:-${TOMMYBOT_BIN:-./target/release/brim}}
+# BRIM_BIN: an already built binary (say a debug build in another target dir) instead of the release build.
+export BRIM_BIN=${BRIM_BIN:-./target/release/brim}
 [ "$BRIM_BIN" != ./target/release/brim ] || cargo build -q --release -p brim
 mkdir -p target
 # The restart scenario kills and starts the bot itself, so the pid lives in a file.

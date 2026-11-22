@@ -10,15 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Set once at start: this server still runs under the names from before the rename to Brim
-/// (`brim_core::db::old_names`), in `~/tommybot`, with the `tommybot-<img>` images. No new builds
-/// come under those names, so the Update button refuses until its owner moves it to the Brim names.
-pub static OLD_NAMES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
-fn old_names() -> bool {
-    OLD_NAMES.get().copied().unwrap_or(false)
-}
-
 /// The GitHub API of the repository whose builds this server installs.
 fn api(path: &str) -> String {
     format!("https://api.github.com/repos/thomkr01/Brim/{path}")
@@ -535,8 +526,6 @@ async fn status(State(st): State<AppState>, s: Sess) -> Res {
         "builds": builds,
         "run": run,
         "estimate": estimate(&done),
-        // The names from before the rename to Brim: the page names that folder.
-        "old_names": old_names(),
     })))
 }
 
@@ -547,25 +536,14 @@ struct Start {
 }
 
 /// The command that updates what the Update button does not: the updater and docker-compose.yml.
-/// A server under the old names gets no `git pull`: the compose file it would bring runs the Brim
-/// names (new, empty database volume) and refuses to start there (`BRIM_NAMES`).
 pub fn server_cmd() -> &'static str {
-    if old_names() {
-        "cd ~/tommybot && docker compose pull && docker compose up -d"
-    } else {
-        "cd ~/brim && git pull && docker compose pull && docker compose up -d"
-    }
+    "cd ~/brim && git pull && docker compose pull && docker compose up -d"
 }
 
 async fn start(State(st): State<AppState>, s: Sess, Json(b): Json<Start>) -> Res {
     owner(&st, &s).await?;
     if !s.stepped_up {
         return Err(ApiError::StepUp);
-    }
-    if old_names() {
-        return Err(ApiError::BadRequest(
-            "This server still runs the old names, and no new builds come under them. Move it to the Brim names first. Nothing was started.".into(),
-        ));
     }
     let (online, updater_sha) = updater(&st).await?;
     if !online {

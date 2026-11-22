@@ -36,7 +36,7 @@ async fn read_only_role_and_tools() {
         return;
     };
     let admin = brim_core::db::connect(&url).await.unwrap();
-    let (_, role) = brim_core::db::roles(&admin).await.unwrap();
+    let role = brim_core::db::MCP_ROLE;
     brim_core::db::set_mcp_password(&admin, "mcp-test-pw")
         .await
         .unwrap();

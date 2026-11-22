@@ -16,14 +16,8 @@ fn change(c: &Value) -> AnyView {
 }
 
 /// What the Update button does not update: the updater and docker-compose.yml. As the dashboard's
-/// `update::server_cmd`: no `git pull` under the old names (it would bring the Brim compose file).
-fn server_cmd(d: &Value) -> &'static str {
-    if d["old_names"].as_bool() == Some(true) {
-        "cd ~/tommybot && docker compose pull && docker compose up -d"
-    } else {
-        "cd ~/brim && git pull && docker compose pull && docker compose up -d"
-    }
-}
+/// `update::server_cmd`.
+const SERVER_CMD: &str = "cd ~/brim && git pull && docker compose pull && docker compose up -d";
 
 const STEPS: [&str; 5] = [
     "Checking the running version",
@@ -210,7 +204,7 @@ pub fn Update() -> impl IntoView {
             })
             .unwrap_or_default();
         let side = (!old_updater && !behind.is_empty()).then(|| view! {
-            <p class="warn">{format!("Changed since the server was last updated by hand: {}. The Update button does not update these. On the server run ", behind.join(", "))}<code>{server_cmd(&d)}</code>" once."</p>
+            <p class="warn">{format!("Changed since the server was last updated by hand: {}. The Update button does not update these. On the server run ", behind.join(", "))}<code>{SERVER_CMD}</code>" once."</p>
         });
         view! {
             <div class="card">
@@ -219,9 +213,9 @@ pub fn Update() -> impl IntoView {
                 {changes}
                 {side}
                 {if updater_down(&d) {
-                    view! { <p class="warn">"The updater is not running, so updates cannot start. On the server run "<code>{if d["old_names"].as_bool() == Some(true) { "cd ~/tommybot && docker compose up -d updater" } else { "cd ~/brim && docker compose up -d updater" }}</code>" once."</p> }.into_any()
+                    view! { <p class="warn">"The updater is not running, so updates cannot start. On the server run "<code>"cd ~/brim && docker compose up -d updater"</code>" once."</p> }.into_any()
                 } else if old_updater {
-                    view! { <p class="warn">"The updater on the server is too old to install an approved build. On the server run "<code>{server_cmd(&d)}</code>" once."</p> }.into_any()
+                    view! { <p class="warn">"The updater on the server is too old to install an approved build. On the server run "<code>{SERVER_CMD}</code>" once."</p> }.into_any()
                 } else if fresh {
                     view! { <p class="ok">"Brim is up to date."</p> }.into_any()
                 // Only a known newer build offers the button: with Newest unknown it would start nothing.

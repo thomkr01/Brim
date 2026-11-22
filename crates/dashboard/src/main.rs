@@ -362,7 +362,6 @@ async fn main() -> anyhow::Result<()> {
         );
     }
     let db = brim_core::db::connect(&env("DATABASE_URL")?).await?;
-    let _ = update::OLD_NAMES.set(brim_core::db::old_names(&db).await?);
     let st = AppState {
         db,
         secure,

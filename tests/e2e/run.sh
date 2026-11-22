@@ -10,7 +10,7 @@ if [ -z "${DATABASE_URL:-}" ]; then
   export DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres BRIM_TEST_DB=1
 fi
 db_name=${DATABASE_URL%%\?*}; db_name=${db_name##*/}
-if [[ $db_name != *_test && ${BRIM_TEST_DB:-${TOMMYBOT_TEST_DB:-}} != 1 ]]; then
+if [[ $db_name != *_test && ${BRIM_TEST_DB:-} != 1 ]]; then
   echo "DATABASE_URL names the database '$db_name': run only on a database whose name ends in _test, or set BRIM_TEST_DB=1" >&2
   exit 1
 fi

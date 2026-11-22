@@ -11,20 +11,9 @@ pub const DASHBOARD_ROLE: &str = "brim_dashboard";
 /// The MCP server's read-only role (migration 2700).
 pub const MCP_ROLE: &str = "brim_mcp";
 
-/// The dashboard's and the MCP server's role on this database. A server set up before the rename to
-/// Brim runs the bot as `tommybot`, and its compose file logs the other two in as `tommybot_dashboard`
-/// and `tommybot_mcp` until its owner moves it to the Brim names: those stay its roles until then.
-pub async fn roles(pool: &PgPool) -> Result<(&'static str, &'static str)> {
-    Ok(if old_names(pool).await? {
-        ("tommybot_dashboard", "tommybot_mcp")
-    } else {
-        (DASHBOARD_ROLE, MCP_ROLE)
-    })
-}
-
 /// Whether this connection logs in under a name from before the rename to Brim (the bot, the
-/// dashboard or the MCP server of a server not moved yet): see [`roles`].
-pub async fn old_names(pool: &PgPool) -> Result<bool> {
+/// dashboard or the MCP server of a server not moved yet).
+async fn old_names(pool: &PgPool) -> Result<bool> {
     Ok(sqlx::query_scalar(
         "SELECT current_user IN ('tommybot', 'tommybot_dashboard', 'tommybot_mcp')",
     )
@@ -60,6 +49,12 @@ pub async fn connect(url: &str) -> Result<PgPool> {
             r => break r?,
         }
     };
+    // Before any migration or role change: this build knows only the Brim roles, and it would lock
+    // the old ones out (`lock_old_roles`).
+    anyhow::ensure!(
+        !old_names(&pool).await?,
+        "this server still runs under the TommyBot names (database user tommybot). This version runs only on the Brim names. Move the server first: DEPLOY.md, \"Old names\". Nothing was changed."
+    );
     if !owns_schema(&pool).await? {
         wait_for_schema(&pool).await?;
         return Ok(pool);
@@ -82,14 +77,11 @@ pub async fn connect(url: &str) -> Result<PgPool> {
     Ok(pool)
 }
 
-/// On the Brim names the old roles may not log in: migration 2700 makes `tommybot_mcp` in every
-/// database, and an image from before the rename (a rollback) would make both old roles again with
-/// the new passwords and wider grants, which nothing narrows once the Brim names are back. Roles
-/// belong to the whole Postgres server: compose runs one per install.
+/// The old roles may not log in: migration 2700 makes `tommybot_mcp` in every database, and an image
+/// from before the rename (a rollback) would make both old roles again with the new passwords and
+/// wider grants, which nothing narrows once the Brim names are back. Roles belong to the whole
+/// Postgres server: compose runs one per install.
 async fn lock_old_roles(pool: &PgPool) -> Result<()> {
-    if old_names(pool).await? {
-        return Ok(());
-    }
     sqlx::query(
         "DO $$ DECLARE r TEXT; BEGIN
             FOR r IN SELECT rolname FROM pg_roles WHERE rolname IN ('tommybot_dashboard', 'tommybot_mcp') AND rolcanlogin LOOP
@@ -142,7 +134,6 @@ async fn wait_for_schema(pool: &PgPool) -> Result<()> {
 /// database restored into a new Postgres (`pg_dump` has no roles).
 pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
     // One transaction: no moment in which the grant on every table also covers the migration list.
-    let (role, _) = roles(pool).await?;
     let mut tx = pool.begin().await?;
     for sql in [
         // 12 of max_connections 40: the dashboard's pool (10) and its config listener.
@@ -200,14 +191,11 @@ pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
         // Its server purge (SECURITY DEFINER, closed to PUBLIC by migration 4035).
         "GRANT EXECUTE ON FUNCTION purge_guild(BIGINT) TO brim_dashboard",
     ] {
-        // `role` is one of two fixed names (`roles`), never input.
-        sqlx::query(sqlx::AssertSqlSafe(sql.replace("brim_dashboard", role)))
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(sql).execute(&mut *tx).await?;
     }
     let sql: String =
         sqlx::query_scalar("SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', $1::text, $2::text)")
-            .bind(role)
+            .bind(DASHBOARD_ROLE)
             .bind(pw)
             .fetch_one(&mut *tx)
             .await?;
@@ -219,7 +207,7 @@ pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
 }
 
 /// `DATABASE_URL` for the DB tests, which delete rows and change the MCP role: refused (panic)
-/// unless the database name ends in `_test` or `BRIM_TEST_DB=1` (old name `TOMMYBOT_TEST_DB`) is set, so a production URL in
+/// unless the database name ends in `_test` or `BRIM_TEST_DB=1` is set, so a production URL in
 /// the shell is never touched. Unset is `Err` (the test skips), except in CI, where a skip would
 /// report green without running anything.
 pub fn test_url() -> Result<String, std::env::VarError> {
@@ -236,10 +224,7 @@ pub fn test_url() -> Result<String, std::env::VarError> {
         .rsplit('/')
         .next()
         .unwrap_or("");
-    let scratch = name.ends_with("_test")
-        || ["BRIM_TEST_DB", "TOMMYBOT_TEST_DB"]
-            .iter()
-            .any(|k| std::env::var(k).is_ok_and(|v| v == "1"));
+    let scratch = name.ends_with("_test") || std::env::var("BRIM_TEST_DB").is_ok_and(|v| v == "1");
     assert!(
         scratch,
         "DATABASE_URL names the database `{name}`: the DB tests only run on a database whose name ends in `_test`, or with BRIM_TEST_DB=1"
@@ -252,7 +237,6 @@ pub fn test_url() -> Result<String, std::env::VarError> {
 /// `ALTER ROLE ... SET`, so a database restored into a new Postgres has migration 2700 recorded but
 /// no role, and the Brim name `brim_mcp` never had the grants of the migrations (they name the old one).
 pub async fn set_mcp_password(pool: &PgPool, pw: &str) -> Result<()> {
-    let (_, role) = roles(pool).await?;
     let reset = RESET_ROLE.replace("brim_dashboard", "brim_mcp");
     // One transaction: no session in between that is not read-only.
     let mut tx = pool.begin().await?;
@@ -273,14 +257,11 @@ pub async fn set_mcp_password(pool: &PgPool, pw: &str) -> Result<()> {
         "GRANT USAGE ON SEQUENCE mcp_reads_id_seq TO brim_mcp",
         "GRANT EXECUTE ON FUNCTION mcp_token_name(BYTEA) TO brim_mcp",
     ] {
-        // `role` is one of two fixed names (`roles`), never input.
-        sqlx::query(sqlx::AssertSqlSafe(sql.replace("brim_mcp", role)))
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql)).execute(&mut *tx).await?;
     }
     let sql: String =
         sqlx::query_scalar("SELECT format('ALTER ROLE %I LOGIN PASSWORD %L', $1::text, $2::text)")
-            .bind(role)
+            .bind(MCP_ROLE)
             .bind(pw)
             .fetch_one(&mut *tx)
             .await?;
@@ -330,6 +311,30 @@ mod tests {
     /// Tests that change the dashboard role one at a time: Postgres refuses two ALTER ROLE at once.
     static ROLE_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    /// A server still on the TommyBot names stops at start with a clear error and changes nothing.
+    #[tokio::test]
+    async fn old_names_stop_at_start() {
+        let Ok(url) = test_url() else { return };
+        let _one = ROLE_TESTS.lock().await;
+        let owner = connect(&url).await.unwrap();
+        sqlx::query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tommybot') THEN CREATE ROLE tommybot; END IF; END $$")
+            .execute(&owner)
+            .await
+            .unwrap();
+        sqlx::query("ALTER ROLE tommybot LOGIN PASSWORD 'oldtest1'")
+            .execute(&owner)
+            .await
+            .unwrap();
+        let (_, host) = url.split_once('@').expect("the test URL names a user");
+        let got = connect(&format!("postgres://tommybot:oldtest1@{host}")).await;
+        sqlx::query("ALTER ROLE tommybot NOLOGIN PASSWORD NULL")
+            .execute(&owner)
+            .await
+            .unwrap();
+        let err = got.unwrap_err().to_string();
+        assert!(err.contains("TommyBot names"), "{err}");
+    }
+
     /// The dashboard's role reads and writes rows but not the schema, roles or the migration list,
     /// and the database, not the writer, records who queued a job.
     #[tokio::test]
@@ -338,7 +343,7 @@ mod tests {
         let _one = ROLE_TESTS.lock().await;
         let owner = connect(&url).await.unwrap();
         set_dashboard_role(&owner, "dashtest1").await.unwrap();
-        let (role, _) = roles(&owner).await.unwrap();
+        let role = DASHBOARD_ROLE;
         let opts: PgConnectOptions = url.parse().unwrap();
         let dash = PgPoolOptions::new()
             .max_connections(1)
@@ -603,7 +608,7 @@ mod tests {
         let _one = ROLE_TESTS.lock().await;
         let owner = connect(&url).await.unwrap();
         set_dashboard_role(&owner, "dashtest1").await.unwrap();
-        let (role, _) = roles(&owner).await.unwrap();
+        let role = DASHBOARD_ROLE;
         let opts: PgConnectOptions = url.parse().unwrap();
         let dash = PgPoolOptions::new()
             .max_connections(1)
@@ -705,7 +710,7 @@ mod tests {
             "another server's purge does not hide this delete"
         );
         // On the Brim names the old roles cannot log in, also after an older image made them.
-        if role == DASHBOARD_ROLE {
+        {
             sqlx::query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'tommybot_dashboard') THEN CREATE ROLE tommybot_dashboard; END IF; END $$")
                 .execute(&owner)
                 .await
