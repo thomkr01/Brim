@@ -64,12 +64,6 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Back up and load a layout", "tall", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Preview & load|Delete"), ("#9c20", "Brim · yesterday", "View|Preview & load|Delete"), ("#77de", "Brim · Nov 18", "View|Preview & load|Delete")])])]),
 ];
 
-/// The accent colour of the first bot message in a scene, as a CSS variable for its glow.
-fn glow(items: &[Item]) -> String {
-    let c = items.iter().find_map(|i| match i { E(k) => sample(k)["embeds"][0]["color"].as_u64(), _ => None });
-    format!("--glow:#{:06x}", c.unwrap_or(0xf07f22))
-}
-
 /// Each scene is drawn 616 wide and scaled to fit its box (at most 0.85), so it keeps every window.
 /// shortcut: polled twice a second, because the samples and tab changes alter a scene's height.
 fn fit() {
@@ -228,7 +222,7 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot" aria-live="polite" style=move || glow(tabs[on.get()].2)>
+                            <div class="feat-shot" aria-live="polite">
                                 {effects()}
                                 {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
