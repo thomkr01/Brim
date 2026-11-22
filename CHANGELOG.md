@@ -4,6 +4,9 @@ All notable changes to Brim (called by its earlier name before 2026-11-20) are l
 
 ## [Unreleased]
 
+### Changed
+- Emojis and dashboard icons: every icon now has a smooth orange gradient from left to right. Icons that mean pass, fail or caution end in green, red or amber instead of rust orange. The file names and the way the bot sends them are the same, so run the emoji upload with `--replace` to update them on Discord.
+
 ### Added
 - Built-in tag `/tag dangerous-permissions` in every server: posts the bot's list of dangerous Discord permissions as an embed. The embed is an entry on the Bot messages page (Tags group), so a server can edit it; the list itself always comes from the bot. Migration 4045 lets a `/tag` run post an entry instead of a saved message.
 - Commands page: per-command settings for a server (the ⋮ on each row, and "Edit several" for ticked rows), for the Owner and Extra Owners with their 2FA code: prefix form on or off, slash form on or off, up to 5 aliases, a narrower "who may use it" (never wider than the permit), delete the command message, delete the answer after 1 to 300 seconds, answer as a reply, and a cooldown of up to 3600 seconds per member. Stored in the new config section `commands` (no migration). Safety commands (`lock`, `unlock`, `unquarantine`, `anpanic`) cannot be turned off, narrowed or slowed. The slash forms of a command now sit on the command they run (`/ban remove` under unban).

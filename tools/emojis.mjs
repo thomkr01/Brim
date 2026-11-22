@@ -7,7 +7,10 @@ import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
 const DIR = new URL('../assets/icons/', import.meta.url);
-const STOPS = [['0', '#FFA36C'], ['0.35', '#FF6F91'], ['0.7', '#9B7BFF'], ['1', '#4FC3F7']];
+// Orange gradient left to right. Pass, fail and caution icons end in green, red or amber instead of rust.
+const STOPS = [['0', '#FFC27A'], ['0.55', '#F07F22'], ['1', '#D4581A']];
+const MEANING = [['0', '#FFC27A'], ['0.4', '#F07F22']];
+const ENDS = ['#3BA55D', '#ED4245', '#FFD23F'];
 const args = process.argv.slice(2);
 const cmd = args.shift();
 const sheetAt = args.includes('--sheet') ? args.splice(args.indexOf('--sheet'), 2)[1] : null;
@@ -25,10 +28,12 @@ function lint(n, s) {
   if (n === 'spacer') return /^<svg[^>]*(\/>|>\s*<\/svg>)$/.test(s.trim()) ? bad : [...bad, 'spacer must be empty'];
   const grads = [...s.matchAll(/<linearGradient\b[^>]*>/g)];
   if (grads.length !== 1) bad.push(`${grads.length} gradients`);
-  else if (!grads[0][0].includes(`id="${n}-grad"`) || !/gradientUnits="userSpaceOnUse" x1="16" y1="16" x2="112" y2="112"/.test(grads[0][0])) bad.push('gradient attrs');
+  else if (!grads[0][0].includes(`id="${n}-grad"`) || !/gradientUnits="userSpaceOnUse" x1="16" y1="64" x2="112" y2="64"/.test(grads[0][0])) bad.push('gradient attrs');
   const stops = [...s.matchAll(/<stop offset="([\d.]+)" stop-color="(#[0-9A-Fa-f]{6})"\/>/g)].map(m => [m[1], m[2].toUpperCase()]);
-  if (JSON.stringify(stops) !== JSON.stringify(STOPS)) bad.push('stops');
-  if (/#(?!FFA36C|FF6F91|9B7BFF|4FC3F7)[0-9a-f]{3,6}\b|fill="(?!none|url|#)|stroke="(?!none|url)|rgb\(/i.test(s.replace(/<mask[\s\S]*?<\/mask>/g, ''))) bad.push('color outside gradient');
+  const ok = JSON.stringify(stops) === JSON.stringify(STOPS) ||
+    (stops.length === 3 && JSON.stringify(stops.slice(0, 2)) === JSON.stringify(MEANING) && stops[2][0] === '1' && ENDS.includes(stops[2][1]));
+  if (!ok) bad.push('stops');
+  if (/#(?!FFC27A|F07F22|D4581A|3BA55D|ED4245|FFD23F)[0-9a-f]{3,6}\b|fill="(?!none|url|#)|stroke="(?!none|url)|rgb\(/i.test(s.replace(/<mask[\s\S]*?<\/mask>/g, ''))) bad.push('color outside gradient');
   if (/\d\.\d{2,}/.test(s.replace(/(offset|opacity)="[\d.]+"/g, ''))) bad.push('>1 decimal');
   if (/stroke-width="([0-9.]+)"/.test(s) && [...s.matchAll(/stroke-width="([0-9.]+)"/g)].some(m => +m[1] < 10)) bad.push('stroke <10');
   if (Buffer.byteLength(s) > 2600) bad.push(`${Buffer.byteLength(s)} bytes`);
