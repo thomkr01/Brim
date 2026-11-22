@@ -22,9 +22,9 @@ type Scene = (&'static str, &'static str, &'static [Item]);
 /// Feature sections: title and clickable lines; each line shows its own scene of overlapping windows.
 const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Setup Wizard.", &[
-        ("Answer a few questions", "side", &[P("Setup Wizard", &["Logs channel|brim-logs", "Moderation logs|mod-logs", "Main role|Member"]), P("Compact mode", &["Compact replies"])]),
-        ("Switch on the protection you want", "diag", &[P("Automod status", &["Moderate invite links", "Filter out malicious links"]), P("Antinuke status", &["Monitor staff actions"]), P("Anti raid status", &["Keep raids out"])]),
-        ("Set up verification in one step", "break", &[P("Verification status", &["Verification", "Set up channel|Go"]), E("verify_panel")])]),
+        ("Answer a few questions", "col", &[P("Logging channel", &["-", "?Where do you want Brim to log its actions?", "Logs channel|brim-logs", "Moderation logs channel|mod-logs", ">Next"]), P("Main roles", &["?The role your members need to access the server.", "Main role|Member", ">Next"])]),
+        ("Switch on the protection you want", "col", &[P("Automod status", &["?Moderate what members post.", "Moderate invite links", "Filter out malicious links", "Monitor repetitive message spam", "Slow down channels that flood"]), P("Antinuke status", &["?Watch the moderation actions of your staff.", "Monitor staff actions", "Quarantine at the limit"]), P("Anti raid status", &["?Keep bad raids out.", "Join gate", "Raider list"])]),
+        ("Set up verification in one step", "break", &[P("Verification status", &["-", "?Members solve a captcha before they can talk.", "Verification", "Web verify", ">Set up channel"]), E("verify_panel")])]),
     ("Verification.", &[
         ("Members solve a captcha before they talk", "diag", &[E("verify_captcha"), E("verify_panel")]),
         ("A panel they press to start", "side", &[E("verify_panel"), E("verify_help"), E("verify_captcha")]),
@@ -38,30 +38,30 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Rogue bots are kicked", "tall", &[E("nuke_bot_kicked")]),
         ("Staff powers are watched", "diag", &[P("Anti-nuke", &["Watch staff actions", "Quarantine at the limit", "Restore from backup"]), E("nuke_quarantined"), E("panic_report_loaded")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "diag", &[P("Blocked words", &["Filter", "Action|Warn", "Strikes", "Delete message"]), E("automod_warn")]),
-        ("Kick for invite links", "break", &[P("Invite links", &["Filter", "Action|Kick", "Strikes", "Delete message"]), E("automod_kick")]),
-        ("Time out spammers", "tall", &[P("Spam", &["Filter", "Action|Timeout", "Strikes", "Delete message"]), E("automod_timeout"), E("automod_warn")])]),
+        ("Warn for blocked words", "diag", &[P("Blocked words", &["?Remove messages that contain words you list.", "Filter", "Action|Warn", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_warn")]),
+        ("Kick for invite links", "break", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_kick")]),
+        ("Time out spammers", "tall", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_timeout"), E("automod_warn")])]),
     ("Moderation.", &[
-        ("Ban with a reason", "side", &[C("/ban @Mika DM ads"), E("ban_result"), E("mod_log")]),
+        ("Ban with a reason", "col", &[C("/ban @Mika DM ads"), E("ban_result"), E("mod_log")]),
         ("Short or full replies, your choice", "break", &[E("ban_result"), E("ban_compact")]),
         ("Cases your whole team can see", "diag", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words")]), E("note_modified")])]),
     ("Logging.", &[
-        ("Monitor every action on your server", "tall", &[P("Log channels", &["mod-logs", "automod-logs", "antinuke-logs", "verification-logs", "brim-logs"]), E("mod_log")]),
-        ("A log for every kind of event", "side", &[P("Log types", &["Message deleted", "Member banned", "Role updated", "Channel created"]), E("note_modified"), E("verify_deleted"), E("mod_log")]),
-        ("Ignore users, roles or channels", "break", &[P("Ignored", &["Users", "Roles", "Channels"]), E("mod_log")])]),
+        ("Monitor every action on your server", "tall", &[P("Log channels", &["?Each kind of log goes to its own channel.", "Moderation|mod-logs", "Auto Mod|automod-logs", "Anti-nuke|antinuke-logs", "Verification|verification-logs", "Everything else|brim-logs", ">Save"]), E("mod_log")]),
+        ("A log for every kind of event", "side", &[P("Log types", &["?Pick what Brim writes to your logs.", "Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), E("note_modified"), E("verify_deleted"), E("mod_log")]),
+        ("Ignore users, roles or channels", "break", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), E("mod_log")])]),
     ("Tickets.", &[
         ("Members open a private ticket", "diag", &[E("ticket_intro"), E("ticket_received")]),
         ("Staff see the new ticket", "side", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]),
         ("Replies reach the member", "tall", &[E("ticket_reply")])]),
     ("Tools.", &[
-        ("Build any message in the editor", "side", &[P("Message Builder", &["Title|Verification Required", "Colour|Green", "Buttons", "Schedule"]), X("verify_panel")]),
-        ("See every change in History", "diag", &[T("History", &[("Welcome message", "Revert"), ("Log channels", "Revert"), ("Anti-raid", "Revert")])]),
-        ("Back up and load a layout", "tall", &[T("Backups", &[("Before the raid", "Load"), ("Daily", "Load"), ("Fresh server", "Load")]), P("Backups", &["Create backup", "Preview before load"])])]),
+        ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
+        ("See every change in History", "diag", &[T("History", &[("Welcome message", "Diff|Revert"), ("Log channels", "Diff|Revert"), ("Anti-raid", "Diff|Revert"), ("Auto Mod", "Diff|Revert")])]),
+        ("Back up and load a layout", "tall", &[T("Backups", &[("Before the raid", "View|Preview & load|Delete"), ("Daily", "View|Preview & load|Delete"), ("Fresh server", "View|Preview & load|Delete")]), P("Backups", &["?Save your layout and load it later.", ">Create backup"])])]),
 ];
 
 /// The accent colour of the first bot message in a scene, as a CSS variable for its glow.
 fn glow(items: &[Item]) -> String {
-    let c = items.iter().find_map(|i| match i { E(k) => crate::discord::sample(k)["embeds"][0]["color"].as_u64(), _ => None });
+    let c = items.iter().find_map(|i| match i { E(k) => sample(k)["embeds"][0]["color"].as_u64(), _ => None });
     format!("--glow:#{:06x}", c.unwrap_or(0xf07f22))
 }
 
@@ -75,7 +75,7 @@ fn fit() {
         let Some(b) = boxes.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
         let Some(s) = b.query_selector(".scene").ok().flatten().and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
         let w = f64::from(b.client_width());
-        let k = (w / 616.0).min(0.85);
+        let k = (w / 616.0).min(0.85).min((520.0 / f64::from(s.offset_height())).max(0.55));
         let st = b.style();
         let _ = st.set_property("--k", &k.to_string());
         let _ = st.set_property("--dx", &format!("{}px", (w - 616.0 * k) / 2.0));
@@ -85,6 +85,13 @@ fn fit() {
 
 /// The three edits of a default message: accent colour and a new first line of text.
 const EDITS: [(u64, &str); 3] = [(0x5865f2, "Welcome! One step left."), (0xe91e63, "Hey there, press the button."), (0x1be725, "Verify to join the fun.")];
+
+/// A sample as the bot sends it, with the template's `{prefix}` filled from the sample prefix (the one in the bot's sample variables).
+fn sample(key: &str) -> serde_json::Value {
+    let m = crate::discord::sample(key);
+    if m.is_null() { return m }
+    serde_json::from_str(&m.to_string().replace("{prefix}", "t!")).unwrap_or(m)
+}
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
 
@@ -204,10 +211,16 @@ pub fn Landing(
                             <div class="feat-shot" aria-live="polite" style=move || glow(tabs[on.get()].2)>
                                 <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i>
                                 {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
-                                    E(key) => view! { <div class="win">{crate::discord::show(key)}</div> }.into_any(),
-                                    P(name, rows) => view! { <div class="win pane"><b>{name}</b>{rows.iter().enumerate().map(|(r, row)| match row.split_once('|') { Some((a, b)) => view! { <div class="tog"><label>{a}</label><span class="chip">{b}</span></div> }.into_any(), None => view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label=*row /></div> }.into_any() }).collect_view()}</div> }.into_any(),
+                                    E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
+                                    P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
+                                        (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
+                                        (_, Some(t), _) => view! { <button class="primary" type="button" disabled=true>{t}</button> }.into_any(),
+                                        (_, _, Some((a, b))) => view! { <div class="tog"><label>{a}</label><span class="chip">{b}</span></div> }.into_any(),
+                                        _ if *row == "-" => view! { <div class="pbar"><i></i></div> }.into_any(),
+                                        _ => view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label=*row /></div> }.into_any(),
+                                    }).collect_view()}</div> }.into_any(),
                                     X(key) => {
-                                        let m = crate::discord::sample(key);
+                                        let m = sample(key);
                                         EDITS.iter().map(|(color, text)| {
                                             let mut m = m.clone();
                                             if let Some(e) = m["embeds"].get_mut(0) {
@@ -218,7 +231,7 @@ pub fn Landing(
                                         }).collect_view().into_any()
                                     }
                                     C(text) => view! { <div class="win cmd">{crate::discord::chat("Mika", view! { <span class="md">{text}</span> }.into_any())}</div> }.into_any(),
-                                    T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td><span class="chip">{*b}</span></td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
+                                    T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                 }).collect_view()}</div> }}
                             </div>
                         </section>
