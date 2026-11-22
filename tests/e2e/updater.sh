@@ -17,7 +17,9 @@ trap 'dc down -v -t 1 > /dev/null 2>&1; docker rm -f updtest-registry > /dev/nul
 # registry digest in $dir/<service>.digest (what the dashboard approves). It is tagged under
 # 127.0.0.1 so the local build does not take the tag of the image compose runs, as CI never would.
 push() {
-  printf 'FROM busybox:1.36\nLABEL org.opencontainers.image.revision=%s org.opencontainers.image.version=%s %s=%s\nCMD ["sh", "-c", "%s"]\n' "$2" "${VER:-v1.0.0}" "${LABEL:-org.brim.update}" "${4:-digest}" "$3" \
+  # The service label keeps the bot and mcp images apart: with the same bytes they share one digest, and
+  # so one record, on an engine that builds without BuildKit.
+  printf 'FROM busybox:1.36\nLABEL org.opencontainers.image.revision=%s org.opencontainers.image.version=%s %s=%s test.service=%s\nCMD ["sh", "-c", "%s"]\n' "$2" "${VER:-v1.0.0}" "${LABEL:-org.brim.update}" "${4:-digest}" "$1" "$3" \
     | docker build -q -t "127.0.0.1:5555/$1:latest" - > /dev/null
   docker push -q "127.0.0.1:5555/$1:latest" > /dev/null
   docker inspect -f '{{index .RepoDigests 0}}' "127.0.0.1:5555/$1:latest" | sed 's/.*@//' > "$dir/$1.digest"
