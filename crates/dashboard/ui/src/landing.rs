@@ -2,19 +2,15 @@
 //! SiteFooter, AppealSheet). Classes come from `design/bundle.css`; this file adds only behaviour.
 
 use leptos::{html, prelude::*};
-use std::time::Duration;
 
-const FEATURES: [(&str, &str, &str); 10] = [
-    ("🧩", "Verification", "New members solve a short captcha before they can talk, so bots stay out."),
-    ("🌊", "Anti-raid", "When a wave of new accounts arrives, joins pause and the newcomers wait in quarantine."),
-    ("🧹", "Auto Mod", "Spam, scam links and slurs are removed, and repeat offenders are timed out."),
-    ("🛡️", "Anti-nuke", "If a staff account starts mass banning or deleting, Brim takes its powers away."),
-    ("📐", "Layout Guard", "Channels, categories and roles that are changed without you are put back."),
-    ("💾", "Backups", "Save your whole server layout and restore it in one go."),
-    ("🔨", "Moderation", "Warn, mute, kick and ban, with cases and notes your whole team can see."),
-    ("🎫", "Tickets", "Members reach your staff in a private ticket with one button."),
-    ("✉️", "Message Builder", "Make embeds with buttons, then post them now or on a schedule."),
-    ("📜", "Logs", "Every action and change is written to your log channels, so you always know who did what."),
+/// Feature sections: title, text, and the tabs; each tab is a sample message the bot saved at startup.
+const SECTIONS: [(&str, &str, &[(&str, &str)]); 6] = [
+    ("Verification", "New members solve a short captcha before they can talk, so bots stay out.", &[("Panel", "verify_panel"), ("Captcha", "verify_captcha"), ("Help", "verify_help")]),
+    ("Anti-raid", "When a wave of new accounts arrives, joins pause and the newcomers wait in quarantine.", &[("Raid alert", "raid"), ("Report", "raid_report"), ("Known raider", "raider_alert")]),
+    ("Anti-nuke", "If a staff account starts mass banning or deleting, Brim takes its powers away.", &[("Quarantined", "nuke_quarantined"), ("Bot kicked", "nuke_bot_kicked"), ("Panic report", "panic_report_loaded")]),
+    ("Auto Mod", "Spam, scam links and slurs are removed, and repeat offenders are timed out.", &[("Warn", "automod_warn"), ("Kick", "automod_kick"), ("Timeout", "automod_timeout")]),
+    ("Moderation", "Warn, mute, kick and ban, with cases and notes your whole team can see.", &[("Ban", "ban_result"), ("Log entry", "mod_log"), ("Note", "note_modified")]),
+    ("Tickets", "Members reach your staff in a private ticket with one button.", &[("Opened", "ticket_intro"), ("Staff view", "ticket_received"), ("Reply", "ticket_reply")]),
 ];
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -49,39 +45,6 @@ pub fn Landing(
         "#/".to_string()
     } else {
         format!("/auth/login?next=/{}", js_sys::encode_uri_component(&hash))
-    };
-
-    let picked = RwSignal::new(None::<usize>);
-    // Pebbles pop in (0), one wave runs across them (1), then one nudges every 3 s until the first tap (2).
-    let phase = RwSignal::new(if calm() { 2 } else { 0 });
-    let nudge = RwSignal::new(None::<usize>);
-    let last = StoredValue::new(usize::MAX);
-    if !calm() {
-        if let Ok(h) = set_interval_with_handle(
-            move || {
-                if phase.get_untracked() == 2 && picked.get_untracked().is_none() {
-                    // Never the same pebble twice in a row.
-                    let mut n = (js_sys::Math::random() * (FEATURES.len() - 1) as f64) as usize;
-                    if n >= last.get_value() {
-                        n += 1;
-                    }
-                    last.set_value(n);
-                    nudge.set(Some(n));
-                }
-            },
-            Duration::from_secs(3),
-        ) {
-            on_cleanup(move || h.clear());
-        }
-    }
-    // The last pebble's animation ends each phase (its delay is the longest).
-    let ended = move |i: usize| {
-        if i == FEATURES.len() - 1 && phase.get_untracked() < 2 {
-            phase.update(|p| *p += 1);
-        }
-        if nudge.get_untracked() == Some(i) {
-            nudge.set(None);
-        }
     };
 
     // The top bar stays hidden until the visitor has scrolled past the hero's copper line. On a short
@@ -142,25 +105,23 @@ pub fn Landing(
             </section>
             <div class="land-rest">
                 <p class="tb-tagline">"Built in Rust: fast, light and hard to break."</p>
-                <div class="land-rule" aria-hidden="true"></div>
-            <div class="tb-picker" class:is-entering=move || phase.get() == 0 class:is-waving=move || phase.get() == 1>
-                <div class="tb-pebbles">
-                    {FEATURES.iter().enumerate().map(|(i, (emoji, name, _))| view! {
-                        <button class="tb-pebble" type="button" style=format!("--tb-i:{i}")
-                            aria-pressed=move || (picked.get() == Some(i)).to_string()
-                            class:is-nudging=move || nudge.get() == Some(i)
-                            on:animationend=move |_| ended(i)
-                            on:click=move |_| { picked.set(Some(i)); nudge.set(None); }>
-                            <span aria-hidden="true">{*emoji}</span>{*name}
-                        </button>
-                    }).collect_view()}
-                </div>
-                <p class="tb-feature-line" aria-live="polite">{move || match picked.get() {
-                    // Keyed by the pick, so the line's fade-in runs again on each tap.
-                    Some(i) => view! { <span class="tb-feature-text"><span class="tb-feature-name">{format!("{}:", FEATURES[i].1)}</span>" "{FEATURES[i].2}</span> }.into_any(),
-                    None => view! { <span class="land-hint">"Tap a feature to see what it does."</span> }.into_any(),
-                }}</p>
-            </div>
+                                {SECTIONS.iter().enumerate().map(|(i, (title, text, tabs))| {
+                    let on = RwSignal::new(0usize);
+                    view! {
+                        <section class="feat" class:flip=i % 2 == 1>
+                            <div class="feat-copy">
+                                <h2>{*title}</h2>
+                                <p>{*text}</p>
+                                <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
+                                    {tabs.iter().enumerate().map(|(t, (label, _))| view! {
+                                        <button class="tb-pebble" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| on.set(t)>{*label}</button>
+                                    }).collect_view()}
+                                </div>
+                            </div>
+                            <div class="feat-shot" aria-live="polite">{move || crate::discord::show(tabs[on.get()].1)}</div>
+                        </section>
+                    }
+                }).collect_view()}
             </div>
             <footer class="tb-footer">
                 <a class="tb-link tb-link-strong" href="#/commands">"Docs"</a>

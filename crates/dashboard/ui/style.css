@@ -619,7 +619,16 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
   .land .land-rest { margin-top:-100px; }
 }
 @media (min-width:2200px) { .land .hero { min-height:calc(100 * var(--vh)); } .land .hero-body { width:min(1500px,100% - 96px); } }
-.land .land-hint { color:var(--accent); }
+.land .feat { display:grid; grid-template-columns:1fr 1.2fr; align-items:center; gap:var(--space-32); width:min(var(--w-wide),100%); margin:0 auto; padding:var(--space-32) 0; text-align:left; }
+.land .feat.flip .feat-copy { order:2; }
+.land .feat h2 { margin:0 0 var(--space-12); }
+.land .feat p { margin:0 0 var(--space-20); color:var(--text-secondary); }
+.land .feat-tabs { display:flex; flex-wrap:wrap; gap:var(--space-8); }
+.land .feat-shot { min-width:0; mask-image:radial-gradient(ellipse at center,#000 55%,#0000 100%); }
+.land .feat-shot .dmsg { background:none; animation:feat-in .35s ease; }
+.land .feat-shot .embed { background:var(--surface); border-color:#0000; }
+@keyframes feat-in { from { opacity:0; } }
+@media (max-width:760px) { .land .feat { grid-template-columns:1fr; gap:var(--space-16); } .land .feat.flip .feat-copy { order:0; } }
 .land .land-err { min-height:1.4em; margin:var(--space-8) 0 0; color:var(--bad); font-size:var(--fs-ui); }
 .land .land-help { margin:var(--space-4) 0 0; color:var(--text-secondary); font-size:var(--fs-caption); line-height:1.5; }
 /* Layout helpers that replace one-off inline styles (CI refuses a fixed style="..." in a page). */

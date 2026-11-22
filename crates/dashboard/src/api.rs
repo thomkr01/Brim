@@ -207,8 +207,8 @@ pub(crate) async fn staff(
     }
 }
 
-/// The sample messages the bot saved at startup, for the previews; empty before its first start.
-pub async fn previews(State(st): State<AppState>, _: Sess) -> Res {
+/// The sample messages the bot saved at startup, for the previews and the public front page (no login); empty before its first start.
+pub async fn previews(State(st): State<AppState>) -> Res {
     let m: Option<Value> = sqlx::query_scalar("select messages from bot_previews")
         .fetch_optional(&st.db)
         .await?;
