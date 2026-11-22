@@ -687,10 +687,8 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .fx { position:absolute; inset:0; z-index:0; pointer-events:none; }
 .land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
-.land .spark, .land .hex { width:var(--space-32); height:var(--space-32); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
-.land .spark.lg { width:var(--space-44); height:var(--space-44); }
-.land .hex.lg { width:var(--space-36); height:var(--space-36); }
-.land .hex { clip-path:var(--shield); filter:none; }
+.land .spark { width:var(--space-32); height:var(--space-32); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .spark { width:var(--space-24); height:var(--space-24); } .land .spark.lg { width:var(--space-32); height:var(--space-32); }
 /* Outline shapes: the same gradient shows only as a thin edge, because the inner copy is the page colour. */
 .land .ol::after { content:""; position:absolute; inset:var(--space-4); background:var(--page); clip-path:inherit; }
 @keyframes feat-twinkle { 50% { scale:.5; opacity:.5; } }
@@ -702,11 +700,11 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .land-close { position:relative; margin:calc(var(--space-56) * 3) auto calc(var(--space-56) * 2); }
 .land .land-close h2 { margin:var(--space-8) 0 var(--space-24); font-size:2.4em; }
 .land .land-close .tb-actions { justify-content:center; }
-.land .land-close .spark { left:20%; top:0; } .land .land-close .hex { right:22%; bottom:0; }
+.land .land-close .spark { left:20%; top:0; } .land .land-close .spark.lg { right:22%; left:auto; top:auto; bottom:0; }
 /* Each block fades in as it scrolls into view. Outside the animation range the block is fully shown, so nothing hides without support. */
 @supports (animation-timeline:view()) { .land .feat, .land .land-edit, .land .land-close { animation:feat-reveal linear; animation-timeline:view(); animation-range:entry 0% entry 60%; } }
 @keyframes feat-reveal { from { opacity:0; transform:translateY(var(--space-24)); } }
-@media (prefers-reduced-motion:reduce) { .land .feat-shot > .scene { transform:none; filter:none; } .land .land-edit, .land .land-close, .land .win, .land .feat, .land .feat-shot > .scene, .land .spark, .land .hex, .land .win::after { transition:none; animation:none; } }
+@media (prefers-reduced-motion:reduce) { .land .feat-shot > .scene { transform:none; filter:none; } .land .land-edit, .land .land-close, .land .win, .land .feat, .land .feat-shot > .scene, .land .spark, .land .win::after { transition:none; animation:none; } }
 @media (max-width:760px) {
   .land .feat, .land .feat.flip { flex-direction:column; gap:var(--space-16); padding:var(--space-32) 0; text-align:center; border-bottom:1px solid var(--surface); }
   .land .feat-tabs { align-items:center; }
@@ -856,9 +854,7 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 
 /* Dense groups: smaller text in the pieces, labels on one line, the message capped with a soft fade. */
 .land [class*="l-base"] .pane { font-size:.9em; } .land .pane .tog label { white-space:nowrap; }
-.land [class*="l-base"] > div:nth-of-type(3) { max-height:calc(var(--space-56) * 5); }
-.land [class*="l-base"] > .xs { max-height:none; }
+
 .land .win.xs { display:flex; flex-direction:column; background:none; box-shadow:none; gap:var(--space-8); overflow:visible; }
 .land .win.xs > * { transform:scale(.98); }
-@media (max-width:760px) { .land .scene { padding:var(--space-48) 0 var(--space-56); } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } .land [class*="l-base"] .pane { font-size:1em; } .land [class*="l-base"] > div:nth-of-type(3) { max-height:calc(var(--space-56) * 6); } }
-.land [class*="l-base"] > div:nth-of-type(3):not(.pane):not(.xs)::after { content:""; position:absolute; inset:auto 0 0 0; height:var(--space-40); background:linear-gradient(#0000, #313338); pointer-events:none; }
+@media (max-width:760px) { .land .scene { padding:var(--space-48) 0 var(--space-56); } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } .land [class*="l-base"] .pane { font-size:1em; } }

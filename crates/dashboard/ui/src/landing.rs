@@ -65,6 +65,32 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
 
 /// Each scene is drawn 616 wide and scaled to fit its box (at most 0.85), so it keeps every window.
 /// shortcut: polled twice a second, because the samples and tab changes alter a scene's height.
+/// Ends a tall message at a whole line: the card keeps its solid look and shows only lines that fit under `limit` (design px).
+fn cap_message(scene: &web_sys::HtmlElement, limit: f64) {
+    use wasm_bindgen::JsCast;
+    let Ok(Some(win)) = scene.query_selector(":scope > div:nth-of-type(3):not(.pane):not(.xs)") else { return };
+    let Ok(Some(_)) = scene.query_selector(".feat-skel").map(|e| e.map_or(Some(()), |_| None)) else { return };
+    if win.get_attribute("data-cap").is_some() { return }
+    let _ = win.set_attribute("data-cap", "1");
+    let Ok(win) = win.dyn_into::<web_sys::HtmlElement>() else { return };
+    if f64::from(win.offset_height()) <= limit + 8.0 { return }
+    let ratio = win.get_bounding_client_rect().height() / f64::from(win.offset_height());
+    let top = win.get_bounding_client_rect().top();
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    let Ok(walker) = doc.create_tree_walker_with_what_to_show(&win, 4) else { return };
+    let (mut best, range) = (0.0_f64, doc.create_range().ok());
+    // Every line of text has a rect; the card ends under the last line that fits whole.
+    while let (Ok(Some(node)), Some(r)) = (walker.next_node(), range.as_ref()) {
+        if r.select_node_contents(&node).is_err() { continue }
+        let rects = r.get_client_rects();
+        for k in 0..rects.map_or(0, |l| l.length()) {
+            let bottom = (r.get_client_rects().and_then(|l| l.item(k)).map_or(0.0, |x| x.bottom()) - top) / ratio;
+            if bottom <= limit - 6.0 && bottom > best { best = bottom }
+        }
+    }
+    if best > 0.0 { let _ = win.style().set_property("max-height", &format!("{}px", best + 4.0)); }
+}
+
 fn fit() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
     let Ok(boxes) = doc.query_selector_all(".feat-shot") else { return };
@@ -77,6 +103,7 @@ fn fit() {
         // Every scene gets its own scale, so a scene that fades in already has its final size on the first frame.
         for j in 0..scenes.length() {
             let Some(s) = html(scenes.item(j)) else { continue };
+            cap_message(&s, if w < 500.0 { 336.0 } else { 280.0 });
             let nat = f64::from(s.offset_width());
             let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.55));
             let _ = s.style().set_property("--k", &k.to_string());
@@ -116,7 +143,7 @@ fn effects() -> impl IntoView {
         .flat_map(|k| {
             let side = if c[k] % 2 == 0 { "left" } else { "right" };
             let edge = if c[k] < 2 { "top" } else { "bottom" };
-            let (a, b) = if k % 2 == 0 { ("spark ol", "hex") } else { ("hex ol", "spark") };
+            let (a, b) = if k % 2 == 0 { ("spark ol lg", "spark") } else { ("spark lg", "spark ol") };
             [(a, side, edge, 1.0, 1.0), (b, side, edge, 12.0, 0.5 + r() * 1.5)]
         })
         .map(|(class, side, edge, x, y)| {
@@ -267,7 +294,7 @@ pub fn Landing(
                 </div>
                 <p class="land-edit">"Every embed Brim sends can be "<span class="u">"edited"</span>" in the message editor."</p>
                 <section class="land-close">
-                    <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i>
+                    <i class="spark" aria-hidden="true"></i><i class="spark ol lg" aria-hidden="true"></i>
                     <p class="feat-sub">"Free, with every feature."</p>
                     <h2>"Put the "<span class="u">"safeguards"</span>" in place now."</h2>
                     <div class="tb-actions">
