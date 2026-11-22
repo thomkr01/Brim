@@ -244,7 +244,7 @@ async fn raid_page(
     let nonce = crate::auth::token();
     let page = Html(format!(
         r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Join Raid Report</title><style>body{{background:#1c1c1c;color:#eee;font:16px system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}code{{background:#2f2f2f;padding:.1rem .4rem;border-radius:.3rem}}li{{margin:.3rem 0}}button{{background:#1be725;border:0;border-radius:.5rem;padding:.5rem 1rem;font-weight:600;cursor:pointer}}</style>{body}
+<title>Join Raid Report</title><style>body{{overflow-wrap:anywhere;background:#1c1c1c;color:#eee;font:16px system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}}code{{background:#2f2f2f;padding:.1rem .4rem;border-radius:.3rem}}li{{margin:.3rem 0}}button{{background:#1be725;border:0;border-radius:.5rem;padding:.5rem 1rem;font-weight:600;cursor:pointer}}</style>{body}
 <script nonce="{nonce}">var c=document.getElementById('copy');if(c)c.onclick=function(){{navigator.clipboard.writeText(c.dataset.ids)}}</script>"#
     ));
     use axum::response::IntoResponse;

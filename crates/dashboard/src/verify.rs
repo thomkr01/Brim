@@ -38,7 +38,7 @@ fn gate(cfg: &Value, have_keys: bool) -> Result<bool, &'static str> {
 fn shell(body: &str) -> Html<String> {
     Html(format!(
         r#"<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Verify</title><style>body{{background:#1c1c1c;color:#eee;font:16px Poppins,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}}
+<title>Verify</title><style>body{{overflow-wrap:anywhere;background:#1c1c1c;color:#eee;font:16px Poppins,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}}
 main{{background:#212121;padding:2rem;border-radius:1rem;max-width:26rem;text-align:center}}button{{background:#1be725;color:#111;border:0;border-radius:.5rem;padding:.7rem 1.4rem;font:inherit;font-weight:600;cursor:pointer;text-transform:uppercase}}
 #close{{background:#e71b1b;color:#fff}}.tag{{display:inline-block;background:#2f2f2f;border-radius:.4rem;padding:.15rem .6rem;font-size:.8rem;color:#bbb}}h1{{letter-spacing:.15em;margin:.8rem 0 .3rem}}.sub{{color:#bbb;margin:0 0 1.2rem}}.ok{{font-size:3rem;color:#1be725}}</style>
 <main>{body}</main>"#
@@ -71,7 +71,7 @@ async fn page(
         r#"<span class="tag">Brim</span><h1>VERIFICATION</h1><p class="sub">You are required to pass the captcha to get access to the server.</p><p>Signed in as {}.</p>{widget}<p><button id="go">&#10003; Verify</button></p><p id="msg" role="alert"></p>
 <script nonce="{nonce}">go.onclick=async()=>{{go.disabled=true;
 const t=document.querySelector('[name=cf-turnstile-response]');
-const r=await fetch(location.pathname,{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':'{}'}},body:JSON.stringify({{token:t?t.value:''}})}});
+let r;try{{r=await fetch(location.pathname,{{method:'POST',headers:{{'content-type':'application/json','x-csrf-token':'{}'}},body:JSON.stringify({{token:t?t.value:''}})}})}}catch(e){{msg.textContent='Could not reach the server. Check your connection and try again.';go.disabled=false;return}}
 const j=await r.json().catch(()=>({{}}));
 if(r.ok){{document.querySelector('main').innerHTML='<div class="ok">&#10003;</div><h1>VERIFIED!</h1><p class="sub">Your roles arrive in a few seconds.</p><button id="close">Close</button>';document.getElementById('close').onclick=()=>window.close()}}
 else if(r.status===401){{location.href='/auth/login?next='+location.pathname}}else{{msg.textContent=j.error||'Something went wrong.';go.disabled=false;window.turnstile&&turnstile.reset()}}}}</script>"#,

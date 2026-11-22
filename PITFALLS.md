@@ -1363,6 +1363,9 @@ The 5 wrong codes in 10 minutes, the code replay guard, and the 5 tries in 10 mi
 **The dashboard had no script rule (Content-Security-Policy).** (security review 2026-11-22)
 Only `frame-ancestors` was set. The UI writes message previews and emoji as raw HTML, so one escape gap would run a script with the viewer's session, the owner's too. *Avoid:* every response gets `script-src 'self' 'wasm-unsafe-eval'` plus the hash of each inline script of the built `index.html` (`script_csp`, made at start). A page the server makes itself (verify, raid report) gives its scripts a new nonce (`nonce_csp`) and has no inline event handler (`onclick=`): set the handler from the script. A new inline script in `index.html` needs nothing more; a new script host must go in the rule.
 
+**The verify page's button stayed dead after a lost connection, and the raid page was wider than a phone.** (bug hunt 2026-11-22)
+The verify script caught a bad answer but not a failed `fetch`: with no connection the click threw, the button stayed disabled and no text said why, so the member had to reload. A 32-character name with no space ran out of the raid report page at 375 px. Root cause: the pages the server makes itself were tested only on the good path and at desktop width. *Avoid:* a script on such a page wraps `fetch` in `try`, shows a message and frees the button; the page body has `overflow-wrap:anywhere`. Searched: only the verify page and the raid report page are made by the server with a script or a list.
+
 ## 7. Build and deploy
 
 **Every push to a PR branch ran the whole CI twice.** (owner decision, 11-20)
