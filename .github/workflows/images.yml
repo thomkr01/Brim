@@ -58,7 +58,7 @@ jobs:
           # Only the owner makes releases: write access alone could tag an old commit as the highest.
           [ "$ACTOR" = "$OWNER" ] || stop "The tag was pushed by $ACTOR, not by $OWNER."
           printf '%s\n' "$TAG" | grep -Eqx 'v[0-9]+\.[0-9]+\.[0-9]+' || stop "$TAG is not a release tag (v1.2.3)."
-          # e2e runs only for tags and is skipped elsewhere, and a skipped job counts as passed: so ask.
+          # e2e always runs for a tag (elsewhere it runs only when the dashboard changed), and a skipped job counts as passed: so ask.
           e2e=$(gh api "repos/$GH_REPO/actions/runs/$CI_RUN/jobs?per_page=100" --jq '[.jobs[] | select(.name == "e2e")][0].conclusion') \
             || { echo "Could not read the jobs of CI run $CI_RUN."; exit 1; }
           [ "$e2e" = success ] || stop "The e2e job of CI run $CI_RUN is ${e2e:-missing}, not passed."
