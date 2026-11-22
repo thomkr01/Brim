@@ -1,0 +1,81 @@
+# Repo map
+
+Where things are. Open the path, do not search. Paths are from the repo root.
+
+## Crates (`crates/`)
+- `core`: shared types, config sections, permits, database, jobs. `src/db.rs` (pool, migrator), `src/permits.rs` (permit `Level`, `has`, `whitelisted`, `guarded`), `src/sections.rs` (section list, `SENSITIVE` = 2FA sections), `src/limits.rs` (number limits), `src/cases.rs`, `src/jobs.rs`, `src/cmdcfg.rs` (command settings and who may run a command).
+- `bot`: the gateway bot. `src/main.rs`, `app.rs` (config reload), `events.rs`, `commands.rs` + `prefix.rs` (prefix commands), `slash.rs` (slash commands), `general.rs` (help and `catalog()`), `modcmds.rs`, `setup.rs` (Auto Setup on the bot side), `previews.rs` (sample messages for the dashboard), `tickets/`, `raiders/`, `verify/`, `settings/`.
+- `antinuke`: nuke detection, backup, incidents, security score. `src/security.rs` (score and issue rows), `backup.rs`, `incident.rs`.
+- `automod`: filters, heat, join gate, lockdown, strikes, captcha. `src/heat.rs`, `join.rs`, `lockdown.rs`, `strike.rs`, `captcha.rs`, `filters.rs`.
+- `logging`: message text and rendering. `src/botmsg.rs` (default bot messages), `render.rs`, `embed.rs`, `emoji.rs`, `overlay.rs`.
+- `dashboard`: the web server (axum). `src/main.rs` (`router`), `api.rs` (`level_of`, `require`), `access.rs`, `auth.rs`, `ops.rs`, `sections.rs`, `schema.rs` (form fields per section), `store.rs`, `update.rs`.
+- `dashboard/ui`: the web app (Leptos, wasm, built with `trunk`; not in the root workspace). `src/main.rs` (routes by page key), `style.css`, `index.html`, `design/`.
+- `mcp`: the MCP server. `src/lib.rs`, `tools.rs` (tool list and reads), `writes.rs` (proposed changes), `oauth.rs`.
+
+## Dashboard pages (UI source in `crates/dashboard/ui/src/`, server code in `crates/dashboard/src/`)
+- Routing: page keys in `main.rs` (the match near `bot_messages`, `feeds`, `bot_profile`); icons per key in the `"overview" => "info"` table of `main.rs`; page titles in the table below it.
+- Home (server list and front of a server): `home.rs`. Front page (before login): `landing.rs`. Style guide page (`#/ui`): `styleguide.rs`.
+- Setup wizard: `wizard.rs` (steps, cards, `score`) and `pages.rs::Wizard`. Overview and score ring: `pages.rs::Score`, `pages::Ring`. Server side of the score and Fix: `ops.rs` (`live`, `score`, `fix`, route `/api/guilds/{guild}/score/fix`).
+- Channel Setup: `channels.rs` (UI) and `crates/dashboard/src/channels.rs` (drafts, `issues`, `plan`, Push), access rules in `channel_access.rs`.
+- Permits: `permits.rs`. Extra rules per page: `crates/dashboard/src/access.rs` and `sections.rs`.
+- Bot Messages: `botmsgs.rs` (+ `crates/dashboard/src/botmsgs.rs`). Embeds and the message builder: `embeds.rs`, `msgparts.rs`, `msgrules.rs`, `msgsticky.rs`, `msgtags.rs`, `msgtrig.rs`; server side `crates/dashboard/src/embeds.rs`, `msgrules.rs`, `msgsticky.rs`, `msgtags.rs`, `msgtrig.rs`, `msghooks.rs`; the bot runs them in `crates/bot/src/msghooks.rs`, `msgrules.rs`, `sticky.rs`, `tags.rs`.
+- Feeds: `feeds.rs` (+ `crates/dashboard/src/feeds.rs`, `feedhooks.rs`, `feedfollow.rs`; bot `crates/bot/src/feeds.rs`).
+- Tickets: `tickets.rs` (+ `pages.rs::Tickets`, `crates/dashboard/src/tickets.rs`, `crates/bot/src/tickets/`).
+- Appeals: `appeals.rs` (+ `crates/dashboard/src/appeals.rs`, `crates/dashboard/src/raiders/appeal.rs`, bot `appeals.rs`).
+- Raider List and matches: `raiders.rs` (+ `crates/dashboard/src/raiders/`, `crates/core/src/raiders.rs`, `crates/bot/src/raiders/`).
+- Lockdown: `lockdown.rs`. Backups and Revert: `recovery.rs` (backup view, `ChannelTree`), `pages.rs::Revert`. Data requests: `datareq.rs`. Rescue key: `pages.rs::Rescue`, server side `crates/dashboard/src/ops.rs` (`claim_key`).
+- Commands page: `commands.rs` (fed by `crates/bot/src/general.rs::catalog`). History and diff: `histdiff.rs`. Search: `search.rs`. Bot profile: `profile.rs`. MCP tokens: `mcp.rs`. Update: `update.rs`. Secure account and 2FA: `secure.rs`, `crates/dashboard/src/otp.rs`.
+- Module pages (Automod, Anti Nuke, Join gate, Verification and the rest): one generic page, `modules.rs`; its form fields come from `crates/dashboard/src/schema.rs`. Form widgets: `form.rs`. Shared parts (`Head`, `PageTabs`, `AddButton`, `Grip`, `screen_zoom`): `common.rs`. Markdown preview: `md.rs`. Discord message preview: `discord.rs`.
+
+## Front page
+- `landing.rs`: `SECTIONS` (each block has a title and its scenes), `Landing`. Scene rules in `style.css` under "Three solid pieces per scene". Rules in `crates/dashboard/ui/design/README.md` (section on the front page).
+
+## Bot messages and default texts
+- Defaults: `crates/logging/src/botmsg.rs` (`Def`, `COMMANDS`, `AUDIT_LOGS`; each message has a key, a template and its variables). Filling in variables: `render.rs`. Ticket texts: `crates/bot/src/tickets/msgs.rs`. Panic, lockdown and verify texts sit beside their code (`panic.rs`, `lockdown.rs`, `verify.rs`).
+- Texts have tests: `crates/bot/src/*_texts_tests.rs`.
+
+## Emojis and icons
+- Source images: `assets/icons/<name>.svg` (128x128, one name = one emoji). Mascot: `assets/mascot/brim.svg`, `assets/mascot/poses/*.webp`; logo `assets/logo/`; banners `assets/banner/`; Unicode list `assets/emoji/emoji.json`.
+- Names to ids and the Unicode fallback: `crates/logging/src/emoji.rs` (`load`, `id_of`, `for_label`). Lint rules and upload: `tools/emojis.mjs` (`check [names] [--sheet out.png]`, `upload [--replace]`; needs `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`).
+- In the dashboard: `crates/dashboard/ui/src/icons.rs` (`icon`), `Pose` and the `Brim` pose enum in `common.rs`.
+
+## Design
+- Tokens: `crates/dashboard/ui/design/tokens.json` (source), `tokens.css` (made by `node tools/design-tokens.mjs`; `--check` in CI), `bundle.css` (`tb-` classes). Short names (`--b1`, `--fg`, `--primary`) and the orange title gradient `--orange-grad` are in `crates/dashboard/ui/style.css` (the gradient on `.land`). Spacing tokens `--space-N`; screen scale `--z`.
+- Rules: `crates/dashboard/ui/design/README.md`; pitfalls: `crates/dashboard/ui/PITFALLS.md`. Checks: `tools/ui-sizes.mjs`.
+- Fonts: Poppins, `assets/fonts/*.woff2`.
+
+## Commands
+- Prefix and slash dispatch: `crates/bot/src/commands.rs`, `prefix.rs`, `slash.rs`. Catalog and help: `crates/bot/src/general.rs` (`catalog`, `help_embed`, `ARGS`). Moderation commands: `modcmds.rs`, `modslash.rs`, `purge.rs`, `slowmode.rs`, `lockdown.rs`. Who may run which: `crates/core/src/cmdcfg.rs`. Reply helpers: `reply.rs`, `confirm.rs`.
+
+## Permits and access checks
+- Permit levels and flags: `crates/core/src/permits.rs`. In the bot: `crates/bot/src/hierarchy.rs`, `protected.rs`, `permit_sync.rs`, `whitelist.rs`. In the dashboard: `crates/dashboard/src/api.rs` (`level_of`, `require`), `access.rs`, `channel_access.rs`, `crates/dashboard/ui/src/guard.rs`. Step-up 2FA: `secure.rs`, `otp.rs`.
+
+## Migrations
+- `crates/core/migrations/NNNN_name.sql`, applied by sqlx (`crates/core/src/db.rs`). Never edit an applied file (checksums). Keep them additive: an older binary must start on a newer schema. The next number is the highest file number plus one: `ls crates/core/migrations | tail -1`. Parallel work takes separate number ranges.
+
+## Tests
+- Unit and database: `cargo test --workspace` (set `DATABASE_URL`; only a scratch database, see README). Lint: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`.
+- Dashboard web app: in `crates/dashboard/ui`: `cargo test --locked`, `cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings`, `node ../../../tools/design-tokens.mjs --check`, `node ../../../tools/ui-sizes.mjs`. Build: `trunk build --release`.
+- Browser sweep (e2e): `tests/e2e/run.sh` (local Postgres, `mock_discord.py`, `dashboard.js` opens every page); `DEEP=1` adds `deep.js`; `tests/e2e/updater.sh` tests the updater; `tests/e2e/live.sh` and `live.py` need a real test bot and never run against production.
+
+## CI and release
+- `.github/workflows/ci.yml`: runs on every push and on tags. Jobs: `check` (fmt, clippy, tests), `supply-chain` (cargo audit), `dashboard-ui`, `changes`, `e2e`. `e2e` runs on a tag, on request, and on a push that changes `crates/dashboard/`, `tests/e2e/` or `ci.yml`.
+- `audit.yml`: weekly (Monday) and on request. `graphify.yml`: builds the code graph on every push. `image-cache.yml` and `images.yml`: start after CI on a `v*` tag; `images.yml` publishes the four images (bot, dashboard, updater, mcp) to GHCR and moves `latest`.
+- Release: a `vX.Y.Z` tag on a commit of `main`. Steps and rules: `DEPLOY.md` (images, update, rollback). Changes: `CHANGELOG.md`. `Dockerfile` builds all images.
+
+## Updater
+- `scripts/updater.sh` (runs in the `updater` container; pulls the approved release, recreates services, rolls back on failure), `crates/dashboard/src/update.rs` and `crates/dashboard/ui/src/update.rs` (Update page), `docker-compose.yml`. Backups: `scripts/backup.sh`, `restore*.sh`.
+
+## MCP
+- `crates/mcp/`: reads in `tools.rs`, proposed changes in `writes.rs`, login in `oauth.rs`. Tokens page: `crates/dashboard/ui/src/mcp.rs`, `crates/dashboard/src/mcp.rs`. Setup: `DEPLOY.md` section 6.
+
+## Notes on past bugs and rules
+- `PITFALLS.md` (bot, core, dashboard server) and `crates/dashboard/ui/PITFALLS.md` (web app): read the one for the area before a change. `DEPLOY.md`: server setup and updates. `README.md`: features and how to run. `PRIVACY.md`, `TERMS.md`: public texts.
+
+## How to keep this file true
+- Whoever moves, renames, adds or removes a file, page, workflow, tool or migration rule named here updates its line in the same change.
+- A new dashboard page adds its line under "Dashboard pages". A new crate adds its line under "Crates".
+- A new default bot message needs no line; a new message area does.
+- Write only paths that exist. Check each one with `ls` before you commit.
+- Keep one line for each thing and the file under 150 lines. Name a function only where it saves a search.
+- Do not add history, names of people or tools, or plans. This file says where things are now.
