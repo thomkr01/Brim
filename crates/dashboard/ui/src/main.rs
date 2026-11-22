@@ -957,10 +957,12 @@ fn App() -> impl IntoView {
     });
     // The header logo opens the public front page, also when signed in.
     let front = move || route.get().first().is_some_and(|a| a == "front");
+    // The servers list and the public appeal page have no menu to open.
+    let bare = move || route.get().first().is_none_or(|a| a == "appeal");
     view! {
         <Show when=move || me.get().is_some() && !front() fallback=move || if !checked.get() { view! { <main class="boot"><Working /></main> }.into_any() } else if let Some(e) = me_err.get() { view! { <main><div class="card empty"><h2>"Brim could not load your sign-in"</h2><p>{e}</p><button on:click=|_| { let _ = web_sys::window().unwrap().location().reload(); }>"Try again"</button></div></main> }.into_any() } else if route.get().first().is_some_and(|a| a == "commands") { view! { <main><Commands /></main> }.into_any() } else { view! { <landing::Landing signed_in=me.get().is_some() /> }.into_any() }>
             <header>
-                <button class="ghost menu-btn" class:hide=move || route.get().is_empty() aria-label="menu" aria-expanded=move || nav_open.get().to_string() on:click=move |_| set_nav_open.update(|o| *o = !*o)>{icons::icon("menu")}</button>
+                <button class="ghost menu-btn" class:hide=bare aria-label="menu" aria-expanded=move || nav_open.get().to_string() on:click=move |_| set_nav_open.update(|o| *o = !*o)>{icons::icon("menu")}</button>
                 <a class="logo" href="#/front" aria-label="Brim front page"><img src="/logo.svg" alt="" width="32" height="32" /><span>"Brim"</span></a><Show when=move || guild.get().is_some()><SearchBox guild pages=pages.get_value() /></Show><span class="sp"></span>
                 <a class="ghost" href="#/commands">"Commands"</a>
                 <Show when=move || me.get().is_some_and(|m| m["bot_owner"] == true)><a class="ghost" href="#/update">"Update"</a></Show>
@@ -975,7 +977,7 @@ fn App() -> impl IntoView {
             {move || guild.get().filter(|_| !route.get().is_empty()).map(|g| view! { <div class="m-srv">{srv_row(g)}</div> })}
             <div class="shell">
                 <Show when=move || nav_open.get()><div class="scrim" on:click=move |_| set_nav_open.set(false)></div></Show>
-                <nav class:open=move || nav_open.get() class:hide=move || route.get().is_empty() on:click=move |_| set_nav_open.set(false)>
+                <nav class:open=move || nav_open.get() class:hide=bare on:click=move |_| set_nav_open.set(false)>
                     {move || match route.get().first() {
                         None => ().into_any(),
                         Some(a) if ["commands", "update", "ui", "mcp-tokens", "raiders", "raider-appeal", "data-requests", "secure-account"].contains(&a.as_str()) => server_list().into_any(),

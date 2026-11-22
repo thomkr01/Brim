@@ -202,6 +202,7 @@ pub fn AppealForm(guild: String) -> impl IntoView {
         Msg::default(),
         RwSignal::new(false),
     );
+    let (fail, sending) = (RwSignal::new(None::<String>), RwSignal::new(false));
     let g = StoredValue::new(guild);
     let mine = RwSignal::new(Vec::<Value>::new());
     let load_mine = move || {
@@ -238,54 +239,69 @@ pub fn AppealForm(guild: String) -> impl IntoView {
                 ]);
                 info.set(v)
             }
-            Err(e) => msg.err(if e == "not found" {
-                "Appeals are not enabled in this server.".into()
-            } else {
-                e
-            }),
+            Err(e) => fail.set(Some(e)),
         }
     });
     let submit = move |_| {
+        sending.set(true);
         spawn_local(async move {
-            match api(
+            let r = api(
                 "POST",
                 &format!("/api/appeal/{}", g.get_value()),
                 Some(json!({"answers": answers.get_untracked()})),
             )
-            .await
-            {
+            .await;
+            sending.try_set(false);
+            match r {
                 Ok(_) => done.set(true),
                 Err(e) => msg.err(e),
             }
         })
     };
     view! {
-        <Head guild=String::new() page="Brim".into() big="Appeal".into() />
+        <div class="appeal">
         <Toast msg />
         <For each=move || mine.get() key=|r| (r["id"].as_i64(), r["status"].as_str().map(String::from)) let:r>
             {
-                let open = r["status"] == "open";
-                view! { <div class="card row">
-                    <b>{format!("Appeal #{}", r["id"])}</b><span class="muted">{format!("{} appeal, {}", s(&r["kind"]), s(&r["status"]))}</span>
-                    {r["reply"].as_str().map(|t| view! { <span>{format!("Staff reply: {t}")}</span> })}
+                let status = s(&r["status"]);
+                let (chip, text) = match status.as_str() {
+                    "open" => ("info", "Waiting for staff"),
+                    "accepted" => ("ok", "Accepted"),
+                    "denied" => ("bad", "Denied"),
+                    _ => ("", "Withdrawn"),
+                };
+                let open = status == "open";
+                view! { <div class="card appeal-row">
+                    <div class="row"><span class=format!("chip {chip}")>{text}</span><b>{format!("{} appeal", s(&r["kind"]))}</b><span class="sp"></span><span class="muted small">{format!("Sent {}", crate::profile::when(&r["at"]))}</span></div>
+                    {r["reply"].as_str().map(|t| view! { <p><b>"Staff reply: "</b>{t.to_string()}</p> })}
                     <Show when=move || open><button class="ghost" on:click=withdraw>"Withdraw"</button></Show>
                 </div> }
             }
         </For>
-        <Show when=move || done.get() fallback=move || view! {
-            <Show when=move || !info.get().is_null()>
-                {move || {
-                    let i = info.get();
-                    if i["blacklisted"] == true { return view! { <p>"You can no longer appeal in this server."</p> }.into_any(); }
-                    if i["kind"].is_null() { return view! { <p>"You are not banned or timed out in this server."</p> }.into_any(); }
-                    view! { <div class="card">
-                        {questions(i["fields"].as_array().cloned().unwrap_or_default(), answers)}
-                        <button on:click=submit>"Send appeal"</button>
-                    </div> }.into_any()
-                }}
-            </Show>
-        }><p>"Your appeal was sent. Staff will review it."</p></Show>
+        {move || if done.get() {
+            panel(Brim::ThumbsUp, "Appeal sent", "Staff will review it. Check this page later for the answer.").into_any()
+        } else if let Some(e) = fail.get() {
+            if e == "not found" { panel(Brim::Shrug, "Appeals are off", "Appeals are not enabled in this server.").into_any() } else { panel(Brim::Stop, "Could not load the appeal page", e).into_any() }
+        } else if info.with(Value::is_null) {
+            view! { <p class="center"><Working /></p> }.into_any()
+        } else {
+            let i = info.get();
+            if i["blacklisted"] == true { panel(Brim::Stop, "Appeals are closed for you", "You can no longer appeal in this server.").into_any() }
+            else if i["kind"].is_null() { panel(Brim::ThumbsUp, "Nothing to appeal", "You are not banned or timed out in this server.").into_any() }
+            else { view! { <div class="card">
+                <h2>{if i["kind"] == "ban" { "Appeal your ban" } else { "Appeal your timeout" }}</h2>
+                <p class="muted">"Answer the questions below. Staff read your appeal and answer it on this page."</p>
+                {questions(i["fields"].as_array().cloned().unwrap_or_default(), answers)}
+                <button class="send" disabled=move || sending.get() on:click=submit>{busy_label(move || sending.get(), "Send appeal")}</button>
+            </div> }.into_any() }
+        }}
+        </div>
     }
+}
+
+/// A centred card for a state with nothing to fill in: the mascot, a headline and one line.
+fn panel(pose: Brim, title: &'static str, text: impl IntoView + 'static) -> impl IntoView {
+    view! { <div class="card empty"><Pose pose class="pose-top" /><h2>{title}</h2><p class="muted">{text}</p></div> }
 }
 
 /// The appeal questions as inputs writing into `answers` (one entry per field); also the settings preview.
@@ -294,6 +310,7 @@ pub fn questions(fields: Vec<Value>, answers: RwSignal<Vec<String>>) -> impl Int
         let on = move |e| answers.update(|a| a[n] = event_target_value(&e));
         let opts: Vec<String> = f["options"].as_array().map(|o| o.iter().map(s).collect()).unwrap_or_default();
         let max = f["max"].as_u64().unwrap_or(1000).to_string();
+        let (max2, opts_empty) = (max.clone(), opts.is_empty());
         let input = if opts.is_empty() {
             if f["long"] == true { view! { <textarea class="short" aria-label=s(&f["label"]) maxlength=max on:input=on></textarea> }.into_any() } else { view! { <input aria-label=s(&f["label"]) maxlength=max on:input=on /> }.into_any() }
         } else if f["multi"] == true {
@@ -305,6 +322,7 @@ pub fn questions(fields: Vec<Value>, answers: RwSignal<Vec<String>>) -> impl Int
         } else {
             view! { <select aria-label=s(&f["label"]) on:change=on><option value="">"Choose"</option>{opts.into_iter().map(|o| { let v = o.clone(); view! { <option value=v>{o}</option> } }).collect_view()}</select> }.into_any()
         };
-        view! { <div class="row"><label>{s(&f["label"])}</label>{input}</div> }
+        let count = opts_empty.then(|| view! { <span class="muted small">{move || format!("{} / {max2}", answers.with(|a| a.get(n).map_or(0, |t| t.chars().count())))}</span> });
+        view! { <div class="row"><label>{s(&f["label"])}</label>{input}{count}</div> }
     }).collect_view()
 }

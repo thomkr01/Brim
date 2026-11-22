@@ -43,7 +43,7 @@ async fn load(path: &str) -> Result<Value, String> {
     })
 }
 
-fn when(at: &Value) -> String {
+pub(crate) fn when(at: &Value) -> String {
     js_sys::Date::new(&s(at).into())
         .to_locale_string("en-GB", &wasm_bindgen::JsValue::UNDEFINED)
         .into()

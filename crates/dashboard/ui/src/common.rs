@@ -1259,13 +1259,13 @@ impl Brim {
     pub fn rule(self) -> (&'static str, &'static str) {
         match self {
             Brim::OnGuard => ("On Guard", "Security pages: Anti-nuke and the panic pages."),
-            Brim::Stop => ("Stop", "No access to a page, and a wrong 2FA code."),
+            Brim::Stop => ("Stop", "No access to a page, a wrong 2FA code, and a closed or failed appeal page."),
             Brim::PointingLeft => ("Pointing Left", "A setup step, pointing at its button."),
             Brim::PointingRight => ("Pointing Right", "An empty list, pointing at the button that adds the first item."),
-            Brim::ThumbsUp => ("Thumbs Up", "Saved, and setup done."),
+            Brim::ThumbsUp => ("Thumbs Up", "Saved, setup done, an appeal sent, or nothing to appeal."),
             Brim::AsleepOnDuty => ("Asleep On Duty", "Only while Brim is offline or restarting for an update."),
             Brim::LookingCloser => ("Looking Closer", "Search with no hits, the log pages and the dashboard log."),
-            Brim::Shrug => ("Shrug", "A page or module that does not exist."),
+            Brim::Shrug => ("Shrug", "A page or module that does not exist, or appeals that are off."),
             Brim::Waving => ("Waving", "A welcome: the server list when there is no server yet."),
             Brim::Alarm => ("Alarm", "A raid or anti-nuke alert, such as panic mode on."),
             Brim::HoldingAKey => ("Holding A Key", "Rescue Key and Secure my account."),
