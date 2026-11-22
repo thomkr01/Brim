@@ -702,3 +702,9 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 ## The release browser test waited for a page the leave guard held (2026-11-22)
 - Root cause: `tests/e2e/dashboard.js` changed the Verification page ("+" on the captcha preview) and then did `page.goto` to the Messages page. That is only a hash change, so the new leave guard (`guard::hold`) put the address back and asked "Unsaved changes". The Messages page never opened and "Add new message" timed out in the v1.2.0 release run. The e2e job runs only on a tag, so main stayed green.
 - **Rule:** a step in `dashboard.js` that leaves a page it edited goes through the shared `page.goto` wrapper, which answers "Discard changes" when the dialog shows. A new page guard needs no test change; a page that keeps edits on purpose must be tested with its own click.
+
+## Front page: switching a line moved the page
+
+Each scene set the stage height (`--sh`) when it was the active one, so a taller or shorter scene changed the height of the block and the lines and the page below jumped. A hover lift on the pieces and a bold active line made the page feel loose too.
+
+**Rule:** the stage is as tall as the tallest scene of its block; a switch changes only which scene shows. Do not change the weight, size or height of anything a click on a line touches. Do not use `prefers-reduced-motion` to turn off front page motion: the owner's motion switch (`data-motion`) decides.
