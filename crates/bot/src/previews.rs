@@ -336,13 +336,29 @@ mod front_page {
     fn scenes_name_real_samples() {
         let src = include_str!("../../dashboard/ui/src/landing.rs");
         let all = super::messages();
-        let keys: Vec<&str> = src.split("E(\"").skip(1).chain(src.split("X(\"").skip(1)).filter_map(|r| r.split('"').next()).collect();
+        let keys: Vec<&str> = src
+            .split("E(\"")
+            .skip(1)
+            .chain(src.split("X(\"").skip(1))
+            .filter_map(|r| r.split('"').next())
+            .collect();
         assert!(keys.len() > 10, "found no scenes");
         for k in keys {
-            assert!(all.get(k).is_some_and(|v| !v.is_null()), "front page names a missing sample: {k}");
+            assert!(
+                all.get(k).is_some_and(|v| !v.is_null()),
+                "front page names a missing sample: {k}"
+            );
             // `{prefix}` is filled by the front page with the sample prefix; no other variable may be left.
             let text = all[k].to_string().replace("{prefix}", "t!");
-            assert!(!text.contains('{') || !text.split('{').skip(1).any(|r| r.starts_with(|c: char| c.is_ascii_lowercase()) && r.split('}').next().is_some_and(|v| v.chars().all(|c| c.is_ascii_lowercase() || c == '_'))), "unfilled variable in sample {k}");
+            assert!(
+                !text.contains('{')
+                    || !text.split('{').skip(1).any(|r| r
+                        .starts_with(|c: char| c.is_ascii_lowercase())
+                        && r.split('}').next().is_some_and(|v| v
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c == '_'))),
+                "unfilled variable in sample {k}"
+            );
         }
     }
 }

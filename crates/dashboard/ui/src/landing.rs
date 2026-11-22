@@ -121,7 +121,9 @@ fn effects() -> impl IntoView {
             [(a, edge, x, y), (b, edge, x + inward, y + 2.0 + r() * 3.0)]
         })
         .map(|(class, edge, x, y)| {
-            let style = format!("left:{x:.0}%;{edge}:{y:.0}%;rotate:{:.0}deg;--gp:{:.0}%", -40.0 + r() * 80.0, r() * 100.0);
+            // Only the spark turns; the shield always stands upright.
+            let turn = if class.starts_with("spark") { -40.0 + r() * 80.0 } else { 0.0 };
+            let style = format!("left:{x:.0}%;{edge}:{y:.0}%;rotate:{turn:.0}deg;--gp:{:.0}%", r() * 100.0);
             view! { <i class=class style=style aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>()
