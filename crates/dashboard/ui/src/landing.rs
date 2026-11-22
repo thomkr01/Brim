@@ -77,10 +77,11 @@ fn fit() {
         let Some(b) = boxes.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
         let Some(s) = b.query_selector(".scene.on").ok().flatten().and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
         let w = f64::from(b.client_width());
-        let k = (w / 616.0).min(0.85).min((520.0 / f64::from(s.offset_height())).max(0.55));
+        let nat = f64::from(s.offset_width());
+        let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.55));
         let st = b.style();
         let _ = st.set_property("--k", &k.to_string());
-        let _ = st.set_property("--dx", &format!("{}px", (w - 616.0 * k) / 2.0));
+        let _ = st.set_property("--dx", &format!("{}px", (w - nat * k) / 2.0));
         let _ = st.set_property("--sh", &format!("{}px", s.offset_height()));
     }
 }
