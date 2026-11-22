@@ -3,14 +3,14 @@
 
 use leptos::{html, prelude::*};
 
-/// Feature sections: title, text, and the tabs; each tab is a sample message the bot saved at startup.
-const SECTIONS: [(&str, &str, &[(&str, &str)]); 6] = [
-    ("Verification", "New members solve a short captcha before they can talk, so bots stay out.", &[("Panel", "verify_panel"), ("Captcha", "verify_captcha"), ("Help", "verify_help")]),
-    ("Anti-raid", "When a wave of new accounts arrives, joins pause and the newcomers wait in quarantine.", &[("Raid alert", "raid"), ("Report", "raid_report"), ("Known raider", "raider_alert")]),
-    ("Anti-nuke", "If a staff account starts mass banning or deleting, Brim takes its powers away.", &[("Quarantined", "nuke_quarantined"), ("Bot kicked", "nuke_bot_kicked"), ("Panic report", "panic_report_loaded")]),
-    ("Auto Mod", "Spam, scam links and slurs are removed, and repeat offenders are timed out.", &[("Warn", "automod_warn"), ("Kick", "automod_kick"), ("Timeout", "automod_timeout")]),
-    ("Moderation", "Warn, mute, kick and ban, with cases and notes your whole team can see.", &[("Ban", "ban_result"), ("Log entry", "mod_log"), ("Note", "note_modified")]),
-    ("Tickets", "Members reach your staff in a private ticket with one button.", &[("Opened", "ticket_intro"), ("Staff view", "ticket_received"), ("Reply", "ticket_reply")]),
+/// Feature sections: title and clickable lines; each line shows one of the bot's sample messages.
+const SECTIONS: [(&str, &[(&str, &str)]); 6] = [
+    ("Verification.", &[("Members solve a captcha before they talk", "verify_captcha"), ("A panel they press to start", "verify_panel"), ("Help for members who get stuck", "verify_help")]),
+    ("Anti-raid.", &[("Joins pause when a wave of accounts arrives", "raid"), ("Newcomers wait in quarantine", "raid_report"), ("Known raiders are flagged on arrival", "raider_alert")]),
+    ("Anti-nuke.", &[("Mass bans and deletes are stopped", "nuke_quarantined"), ("Rogue bots are kicked", "nuke_bot_kicked"), ("A panic report shows what was restored", "panic_report_loaded")]),
+    ("Auto Mod.", &[("Warn for blocked words", "automod_warn"), ("Kick for invite links", "automod_kick"), ("Time out spammers", "automod_timeout")]),
+    ("Moderation.", &[("Ban with a reason", "ban_result"), ("Every action is logged as a case", "mod_log"), ("Notes your whole team can see", "note_modified")]),
+    ("Tickets.", &[("Members open a private ticket", "ticket_intro"), ("Staff see the new ticket", "ticket_received"), ("Replies reach the member", "ticket_reply")]),
 ];
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -105,16 +105,21 @@ pub fn Landing(
             </section>
             <div class="land-rest">
                 <p class="tb-tagline">"Built in Rust: fast, light and hard to break."</p>
-                                {SECTIONS.iter().enumerate().map(|(i, (title, text, tabs))| {
+                                <h2 class="feat-head">"Features that do the work."</h2>
+                <div class="feat-line" aria-hidden="true"></div>
+                <p class="feat-sub">"Free, with every feature."</p>
+                <div class="feats">
+                {SECTIONS.iter().enumerate().map(|(i, (title, tabs))| {
                     let on = RwSignal::new(0usize);
                     view! {
                         <section class="feat" class:flip=i % 2 == 1>
                             <div class="feat-copy">
-                                <h2>{*title}</h2>
-                                <p>{*text}</p>
+                                <h3>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
                                     {tabs.iter().enumerate().map(|(t, (label, _))| view! {
-                                        <button class="tb-pebble" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| on.set(t)>{*label}</button>
+                                        <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| on.set(t)>
+                                            <span class="feat-dot" aria-hidden="true"></span>{*label}<span class="feat-arrow" aria-hidden="true">"\u{203a}"</span>
+                                        </button>
                                     }).collect_view()}
                                 </div>
                             </div>
@@ -122,6 +127,7 @@ pub fn Landing(
                         </section>
                     }
                 }).collect_view()}
+                </div>
             </div>
             <footer class="tb-footer">
                 <a class="tb-link tb-link-strong" href="#/commands">"Docs"</a>

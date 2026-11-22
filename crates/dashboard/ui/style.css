@@ -619,16 +619,28 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
   .land .land-rest { margin-top:-100px; }
 }
 @media (min-width:2200px) { .land .hero { min-height:calc(100 * var(--vh)); } .land .hero-body { width:min(1500px,100% - 96px); } }
-.land .feat { display:grid; grid-template-columns:1fr 1.2fr; align-items:center; gap:var(--space-32); width:min(var(--w-wide),100%); margin:0 auto; padding:var(--space-32) 0; text-align:left; }
-.land .feat.flip .feat-copy { order:2; }
-.land .feat h2 { margin:0 0 var(--space-12); }
-.land .feat p { margin:0 0 var(--space-20); color:var(--text-secondary); }
-.land .feat-tabs { display:flex; flex-wrap:wrap; gap:var(--space-8); }
-.land .feat-shot { min-width:0; mask-image:radial-gradient(ellipse at center,#000 55%,#0000 100%); }
+.land .feat-head { margin:0; font-size:var(--fs-h1,2.4em); }
+.land .feat-line { width:min(160px,40%); height:var(--stroke-2); margin:var(--space-8) auto var(--space-12); background:var(--copper); }
+.land .feat-sub { margin:0; color:var(--text-secondary); }
+.land .feats { display:flex; flex-direction:column; width:min(var(--w-wide),100%); margin:var(--space-56) auto 0; }
+.land .feat { display:flex; align-items:center; justify-content:center; gap:var(--space-48); padding:var(--space-48) 0; text-align:left; }
+.land .feat.flip { flex-direction:row-reverse; }
+.land .feat-copy { flex:1 1 0; min-width:0; }
+.land .feat-copy h3 { margin:0; font-size:1.6em; font-weight:800; background:linear-gradient(to right,var(--accent),var(--copper)); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.land .feat-tabs { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-12); margin-top:var(--space-20); }
+.land .feat-tab { display:flex; align-items:center; gap:var(--space-8); padding:0; border:0; background:none; color:inherit; font:inherit; font-size:1.1em; font-weight:500; text-align:left; opacity:.7; cursor:pointer; transition:opacity .2s ease; }
+.land .feat-tab:hover, .land .feat-tab[aria-pressed="true"] { opacity:1; }
+.land .feat-dot { width:var(--space-12); height:var(--space-12); flex:none; border-radius:50%; border:var(--stroke-2) solid var(--copper); }
+.land .feat-tab[aria-pressed="true"] .feat-dot { background:var(--copper); }
+.land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
+.land .feat-shot { flex:1.2 1 0; min-width:0; mask-image:radial-gradient(ellipse at center,#000 55%,#0000 100%); }
 .land .feat-shot .dmsg { background:none; animation:feat-in .35s ease; }
 .land .feat-shot .embed { background:var(--surface); border-color:#0000; }
 @keyframes feat-in { from { opacity:0; } }
-@media (max-width:760px) { .land .feat { grid-template-columns:1fr; gap:var(--space-16); } .land .feat.flip .feat-copy { order:0; } }
+@media (max-width:760px) {
+  .land .feat, .land .feat.flip { flex-direction:column; gap:var(--space-16); padding:var(--space-32) 0; text-align:center; border-bottom:1px solid var(--surface); }
+  .land .feat-tabs { align-items:center; }
+}
 .land .land-err { min-height:1.4em; margin:var(--space-8) 0 0; color:var(--bad); font-size:var(--fs-ui); }
 .land .land-help { margin:var(--space-4) 0 0; color:var(--text-secondary); font-size:var(--fs-caption); line-height:1.5; }
 /* Layout helpers that replace one-off inline styles (CI refuses a fixed style="..." in a page). */
