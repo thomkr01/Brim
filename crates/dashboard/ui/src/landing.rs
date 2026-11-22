@@ -10,6 +10,8 @@ enum Item {
     P(&'static str, &'static [&'static str]),
     /// The same sample three times, each with its own edit from EDITS.
     X(&'static str),
+    /// The Channel Setup grid: role columns, rows of (channel or category name, one mark per role).
+    G(&'static [&'static str], &'static [(&'static str, &'static [&'static str])]),
     /// A dashboard list card: title, header button, rows of (name, grey text, action pills joined by |).
     L(&'static str, &'static str, &'static [(&'static str, &'static str, &'static str)]),
     /// A line a member types, as it appears in Discord.
@@ -17,7 +19,7 @@ enum Item {
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{C, E, L, P, T, X};
+use Item::{C, E, G, L, P, T, X};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -58,6 +60,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Tools.", &[
         ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
         ("See every change in History", "diag", &[L("History", "", &[("Welcome message", "Brim · today", "Diff|Revert"), ("Log channels", "Mika · yesterday", "Diff|Revert"), ("Anti-raid", "Sam · Nov 20", "Diff|Revert")])]),
+        ("Set up channels and roles", "diag", &[G(&["Everyone", "Member", "Moderator"], &[("\u{25be} Info", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("# rules", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("\u{25be} Chat", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# general", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# mod-chat", &["\u{2717}", "\u{2717}", "\u{2713}"])])]),
         ("Back up and load a layout", "tall", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Preview & load|Delete"), ("#9c20", "Brim · yesterday", "View|Preview & load|Delete"), ("#77de", "Brim · Nov 18", "View|Preview & load|Delete")])])]),
 ];
 
@@ -93,6 +96,21 @@ fn sample(key: &str) -> serde_json::Value {
     let m = crate::discord::sample(key);
     if m.is_null() { return m }
     serde_json::from_str(&m.to_string().replace("{prefix}", "t!")).unwrap_or(m)
+}
+
+/// Sparkles, hexes and rising motes around a scene, each with its own random place, size, speed and delay.
+/// They sit behind the windows, so they show only at the edges and corners.
+fn effects() -> impl IntoView {
+    let r = || js_sys::Math::random();
+    (0..14).map(|n| {
+        let edge = if r() < 0.5 { -8.0 + r() * 10.0 } else { 96.0 + r() * 10.0 };
+        let (class, style) = match n % 4 {
+            0 | 1 => (if n % 2 == 0 { "spark" } else { "spark lg" }, format!("left:{edge:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s", r() * 100.0, r() * 4.0, 2.0 + r() * 3.0)),
+            2 => ("hex", format!("left:{edge:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s", r() * 100.0, r() * 4.0, 3.0 + r() * 3.0)),
+            _ => ("mote", format!("left:{:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s;--sx:{:.0}%;--sy:{:.0}%", -6.0 + r() * 112.0, r() * 100.0, r() * 8.0, 4.0 + r() * 6.0, -40.0 + r() * 80.0, -120.0 + r() * 160.0)),
+        };
+        view! { <i class=class style=style aria-hidden="true"></i> }
+    }).collect_view()
 }
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -199,7 +217,7 @@ pub fn Landing(
                 {SECTIONS.iter().enumerate().map(|(i, (title, tabs))| {
                     let on = RwSignal::new(0usize);
                     view! {
-                        <section class="feat" class:flip=i % 2 == 1>
+                        <section class="feat" class:flip=i % 2 == 1 class:big=i == 0>
                             <div class="feat-copy">
                                 <h3>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
@@ -211,7 +229,7 @@ pub fn Landing(
                                 </div>
                             </div>
                             <div class="feat-shot" aria-live="polite" style=move || glow(tabs[on.get()].2)>
-                                <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i><i class="mote m2" aria-hidden="true"></i><i class="mote m3" aria-hidden="true"></i><i class="mote m4" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i><i class="mote m1" aria-hidden="true"></i>
+                                {effects()}
                                 {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
@@ -222,6 +240,9 @@ pub fn Landing(
                                         _ => view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label=*row /></div> }.into_any(),
                                     }).collect_view()}</div> }.into_any(),
                                     L(title, btn, rows) => view! { <div class="win lcard card"><div class="lhead"><b>{title}</b>{(!btn.is_empty()).then(|| view! { <span class="tb-btn tb-btn-primary fakebtn">{btn}</span> })}</div>{rows.iter().map(|(id, meta, acts)| view! { <div class="lrow"><span class="lname"><b>{*id}</b><small>{*meta}</small></span><span class="lacts">{acts.split('|').map(|a| view! { <span class="pill">{a}</span> }).collect_view()}</span></div> }).collect_view()}</div> }.into_any(),
+                                    G(roles, rows) => view! { <div class="win lcard card"><div class="lhead"><b>"Channel Setup"</b></div><p class="muted">"Each role's Discord permissions here: \u{2713} allow, \u{2717} deny, \u{2013} neutral."</p>
+                                        <table class="data matrix"><thead><tr><th></th>{roles.iter().map(|r| view! { <th>{*r}</th> }).collect_view()}</tr></thead><tbody>{rows.iter().map(|(name, marks)| view! { <tr class:cat=name.starts_with('\u{25be}')><td><b>{*name}</b></td>{marks.iter().map(|m| view! { <td><span class="gmark" class:al=*m == "\u{2713}" class:de=*m == "\u{2717}">{*m}</span></td> }).collect_view()}</tr> }).collect_view()}</tbody></table>
+                                        <div class="lhead"><span class="sel">"Member \u{25be}"</span><span class="pill">"Add role"</span></div></div> }.into_any(),
                                     X(key) => {
                                         let m = sample(key);
                                         EDITS.iter().map(|(color, text)| {
@@ -245,7 +266,7 @@ pub fn Landing(
                 <section class="land-close">
                     <i class="spark" aria-hidden="true"></i><i class="hex" aria-hidden="true"></i>
                     <p class="feat-sub">"Free, with every feature."</p>
-                    <h2>"Give your server a "<span class="u">"guard"</span>"."</h2>
+                    <h2>"Put the "<span class="u">"safeguards"</span>" in place now."</h2>
                     <div class="tb-actions">
                         <a class="tb-btn tb-btn-primary" href="/invite">"Invite bot"</a>
                         <a class="tb-btn tb-btn-quiet" href=login>"Go to dashboard"</a>
