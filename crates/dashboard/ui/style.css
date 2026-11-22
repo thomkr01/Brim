@@ -689,7 +689,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .spark.lg { width:var(--space-28); height:var(--space-28); background:#fff; }
 .land .hex { background:var(--copper); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); filter:none; }
 .land .mote { width:var(--space-8); height:var(--space-8); border-radius:50%; background:#ffd9a0; box-shadow:0 0 var(--space-12) var(--space-4) var(--accent); opacity:0; animation:feat-rise 6s ease-in-out infinite; }
-.land .plain .win { box-shadow:0 var(--space-24) var(--space-48) #0008; }
+.land.plain .win { box-shadow:0 var(--space-24) var(--space-48) #0008; }
 .land .burst { z-index:0; left:12%; top:30%; width:var(--space-56); height:var(--space-56); margin:calc(-1 * var(--space-28)); border-radius:50%; background:radial-gradient(#ffd9a0,#f07f2288 40%,#0000 70%); animation:feat-burst .7s ease-out both; }
 @keyframes feat-twinkle { 50% { transform:scale(.55) rotate(45deg); opacity:.55; } }
 @keyframes feat-rise { 0% { transform:translate(0,0); opacity:0; } 20% { opacity:1; } 100% { transform:translate(var(--sx,0%),var(--sy,-100%)); opacity:0; } }
