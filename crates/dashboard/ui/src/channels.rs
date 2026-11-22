@@ -818,15 +818,16 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                 // A picker in the menu itself: focusing the panel's picker from here did nothing on iOS
                 // (no focus outside a tap) and the panel sits under the whole list on a phone.
                 {(!cat).then(|| {
-                    let opts = t.iter().filter(|c| is_cat(c) && c["deleted"] != true).map(|c| { let cid = s(&c["id"]); let on = pv.as_deref() == Some(cid.as_str()); view! { <option value=cid selected=on>{s(&c["name"])}</option> } }).collect_view();
-                    view! { <label class="mv">"Move to category"<select aria-label="move to category" on:change=move |e| {
-                        if let Some(d) = event_target::<web_sys::Element>(&e).closest("details").ok().flatten() { let _ = d.remove_attribute("open"); }
-                        let v = event_target_value(&e); let np = (!v.is_empty()).then_some(v);
-                        // Shows the current category again: a cancelled move does not rebuild the row; a done one does.
-                        event_target::<web_sys::HtmlSelectElement>(&e).set_value(pv.as_deref().unwrap_or(""));
-                        let at = siblings(&tree.get_untracked(), np.as_deref(), false).len();
-                        ask_move(m3.clone(), np, at)
-                    }><option value="" selected=pv.is_none()>"No category"</option>{opts}</select></label> }
+                    let opts: Vec<(String, String)> = t.iter().filter(|c| is_cat(c) && c["deleted"] != true).map(|c| (s(&c["id"]), s(&c["name"]))).collect();
+                    let cur = pv.clone().unwrap_or_default();
+                    view! { <label class="mv">"Move to category"<crate::form::ListPick items=Signal::derive(move || opts.clone()) get=Signal::derive(move || cur.clone()) none="No category" label="move to category"
+                        set=Callback::new(move |v: String| {
+                            // A cancelled move does not rebuild the row, so the box shows the current category again; a done one does.
+                            if v == pv.clone().unwrap_or_default() { return }
+                            let np = (!v.is_empty()).then_some(v);
+                            let at = siblings(&tree.get_untracked(), np.as_deref(), false).len();
+                            ask_move(m3.clone(), np, at)
+                        }) /></label> }
                 })}
             </div></details> }
         });
@@ -980,9 +981,10 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
             view! { <p class="line muted">"Follows the category."</p> }.into_any()
         };
         let cats = (!cat).then(|| {
-            let opts = t.iter().filter(|c| is_cat(c) && c["deleted"] != true).map(|c| { let cid = s(&c["id"]); let on = p.as_deref() == Some(cid.as_str()); view! { <option value=cid prop:selected=on>{s(&c["name"])}</option> } }).collect_view();
-            view! { <select aria-label="category" on:change=move |e| { let v = event_target_value(&e); let np = (!v.is_empty()).then_some(v); let at = siblings(&tree.get_untracked(), np.as_deref(), false).len(); ask_move(sid.get_value(), np, at) }>
-                <option value="" prop:selected=p.is_none()>"No category"</option>{opts}</select> }
+            let opts: Vec<(String, String)> = t.iter().filter(|c| is_cat(c) && c["deleted"] != true).map(|c| (s(&c["id"]), s(&c["name"]))).collect();
+            let cur = p.clone().unwrap_or_default();
+            view! { <crate::form::ListPick items=Signal::derive(move || opts.clone()) get=Signal::derive(move || cur.clone()) none="No category" label="category"
+                set=Callback::new(move |v: String| { let np = (!v.is_empty()).then_some(v); let at = siblings(&tree.get_untracked(), np.as_deref(), false).len(); ask_move(sid.get_value(), np, at) }) /> }
         });
         // The level list (plan 3.2): one control instead of Everyone / Only these roles.
         let key = level_key(&acc);

@@ -523,6 +523,17 @@ fs.mkdirSync(out, { recursive: true });
   if (!(await page.locator('a', { hasText: 'Edit embed' }).count())) failed.push('tickets: no Edit embed link to Default messages');
   for (const t of ['Publish panels', 'Last 30 days']) if (!(await page.locator('h2', { hasText: t }).count())) failed.push(`tickets: no ${t} card`);
   await page.click('.bar >> text=Cancel', { timeout: 5000 }).catch(() => failed.push('tickets: no Changes detected bar after Add panel'));
+  // Publish panels: the channel box opens the list of channels on click and filters as you type (the shared picker).
+  await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1tickets/publish')}`);
+  const pub = page.locator('.card', { has: page.locator('h2', { hasText: 'Publish panels' }) }).locator('.lp input');
+  await pub.click();
+  await page.locator('.lpl li[role=option]').nth(1).waitFor({ timeout: 5000 }).catch(() => failed.push('tickets: Publish panels channel box lists no channels'));
+  const all = await page.locator('.lpl li[role=option]').count();
+  await pub.fill('zzzz-no-such');
+  if (!(await page.locator('.lpl li', { hasText: 'No match' }).count())) failed.push('tickets: Publish panels channel box does not filter');
+  await pub.fill('');
+  if ((await page.locator('.lpl li[role=option]').count()) !== all) failed.push('tickets: Publish panels channel box lost its list after clearing the search');
+  await page.keyboard.press('Escape');
   // Bot messages: the grouped list, a message opens in the editor, Revert asks first.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1bot_messages')}`);
   // Six main areas, all closed at first; an area opens to its sub-groups, a sub-group to its messages.
@@ -607,12 +618,15 @@ fs.mkdirSync(out, { recursive: true });
   if (psql(`select count(*) from case_edits where guild_id = ${cg} and (old_value like '%example.com%' or new_value like '%example.com%')`) !== '0') failed.push('cases: the history kept a removed proof');
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1logging')}`);
   // No wait here on purpose: a change made right after the page loaded once got its bar hidden again (ui/PITFALLS.md #3).
-  const drop = page.locator('input[list^="lp-"]').first();
+  const drop = page.locator('.lp input').first();
   // Wait for the channel options too: the list has only "none" until the channel list arrives.
-  await page.locator('datalist option:nth-child(2)').first().waitFor({ state: 'attached', timeout: 5000 }).catch(() => failed.push('cancel: no channel dropdown on logging'));
+  await drop.click();
+  await page.locator('.lpl li:nth-child(2)').first().waitFor({ timeout: 5000 }).catch(() => failed.push('cancel: no channel dropdown on logging'));
+  await page.keyboard.press('Escape');
   const was = await drop.inputValue();
-  const other = await page.locator('datalist').first().locator('option').evaluateAll((os, w) => os.map((o) => o.value).find((v) => v !== w), was);
-  if (other !== undefined) { await drop.fill(other); await drop.blur(); }
+  await drop.click();
+  const other = await page.locator('.lpl li').evaluateAll((os, w) => os.map((o) => o.textContent).find((v) => v !== w), was);
+  if (other !== undefined) await page.locator('.lpl li', { hasText: other }).first().dispatchEvent('mousedown');
   await page.click('.bar >> text=Cancel', { timeout: 5000 }).catch(() => failed.push('cancel: no Changes detected bar'));
   if ((await drop.inputValue()) !== was) failed.push(`cancel: dropdown kept ${other}, saved is ${was}`);
   // Leaving a page while its requests run (or fail, as while the dashboard restarts) must not read disposed signals.

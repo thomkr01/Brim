@@ -208,7 +208,9 @@ const NUKE_WORDS: [(&str, &str, &str, &str); 17] = [
     ),
 ];
 
-/// Pick one of (id, label): type to search the list, or open it. `none` is the label of "nothing" (id "").
+/// Pick one of (id, label): a box that opens the whole list on focus and filters it as you type
+/// (not a native datalist: Firefox shows none on focus). `none` is the label of "nothing" (id "").
+/// The one picker for every channel, role and category field (ui PITFALLS "One picker").
 #[component]
 pub fn ListPick(
     #[prop(into)] items: Signal<Vec<(String, String)>>,
@@ -218,31 +220,60 @@ pub fn ListPick(
     label: &'static str,
     #[prop(optional, into)] disabled: Signal<bool>,
 ) -> impl IntoView {
-    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let list = format!("lp-{}", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    let (open, q, hi) = (RwSignal::new(false), RwSignal::new(String::new()), RwSignal::new(0usize));
     let name = move |v: &str| {
         if v.is_empty() {
             return none.to_string();
         }
         items.with(|l| l.iter().find(|(i, _)| i == v).map(|(_, n)| n.clone())).unwrap_or_else(|| "not found (deleted, or not loaded)".into())
     };
+    // The rows that match the search; the "nothing" row comes first when `none` is set.
+    let rows = Memo::new(move |_| {
+        let f = q.get().trim().to_lowercase();
+        let mut v: Vec<(String, String)> = if none.is_empty() { vec![] } else { vec![(String::new(), none.to_string())] };
+        v.extend(items.get());
+        v.retain(|(_, n)| n.to_lowercase().contains(&f));
+        v
+    });
+    let choose = move |id: String| {
+        open.set(false);
+        set.run(id)
+    };
     let input = |e: &web_sys::Event| event_target::<web_sys::HtmlInputElement>(e);
     view! {
-        // Focus empties the box so the whole list shows; leaving puts the pick back.
-        <input list=list.clone() aria-label=label prop:disabled=disabled prop:value=move || name(&get.get())
-            on:focus=move |e| input(&e).set_value("")
-            on:blur=move |e| input(&e).set_value(&name(&get.get_untracked()))
-            on:change=move |e| {
-                let q = event_target_value(&e);
-                let q = q.trim();
-                let hit = if q.eq_ignore_ascii_case(none) { Some(String::new()) } else { items.with(|l| l.iter().find(|(_, n)| n.eq_ignore_ascii_case(q)).map(|(i, _)| i.clone())) };
-                if let Some(id) = hit { set.run(id) }
-            } />
-        <datalist id=list>
-            <option value=none></option>
-            {move || items.get().into_iter().map(|(_, n)| view! { <option value=n></option> }).collect_view()}
-        </datalist>
+        <div class="lp">
+            <input role="combobox" aria-expanded=move || open.get().to_string() aria-label=label autocomplete="off" prop:disabled=disabled
+                placeholder=move || Some(name(&get.get())).filter(|n| !n.is_empty()).unwrap_or_else(|| "Search".into()) prop:value=move || if open.get() { q.get() } else { name(&get.get()) }
+                on:focus=move |_| { q.set(String::new()); hi.set(0); open.set(true) }
+                on:click=move |_| open.set(true)
+                on:blur=move |_| open.set(false)
+                on:input=move |e| { q.set(event_target_value(&e)); hi.set(0); open.set(true) }
+                on:keydown=move |e| match e.key().as_str() {
+                    "ArrowDown" => { e.prevent_default(); open.set(true); hi.update(|h| *h = (*h + 1).min(rows.with(Vec::len).saturating_sub(1))) }
+                    "ArrowUp" => { e.prevent_default(); hi.update(|h| *h = h.saturating_sub(1)) }
+                    "Enter" => { e.prevent_default(); if let Some((id, _)) = rows.with(|r| r.get(hi.get_untracked()).cloned()).filter(|_| open.get_untracked()) { choose(id); let _ = input(&e.into()).blur(); } }
+                    "Escape" => { open.set(false); let _ = input(&e.into()).blur(); }
+                    _ => {}
+                } />
+            <Show when=move || open.get()>
+                <ul class="lpl" role="listbox" aria-label=label>
+                    {move || rows.with(Vec::is_empty).then(|| view! { <li class="muted">"No match"</li> })}
+                    {move || rows.get().into_iter().enumerate().map(|(i, (id, n))| {
+                        let on = id == get.get_untracked();
+                        view! { <li role="option" aria-selected=on.to_string() class:hi=move || hi.get() == i
+                            // mousedown, not click: the box loses focus (and the list closes) before a click lands.
+                            on:mousedown=move |e| { e.prevent_default(); choose(id.clone()) }>{n}</li> }
+                    }).collect_view()}
+                </ul>
+            </Show>
+        </div>
     }
+}
+
+/// One member (an ID string) through the shared member picker: the newest pick replaces the old one.
+pub fn one_member(id: RwSignal<String>) -> impl IntoView {
+    view! { <UserPick get=Signal::derive(move || { let v = id.get(); if v.is_empty() { json!([]) } else { json!([v]) } })
+        set=Callback::new(move |v: Value| id.set(strs(&v).pop().unwrap_or_default())) /> }
 }
 
 /// (id, label) pairs from `/discord` for `key`: "channels" (no categories), "categories" or "roles".
@@ -274,7 +305,7 @@ pub(crate) fn items(dc: &Value, key: &str) -> Vec<(String, String)> {
 
 /// Member select: chips of the picked users, a search box that also takes a pasted ID.
 #[component]
-fn UserPick(get: Signal<Value>, set: Callback<Value>) -> impl IntoView {
+pub fn UserPick(get: Signal<Value>, set: Callback<Value>) -> impl IntoView {
     let g = StoredValue::new(crate::hash().into_iter().next().unwrap_or_default());
     let names = RwSignal::new(std::collections::HashMap::<String, String>::new());
     let found = RwSignal::new(Vec::<(String, String)>::new());
@@ -851,28 +882,17 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             </div> }.into_any()
         }
         "channels" | "categories" | "roles" => {
-            // Chips of the picked ones and a search box with the others as a dropdown (a datalist).
+            // Chips of the picked ones and the shared picker (without them) to add another.
             let key = StoredValue::new(kind.clone());
-            let list = format!("pick-{}", path.replace('.', "-"));
+            let label = if kind == "roles" { "add a role" } else if kind == "categories" { "add a category" } else { "add a channel" };
             view! { <div class="pick">
                 {move || strs(&get()).into_iter().map(|id| {
                     let label = items(&dc.get(), &key.get_value()).into_iter().find(|(i, _)| *i == id).map_or_else(|| id.clone(), |(_, l)| l);
                     view! { <span class="chip">{label}" "<button class="link" aria-label="remove" on:click=move |_| { let mut cur = strs(&get()); cur.retain(|x| *x != id); set(json!(cur)) }>"×"</button></span> }
                 }).collect_view()}
-                <input list=list.clone() placeholder="Search to add" aria-label="search to add" on:change=move |e| {
-                    let q = event_target_value(&e);
-                    let hit = items(&dc.get(), &key.get_value()).into_iter().find(|(_, l)| l.eq_ignore_ascii_case(q.trim()));
-                    if let Some((id, _)) = hit {
-                        let mut cur = strs(&get());
-                        if !cur.contains(&id) { cur.push(id); }
-                        set(json!(cur));
-                    }
-                    event_target::<web_sys::HtmlInputElement>(&e).set_value("");
-                } />
-                <datalist id=list>{move || {
-                    let on = strs(&get());
-                    items(&dc.get(), &key.get_value()).into_iter().filter(|(i, _)| !on.contains(i)).map(|(_, l)| view! { <option value=l></option> }).collect_view()
-                }}</datalist>
+                <ListPick items=Signal::derive(move || { let on = strs(&get()); items(&dc.get(), &key.get_value()).into_iter().filter(|(i, _)| !on.contains(i)).collect() })
+                    get=Signal::derive(String::new) none="" label=label
+                    set=Callback::new(move |id: String| { let mut cur = strs(&get()); if !id.is_empty() && !cur.contains(&id) { cur.push(id); set(json!(cur)) } }) />
             </div> }.into_any()
         }
         _ => view! { <input prop:value=move || show(&get()) on:change=move |e| { let s = event_target_value(&e); set(if s.is_empty() { Value::Null } else { json!(s) }) } /> }.into_any(),

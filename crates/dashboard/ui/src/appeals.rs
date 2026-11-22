@@ -194,7 +194,7 @@ pub fn Blacklist(
     };
     view! {
         <div class="card row">
-            <input placeholder="User ID" aria-label="user ID" prop:value=user on:input=move |e| user.set(event_target_value(&e)) />
+            {crate::form::one_member(user)}
             <button on:click=move |_| post(String::new(), Some(json!({"user_id": user.get_untracked()})))>"Blacklist user"</button>
             <Show when=move || purge><button class="ghost" on:click=move |_| { ask(Ask::new("Remove every user from the appeals blacklist?").yes("Purge all").danger(), move |_| post("/purge".into(), None)) }>"Purge all"</button></Show>
             <Toast msg />

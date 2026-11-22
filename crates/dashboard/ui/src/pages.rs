@@ -937,7 +937,7 @@ pub fn Revert(guild: String) -> impl IntoView {
     };
     view! {
         <div class="row">
-            <input placeholder="Actor user ID" aria-label="actor user ID" prop:value=actor on:input=move |e| actor.set(event_target_value(&e)) />
+            {crate::form::one_member(actor)}
             <input placeholder="Hours" aria-label="hours back" prop:value=hours on:input=move |e| hours.set(event_target_value(&e)) />
             <button on:click=load>"Load"</button>
         </div>

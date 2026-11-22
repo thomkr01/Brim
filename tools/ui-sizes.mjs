@@ -11,6 +11,7 @@
 // - src/*.rs: no button whose text starts with "+" and no `label="+..."` outside common.rs (AddButton is the one add button; the number steppers' "+" with aria-label="more" are controls, not add buttons); no dashed wide button.
 // - src/*.rs: every <table> has class "data" (the table card: one header style, labelled rows on a phone; owner decision 2026-11-20).
 // - style.css: `.cards` is the two-column flow (Cards in common.rs), never a CSS grid again (owner decision 2026-11-20 "no empty spaces").
+// - src/*.rs: no <datalist> or list= input, and no <select> for a channel, role or category: ListPick in form.rs is the one picker (ui PITFALLS "One picker"; only the time zone box in msgrules.rs may keep its list).
 import { readFileSync, readdirSync } from 'node:fs';
 
 const UI = new URL('../crates/dashboard/ui/', import.meta.url);
@@ -72,6 +73,8 @@ for (const f of readdirSync(new URL('src/', UI))) {
     if (/\bstyle=["']/.test(line)) bad.push(`src/${f}:${i + 1}: fixed style="..." attribute, use a class`);
     if (f !== 'common.rs' && !/aria-label="more"/.test(line) && (/>"\+[^"]*"<\/button>/.test(line) || /\blabel="\+/.test(line))) bad.push(`src/${f}:${i + 1}: a "+" button, use AddButton from common.rs`);
     if (/<table\b/.test(line) && !/<table class="(?:[^"]*\s)?data(?=[\s"])/.test(line)) bad.push(`src/${f}:${i + 1}: a table without class "data", use the table card (table.data inside a card)`);
+    if (f !== 'msgrules.rs' && /<datalist\b|<input[^>]*\slist=/.test(line)) bad.push(`src/${f}:${i + 1}: a datalist input, use ListPick from form.rs (the one picker)`);
+    if (/<select\b[^>]*(channel|role|categor)/i.test(line) && !/aria-label="Raider List category"|CATEGORIES/.test(line)) bad.push(`src/${f}:${i + 1}: a select for a channel, role or category, use ListPick from form.rs (the one picker)`);
     if (/class="[^"]*\bdashed\b/.test(line)) bad.push(`src/${f}:${i + 1}: dashed wide button, use AddButton from common.rs`);
   });
 }

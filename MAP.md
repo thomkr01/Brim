@@ -25,7 +25,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 - Raider List and matches: `raiders.rs` (+ `crates/dashboard/src/raiders/`, `crates/core/src/raiders.rs`, `crates/bot/src/raiders/`).
 - Lockdown: `lockdown.rs`. Backups and Revert: `recovery.rs` (backup view, `ChannelTree`), `pages.rs::Revert`. Data requests: `datareq.rs`. Rescue key: `pages.rs::Rescue`, server side `crates/dashboard/src/ops.rs` (`claim_key`).
 - Commands page: `commands.rs` (fed by `crates/bot/src/general.rs::catalog`). History and diff: `histdiff.rs`. Search: `search.rs`. Bot profile: `profile.rs`. MCP tokens: `mcp.rs`. Update: `update.rs`. Secure account and 2FA: `secure.rs`, `crates/dashboard/src/otp.rs`.
-- Module pages (Automod, Anti Nuke, Join gate, Verification and the rest): one generic page, `modules.rs`; its form fields come from `crates/dashboard/src/schema.rs`. Form widgets: `form.rs`. Shared parts (`Head`, `PageTabs`, `AddButton`, `Grip`, `screen_zoom`): `common.rs`. Markdown preview: `md.rs`. Discord message preview: `discord.rs`.
+- Module pages (Automod, Anti Nuke, Join gate, Verification and the rest): one generic page, `modules.rs`; its form fields come from `crates/dashboard/src/schema.rs`. Form widgets: `form.rs` (the one picker for channel, role, category: `ListPick`; members: `UserPick`, `one_member`). Shared parts (`Head`, `PageTabs`, `AddButton`, `Grip`, `screen_zoom`): `common.rs`. Markdown preview: `md.rs`. Discord message preview: `discord.rs`.
 
 ## Front page
 - `landing.rs`: `SECTIONS` (each block has a title and its scenes), `Landing`. Scene rules in `style.css` under "Three solid pieces per scene". Rules in `crates/dashboard/ui/design/README.md` (section on the front page).
