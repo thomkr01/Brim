@@ -160,8 +160,8 @@ details { margin:12px 0; }
 .wizprog { display:flex; align-items:center; gap:12px; margin:20px 4px 16px; } .wizprog span { font-size:var(--fs-caption); color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .wizprog .line { position:relative; flex:1; height:12px; border-radius:var(--radius-button); background:var(--b3); box-shadow:inset 0 2px 4px #0008, 0 1px 0 #ffffff10; }
 .wizprog .line i { position:absolute; inset:0 auto 0 0; width:max(12px, calc(var(--s) * 1%)); border-radius:inherit; background:var(--brand); box-shadow:inset 0 1px 0 #ffffff55, 0 0 10px #9B7BFF88; transition:width 700ms var(--quint); }
-.wizprog .line i::after { content:""; position:absolute; right:-4px; top:50%; width:16px; height:16px; border-radius:50%; transform:translateY(-50%); background:#fff; box-shadow:0 0 0 3px #9B7BFF66, 0 0 12px #FF6F91aa; animation:head 1.6s var(--ease) infinite alternate; }
-@keyframes head { to { box-shadow:0 0 0 6px #9B7BFF22, 0 0 18px #FF6F91cc; } }
+.wizprog .line i::after { content:""; position:absolute; right:-4px; top:50%; width:16px; height:16px; border-radius:50%; transform:translateY(-50%); background:#fff; box-shadow:0 0 14px 4px #9B7BFFcc, 0 0 12px #FF6F91aa; animation:head 1.6s var(--ease) infinite alternate; }
+@keyframes head { to { box-shadow:0 0 22px 8px #9B7BFF66, 0 0 18px #FF6F91cc; } }
 .steps { position:relative; display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; scroll-behavior:smooth; }
 .steps button { display:flex; align-items:center; gap:8px; background:var(--b2); border:1px solid var(--line); color:var(--muted); border-radius:var(--radius-button); padding:var(--space-4) var(--space-12) var(--space-4) var(--space-4); text-transform:none; font-weight:500; transition:transform 180ms var(--spring), color var(--dur) var(--ease), background-color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .steps button i { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-style:normal; font-size:var(--fs-caption); background:var(--b3); color:var(--muted); transition:background-color var(--dur) var(--ease); }
