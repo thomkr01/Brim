@@ -687,10 +687,13 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .badge { position:absolute; z-index:5; right:0; top:0; min-width:var(--space-56); padding:var(--space-8) var(--space-16); border-radius:var(--radius-button); background:linear-gradient(135deg,var(--accent),var(--copper)); color:var(--on-primary); font-size:2em; font-weight:800; text-align:center; box-shadow:0 0 var(--space-32) #f07f2299; }
-.land .fbadges { position:absolute; inset:0; z-index:5; pointer-events:none; }
-.land .fb { position:absolute; width:var(--space-44); height:var(--space-44); display:grid; place-items:center; background:var(--accent); color:#fff; fill:currentColor; clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); animation:feat-wander 8s ease-in-out infinite alternate; --wx:.6rem; --wy:-.6rem; --wr:8deg; }
-.land .fb svg { width:var(--space-24); height:var(--space-24); }
-.land .fb:nth-child(1) { left:-4%; top:-6%; } .land .fb:nth-child(2) { right:-4%; top:-8%; background:var(--copper); animation-delay:-2s; } .land .fb:nth-child(3) { left:-5%; bottom:-6%; background:var(--copper); animation-delay:-4s; } .land .fb:nth-child(4) { right:-3%; bottom:-4%; animation-delay:-6s; }
+.land .fbadges { position:absolute; inset:0; z-index:5; pointer-events:none; filter:drop-shadow(0 var(--space-8) var(--space-12) #0009); }
+.land .fb { position:absolute; width:calc(var(--space-44) * 2); height:calc(var(--space-44) * 2); display:grid; place-items:center; color:#fff; fill:currentColor; clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); animation:feat-wander 8s ease-in-out infinite alternate; --wx:.6rem; --wy:-.6rem; --wr:8deg; }
+.land .fb svg { width:var(--space-44); height:var(--space-44); }
+.land .fb:nth-child(1) { left:0; top:0; margin:calc(var(--space-44) * -1.1) 0 0 calc(var(--space-44) * -1.2); background:var(--bad); }
+.land .fb:nth-child(2) { right:0; top:0; margin:calc(var(--space-44) * -1.2) calc(var(--space-44) * -1.1) 0 0; background:var(--accent); animation-delay:-2s; }
+.land .fb:nth-child(3) { left:0; bottom:0; margin:0 0 calc(var(--space-44) * -1.2) calc(var(--space-44) * -1.1); background:#24292f; animation-delay:-4s; }
+.land .fb:nth-child(4) { right:0; bottom:0; margin:0 calc(var(--space-44) * -1.2) calc(var(--space-44) * -1.1) 0; background:#6e49cb; animation-delay:-6s; }
 .land .scene > i { position:absolute; z-index:0; pointer-events:none; }
 .land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--accent); animation:feat-twinkle 3s ease-in-out infinite, feat-wander 9s ease-in-out infinite alternate; animation-duration:var(--td,3s), var(--wd,9s); animation-delay:var(--dl,0s), var(--dl,0s); clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark.lg { width:var(--space-44); height:var(--space-44); background:#fff; }
