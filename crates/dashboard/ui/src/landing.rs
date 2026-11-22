@@ -42,9 +42,9 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Anti-nuke.", &[
         ("Mass bans and deletes are stopped", "diag", &[E("nuke_quarantined"), E("panic_report_loaded")]),
         ("Rogue bots are kicked", "tall", &[E("nuke_bot_kicked")]),
-        ("Staff powers are watched", "diag", &[P("Anti-nuke", &["Watch staff actions", "Quarantine at the limit", "Restore from backup"]), E("nuke_quarantined"), E("panic_report_loaded")])]),
+        ("Staff powers are watched", "base", &[P("Anti-nuke", &["?Stop staff who delete or ban too fast.", "Watch staff actions", "Quarantine at the limit", "Restore from backup", ">Save"]), P("", &["~Channel deletes|4 per minute|Quarantine ▾"]), E("nuke_quarantined")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "diag", &[P("Blocked words", &["?Remove messages that contain words you list.", "Filter", "Action|Warn ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_warn")]),
+        ("Warn for blocked words", "base", &[P("Blocked words", &["?Remove messages that contain words you list.", "Words|free nitro", "Filter", "Action|Warn ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), P("", &["~Warn|3 strikes|Blocked word"]), E("automod_warn")]),
         ("Kick for invite links", "break", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_kick")]),
         ("Time out spammers", "tall", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout ▾", "Strikes", "Delete message", "Log to automod-logs", ">Save"]), E("automod_timeout"), E("automod_warn")])]),
     ("Moderation.", &[
@@ -57,7 +57,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Ignore users, roles or channels", "break", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), E("mod_log")])]),
     ("Tickets.", &[
         ("Members open a private ticket", "diag", &[E("ticket_intro"), E("ticket_received")]),
-        ("Staff see the new ticket", "side", &[T("Tickets", &[("general-help", "Open"), ("ban-appeal", "Open"), ("billing", "Closed")]), E("ticket_received")]),
+        ("Staff see the new ticket", "base", &[P("Tickets", &["?Where members open a private ticket.", "Panel|#support", "Staff|@Support", "Transcript on close", ">Save"]), P("", &["~Close when idle|3d|Reminder 1d"]), E("ticket_received")]),
         ("Replies reach the member", "tall", &[E("ticket_reply")])]),
     ("Tools.", &[
         ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
@@ -119,11 +119,11 @@ fn effects() -> impl IntoView {
     for (k, c) in [a, b].into_iter().enumerate() {
         let (cx, cy) = (if c % 2 == 0 { 0.0 } else { 100.0 }, if c < 2 { 0.0 } else { 100.0 });
         let (sx, sy) = (if c % 2 == 0 { -1.0 } else { 1.0 }, if c < 2 { -1.0 } else { 1.0 });
-        let (big, small) = if k == 0 { ("spark lg", "hex") } else { ("hex lg", "spark") };
+        let (big, small) = if k == 0 { ("spark lg ol", "hex up") } else { ("hex lg up ol", "spark") };
         shapes.push((big, cx + sx * (r() * 3.0 - 1.0), cy + sy * (r() * 4.0 - 1.0)));
         shapes.push((small, cx + sx * (6.0 + r() * 4.0), cy + sy * (6.0 + r() * 6.0)));
     }
-    shapes.push(("spark", if r() < 0.5 { -2.0 } else { 100.0 }, 30.0 + r() * 40.0));
+    shapes.push(("spark ol", if r() < 0.5 { -2.0 } else { 100.0 }, 30.0 + r() * 40.0));
     let out = shapes
         .into_iter()
         .map(|(class, x, y)| {
@@ -240,7 +240,9 @@ pub fn Landing(
                             <div class="feat-shot"><div class="fx">{effects()}</div>
                                 {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{move || tab.2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{shown(sample(key))}</div> }.into_any(),
-                                    P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
+                                    P(name, rows) => view! { <div class="win pane card">{(!name.is_empty()).then(|| view! { <b class="ph">{name}</b> })}{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
+                                        // One row with several fields: a switch, its name, then one chip per field.
+                                        _ if row.starts_with('~') => { let mut f = row[1..].split('|'); view! { <div class="tog"><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label="on" /><label>{f.next()}</label>{f.map(|c| view! { <span class=if c.ends_with('▾') { "sel" } else { "chip" }>{c}</span> }).collect_view()}</div> }.into_any() }
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
                                         (_, Some(t), _) => view! { <span class="tb-btn tb-btn-primary fakebtn">{t}</span> }.into_any(),
                                         (_, _, Some((a, b))) => view! { <div class="tog"><label>{a}</label><span class=if b.starts_with('@') { "rolechip" } else if b.ends_with('▾') { "sel" } else { "chip" }>{b}</span></div> }.into_any(),

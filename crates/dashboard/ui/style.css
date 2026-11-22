@@ -575,7 +575,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land header { position:static; height:auto; background:none; z-index:auto; }
 .land main { max-width:none; margin:0; }
 /* Hero (owner decision 2026-11-20): steel and copper drawn here, not from a picture, so it fits any screen. The colours are the banner pack's. */
-.land { --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
+.land { --orange-grad:linear-gradient(135deg,#ffc27a,var(--accent) 55%,#d4581a); --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
 .land .hero { position:relative; z-index:2; isolation:isolate; overflow:hidden; min-height:min(calc(100 * var(--vh)),940px); display:flex; flex-direction:column; background:linear-gradient(135deg,var(--steel-1) 0%,var(--steel-2) 56%,var(--steel-3) 100%); }
 .land .hero-split { position:absolute; inset:0; z-index:-1; background:#53403338; mask-image:linear-gradient(#000 30%,#0000 80%); clip-path:polygon(50% 0,100% 0,100% 100%,31.5% 100%); }
 .land .hero-lines { mask-image:linear-gradient(#000 40%,#0000 85%); position:absolute; inset:0; z-index:-1; width:100%; height:100%; fill:none; stroke:var(--copper-soft); stroke-opacity:.3; stroke-width:1.5; }
@@ -626,13 +626,13 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat { display:flex; align-items:center; justify-content:center; gap:calc(var(--space-48) * 3); padding:0; text-align:left; }
 .land .feat.flip { flex-direction:row-reverse; }
 .land .feat-copy { flex:1 1 0; min-width:0; }
-.land .feat-copy h3 { margin:0; font-size:2.4em; font-weight:800; background:linear-gradient(to right,var(--accent),var(--copper)); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.land .feat-copy h3 { margin:0; font-size:2.4em; font-weight:800; background:var(--orange-grad); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
 .land .feat-tabs { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-16); margin-top:var(--space-20); }
 .land .feat-tab { display:flex; align-items:center; gap:var(--space-8); padding:0; border:0; background:none; color:inherit; font:inherit; font-size:1.1em; font-weight:500; text-align:left; opacity:.6; cursor:pointer; transition:opacity .2s ease; }
 .land .feat-tab:hover, .land .feat-tab[aria-pressed="true"] { opacity:1; }
 .land .feat-tab[aria-pressed="true"] { color:#fff; font-weight:700; }
 .land .feat-dot { width:var(--space-12); height:var(--space-12); flex:none; border-radius:50%; border:var(--stroke-2) solid var(--copper); }
-.land .feat-tab[aria-pressed="true"] .feat-dot { background:var(--copper); }
+.land .feat-tab[aria-pressed="true"] .feat-dot { background:var(--orange-grad); border-color:transparent; }
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
 .land .feat-shot { position:relative; flex:1.5 1 0; min-width:0; isolation:isolate; }
 .land .feat-shot { display:grid; grid-template-columns:minmax(0,1fr); height:calc(var(--sh, 0px) * var(--k, 1)); }
@@ -661,6 +661,11 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .scene > div:nth-of-type(4) { grid-area:4/3/5/12; margin-top:calc(-1 * var(--space-16)); z-index:5; transform:rotate(-1deg); }
 .land .scene:not(.l-col) > :is(.pane, .tbl, .cmd):first-of-type { grid-area:1/1/2/10 !important; }
 .land .scene:not(.l-col) > :is(.pane, .tbl):first-of-type + div { grid-area:2/5/3/13 !important; margin-top:calc(-1 * var(--space-8)) !important; }
+/* Panel behind, one enlarged row and the bot's message on top; straight, no tilt. */
+.land .l-base > div:nth-of-type(1) { grid-area:1/1/5/10; z-index:2; }
+.land .l-base > div:nth-of-type(2) { grid-area:4/2/6/13; margin-top:var(--space-24); z-index:4; display:flex; align-items:center; }
+.land .l-base > div:nth-of-type(3) { grid-area:1/6/4/13; margin-top:calc(-1 * var(--space-24)); z-index:3; }
+.land .l-base > .pane:nth-of-type(2) .tog { width:100%; gap:var(--space-12); font-size:1.15em; }
 .land .l-col > div:nth-of-type(1) { grid-area:1/1/2/10; z-index:2; }
 .land .l-col > div:nth-of-type(2) { grid-area:2/4/3/13; margin-top:var(--space-12); z-index:3; }
 .land .l-col > div:nth-of-type(3) { grid-area:3/1/4/10; margin-top:var(--space-12); z-index:4; }
@@ -697,10 +702,13 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .fb:nth-child(4) { right:0; bottom:0; margin:0 calc(var(--space-44) * -1.2) calc(var(--space-44) * -1.1) 0; background:#6e49cb; animation-delay:-6s; }
 .land .fx { position:absolute; inset:0; z-index:0; pointer-events:none; }
 .land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
-.land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--accent); clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--orange-grad); clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark.lg { width:var(--space-44); height:var(--space-44); }
 .land .hex.lg { width:var(--space-36); height:var(--space-36); }
-.land .hex { background:var(--copper); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); filter:none; }
+.land .hex { background:var(--orange-grad); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); filter:none; }
+.land .hex.up { clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%); }
+/* Outline shapes: the same gradient shows only as a thin edge, because the inner copy is the page colour. */
+.land .ol::after { content:""; position:absolute; inset:var(--space-4); background:var(--page); clip-path:inherit; }
 @keyframes feat-twinkle { 50% { scale:.5; opacity:.5; } }
 @keyframes feat-wander { to { translate:var(--wx,0) var(--wy,0); rotate:var(--wr,0deg); } }
 @keyframes feat-rise { 0% { transform:translate(0,0); opacity:0; } 20% { opacity:1; } 100% { transform:translate(var(--sx,0%),var(--sy,-100%)); opacity:0; } }
