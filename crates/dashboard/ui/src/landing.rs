@@ -92,19 +92,34 @@ fn sample(key: &str) -> serde_json::Value {
     serde_json::from_str(&m.to_string().replace("{prefix}", "t!")).unwrap_or(m)
 }
 
-/// Sparkles, hexes and rising motes around a scene, each with its own random place, size, speed and delay.
-/// They sit behind the windows, so they show only at the edges and corners.
+/// Shapes that belong to a scene: a pair at two random corners (a big sparkle with a small hex, and the other way round),
+/// one at a side edge, and a few rising motes. Each has its own float and twinkle timing. They sit behind the windows,
+/// so they only peek out at corners and edges.
 fn effects() -> impl IntoView {
     let r = || js_sys::Math::random();
-    (0..14).map(|n| {
-        let edge = if r() < 0.5 { -8.0 + r() * 10.0 } else { 96.0 + r() * 10.0 };
-        let (class, style) = match n % 4 {
-            0 | 1 => (if n % 2 == 0 { "spark" } else { "spark lg" }, format!("left:{edge:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s", r() * 100.0, r() * 4.0, 2.0 + r() * 3.0)),
-            2 => ("hex", format!("left:{edge:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s", r() * 100.0, r() * 4.0, 3.0 + r() * 3.0)),
-            _ => ("mote", format!("left:{:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s;--sx:{:.0}%;--sy:{:.0}%", -6.0 + r() * 112.0, r() * 100.0, r() * 8.0, 4.0 + r() * 6.0, -40.0 + r() * 80.0, -120.0 + r() * 160.0)),
-        };
-        view! { <i class=class style=style aria-hidden="true"></i> }
-    }).collect_view()
+    let a = (r() * 4.0) as usize;
+    let b = (a + 1 + (r() * 3.0) as usize) % 4;
+    let mut shapes: Vec<(&str, f64, f64)> = vec![];
+    for (k, c) in [a, b].into_iter().enumerate() {
+        let (cx, cy) = (if c % 2 == 0 { 0.0 } else { 100.0 }, if c < 2 { 0.0 } else { 100.0 });
+        let (sx, sy) = (if c % 2 == 0 { -1.0 } else { 1.0 }, if c < 2 { -1.0 } else { 1.0 });
+        let (big, small) = if k == 0 { ("spark lg", "hex") } else { ("hex lg", "spark") };
+        shapes.push((big, cx + sx * (r() * 3.0 - 1.0), cy + sy * (r() * 4.0 - 1.0)));
+        shapes.push((small, cx + sx * (6.0 + r() * 4.0), cy + sy * (6.0 + r() * 6.0)));
+    }
+    shapes.push(("spark", if r() < 0.5 { -2.0 } else { 100.0 }, 30.0 + r() * 40.0));
+    let mut out = shapes
+        .into_iter()
+        .map(|(class, x, y)| {
+            let style = format!("left:{x:.0}%;top:{y:.0}%;--dl:-{:.1}s;--td:{:.1}s;--wd:{:.1}s;--wx:{:.1}rem;--wy:{:.1}rem;--wr:{:.0}deg", r() * 6.0, 2.0 + r() * 3.0, 6.0 + r() * 8.0, -1.5 + r() * 3.0, -1.5 + r() * 3.0, -60.0 + r() * 120.0);
+            view! { <i class=class style=style aria-hidden="true"></i> }
+        })
+        .collect::<Vec<_>>();
+    out.extend((0..5).map(|_| {
+        let style = format!("left:{:.0}%;top:{:.0}%;animation-delay:-{:.1}s;animation-duration:{:.1}s;--sx:{:.0}%;--sy:{:.0}%", r() * 100.0, r() * 100.0, r() * 8.0, 4.0 + r() * 6.0, -40.0 + r() * 80.0, -120.0 + r() * 160.0);
+        view! { <i class="mote" style=style aria-hidden="true"></i> }
+    }));
+    out
 }
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
@@ -223,8 +238,7 @@ pub fn Landing(
                                 </div>
                             </div>
                             <div class="feat-shot" aria-live="polite">
-                                {effects()}
-                                {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{tabs[on.get()].2.iter().map(|it| match *it {
+                                {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{effects()}{tabs[on.get()].2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),

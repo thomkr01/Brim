@@ -684,13 +684,15 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .badge { position:absolute; z-index:5; right:0; top:0; min-width:var(--space-56); padding:var(--space-8) var(--space-16); border-radius:var(--radius-button); background:linear-gradient(135deg,var(--accent),var(--copper)); color:var(--on-primary); font-size:2em; font-weight:800; text-align:center; box-shadow:0 0 var(--space-32) #f07f2299; }
-.land .feat-shot > i { position:absolute; z-index:0; pointer-events:none; }
-.land .spark, .land .hex { width:var(--space-16); height:var(--space-16); background:var(--accent); animation:feat-twinkle 3s ease-in-out infinite; clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
-.land .spark.lg { width:var(--space-28); height:var(--space-28); background:#fff; }
+.land .scene > i { position:absolute; z-index:0; pointer-events:none; }
+.land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--accent); animation:feat-twinkle 3s ease-in-out infinite, feat-wander 9s ease-in-out infinite alternate; animation-duration:var(--td,3s), var(--wd,9s); animation-delay:var(--dl,0s), var(--dl,0s); clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .spark.lg { width:var(--space-44); height:var(--space-44); background:#fff; }
+.land .hex.lg { width:var(--space-36); height:var(--space-36); }
 .land .hex { background:var(--copper); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); filter:none; }
 .land .mote { width:var(--space-8); height:var(--space-8); border-radius:50%; background:#ffd9a0; box-shadow:0 0 var(--space-12) var(--space-4) var(--accent); opacity:0; animation:feat-rise 6s ease-in-out infinite; }
 .land .burst { z-index:0; left:12%; top:30%; width:var(--space-56); height:var(--space-56); margin:calc(-1 * var(--space-28)); border-radius:50%; background:radial-gradient(#ffd9a0,#f07f2288 40%,#0000 70%); animation:feat-burst .7s ease-out both; }
-@keyframes feat-twinkle { 50% { transform:scale(.55) rotate(45deg); opacity:.55; } }
+@keyframes feat-twinkle { 50% { scale:.5; opacity:.5; } }
+@keyframes feat-wander { to { translate:var(--wx,0) var(--wy,0); rotate:var(--wr,0deg); } }
 @keyframes feat-rise { 0% { transform:translate(0,0); opacity:0; } 20% { opacity:1; } 100% { transform:translate(var(--sx,0%),var(--sy,-100%)); opacity:0; } }
 @keyframes feat-burst { from { transform:scale(.2); opacity:1; } to { transform:scale(4); opacity:0; } }
 @keyframes feat-shimmer { 0%,60% { transform:translateX(-100%); } 100% { transform:translateX(100%); } }
