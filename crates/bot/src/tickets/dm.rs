@@ -276,7 +276,7 @@ async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>, kind: Option<&s
             }
             // A type removed since the menu was sent asks again with the types of now.
             let kind = match kind {
-                Some(k) if k.is_empty() || t.types.iter().any(|x| x == k) => k,
+                Some(k) if t.types.iter().any(|x| x == k) => k,
                 _ if !t.types.is_empty() => return ask_type(app, gid, m, &t.types).await,
                 _ => "",
             };
@@ -332,19 +332,10 @@ async fn send_mail(app: &App, m: &Message, gid: Id<GuildMarker>, kind: Option<&s
     touch(app, gid, ch, false).await
 }
 
-/// The type menu for a new DM ticket, and a button to open it without one. Both carry the
-/// member's DM, which is sent once they answer.
+/// The type menu for a new DM ticket. It carries the member's DM, which is sent once they pick.
 async fn ask_type(app: &App, gid: Id<GuildMarker>, m: &Message, types: &[String]) -> Result<()> {
     let id = format!("tk:kind:{gid}:{}", m.id);
-    let skip = button(
-        "Open without a type",
-        format!("{id}:none"),
-        ButtonStyle::Secondary,
-    );
-    let rows = [
-        panel::kind_menu_as(&id, types, "Choose a ticket type"),
-        action_row(vec![skip]),
-    ];
+    let rows = [panel::kind_menu_as(&id, types, "Choose a ticket type")];
     let ask = crate::reply::say(app, gid, "reply.ticket.ask_type", &[]).await;
     app.http
         .create_message(m.channel_id)
@@ -674,14 +665,12 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             .and_then(|v| v.parse().ok())
             .and_then(Id::new_checked)
             .map(|g| (g, *msg, None)),
-        // The ticket type, asked before the channel is made; "none" opens it without one.
-        ["kind", g, msg, rest @ ..] => g.parse().ok().and_then(Id::new_checked).map(|g| {
-            let kind = match rest {
-                ["none"] => "",
-                _ => c.values.first().map_or("", String::as_str),
-            };
-            (g, *msg, Some(kind))
-        }),
+        // The ticket type, asked before the channel is made.
+        ["kind", g, msg] => g
+            .parse()
+            .ok()
+            .and_then(Id::new_checked)
+            .map(|g| (g, *msg, Some(c.values.first().map_or("", String::as_str)))),
         _ => None,
     };
     let Some((gid, msg, kind)) = chosen else {
@@ -791,7 +780,9 @@ mod tests {
         assert_eq!(said("words or links that server does not allow"), 2);
         let raid = brim_automod::join::RaidDetector::restored(0, i64::MAX, String::new());
         t.app.raids.lock().unwrap().insert(gid.get(), raid);
-        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("Report"))
+            .await
+            .unwrap();
         assert_eq!(said("does not take new tickets right now"), 1);
         t.app.raids.lock().unwrap().clear();
         for n in 1..=3 {
@@ -803,7 +794,9 @@ mod tests {
                 .await
                 .unwrap();
         }
-        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("Report"))
+            .await
+            .unwrap();
         assert_eq!(said("too many tickets in that server"), 1);
         assert_eq!(
             said(&format!("POST /guilds/{gid}/channels")),
@@ -857,13 +850,13 @@ mod tests {
         send_mail(&t.app, &dm("why am I quarantined?"), gid, None)
             .await
             .unwrap();
-        assert_eq!(said(&format!("tk:kind:{gid}:5:none")), 1);
+        assert_eq!(said(&format!("tk:kind:{gid}:5")), 1);
         assert_eq!(said(&format!("POST /guilds/{gid}/channels")), 0);
         // A type the server no longer has asks again.
         send_mail(&t.app, &dm("why am I quarantined?"), gid, Some("Gone"))
             .await
             .unwrap();
-        assert_eq!(said(&format!("tk:kind:{gid}:5:none")), 2);
+        assert_eq!(said(&format!("tk:kind:{gid}:5")), 2);
         send_mail(&t.app, &dm("why am I quarantined?"), gid, Some("Report"))
             .await
             .unwrap();
@@ -899,7 +892,9 @@ mod tests {
             .execute(&t.app.pool)
             .await
             .unwrap();
-        send_mail(&t.app, &dm("help"), gid, Some("")).await.unwrap();
+        send_mail(&t.app, &dm("help"), gid, Some("Report"))
+            .await
+            .unwrap();
         assert_eq!(said("too many new tickets right now"), 1);
         sqlx::query("DELETE FROM ticket_users WHERE user_id = $1")
             .bind(u as i64)
