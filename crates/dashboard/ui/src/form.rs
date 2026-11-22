@@ -694,9 +694,8 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             let add = move |_| {
                 let mut cur = get().as_array().cloned().unwrap_or_default();
                 let id = (1..).map(|n| format!("panel-{n}")).find(|id| !cur.iter().any(|p| p["id"] == id.as_str())).unwrap_or_default();
-                // The first one is the button in #open-a-ticket: a label members understand.
-                let (name, emoji) = if cur.is_empty() { ("Open a ticket", "{e:ticket}") } else { ("New panel", "") };
-                cur.push(json!({"id": id, "name": name, "emoji": emoji, "enabled": true, "style": "primary", "per_member": 1}));
+                // Each new button is posted in #open-a-ticket: a label members understand, no category (the ticket category).
+                cur.push(json!({"id": id, "name": "Open a ticket", "emoji": "{e:ticket}", "enabled": true, "style": "primary", "per_member": 1}));
                 set(json!(cur))
             };
             view! { <div class="fullrow">
