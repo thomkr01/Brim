@@ -655,8 +655,8 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .l-break > div:nth-of-type(2) { grid-area:2/1/3/10; margin-top:calc(-1 * var(--space-16)); z-index:3; transform:rotate(-2deg); }
 .land .l-break > div:nth-of-type(3) { grid-area:3/4/4/13; margin-top:calc(-1 * var(--space-16)); z-index:4; transform:rotate(1.5deg); }
 .land .scene > div:nth-of-type(4) { grid-area:4/3/5/12; margin-top:calc(-1 * var(--space-16)); z-index:5; transform:rotate(-1deg); }
-.land .scene:not(.l-col) > :is(.pane, .tbl, .cmd):first-of-type { grid-area:1/1/2/8 !important; }
-.land .scene:not(.l-col) > :is(.pane, .tbl):first-of-type + div { grid-area:1/6/2/13 !important; margin-top:var(--space-40) !important; }
+.land .scene:not(.l-col) > :is(.pane, .tbl, .cmd):first-of-type { grid-area:1/1/2/10 !important; }
+.land .scene:not(.l-col) > :is(.pane, .tbl):first-of-type + div { grid-area:2/5/3/13 !important; margin-top:calc(-1 * var(--space-8)) !important; }
 .land .l-col > div:nth-of-type(1) { grid-area:1/1/2/10; z-index:2; }
 .land .l-col > div:nth-of-type(2) { grid-area:2/4/3/13; margin-top:var(--space-12); z-index:3; }
 .land .l-col > div:nth-of-type(3) { grid-area:3/1/4/10; margin-top:var(--space-12); z-index:4; }
