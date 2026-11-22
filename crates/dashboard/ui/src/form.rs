@@ -811,17 +811,28 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             </div> }.into_any()
         }
         "channels" | "categories" | "roles" => {
+            // Chips of the picked ones and a search box with the others as a dropdown (a datalist).
             let key = StoredValue::new(kind.clone());
+            let list = format!("pick-{}", path.replace('.', "-"));
             view! { <div class="pick">
-                {move || items(&dc.get(), &key.get_value()).into_iter().map(|(id, l)| {
-                    let id2 = id.clone();
-                    view! { <label><input type="checkbox" prop:checked=move || strs(&get()).contains(&id) on:change=move |e| {
-                        let mut cur = strs(&get());
-                        cur.retain(|x| *x != id2);
-                        if event_target_checked(&e) { cur.push(id2.clone()); }
-                        set(json!(cur));
-                    } /> {l}</label> }
+                {move || strs(&get()).into_iter().map(|id| {
+                    let label = items(&dc.get(), &key.get_value()).into_iter().find(|(i, _)| *i == id).map_or_else(|| id.clone(), |(_, l)| l);
+                    view! { <span class="chip">{label}" "<button class="link" aria-label="remove" on:click=move |_| { let mut cur = strs(&get()); cur.retain(|x| *x != id); set(json!(cur)) }>"×"</button></span> }
                 }).collect_view()}
+                <input list=list.clone() placeholder="Search to add" aria-label="search to add" on:change=move |e| {
+                    let q = event_target_value(&e);
+                    let hit = items(&dc.get(), &key.get_value()).into_iter().find(|(_, l)| l.eq_ignore_ascii_case(q.trim()));
+                    if let Some((id, _)) = hit {
+                        let mut cur = strs(&get());
+                        if !cur.contains(&id) { cur.push(id); }
+                        set(json!(cur));
+                    }
+                    event_target::<web_sys::HtmlInputElement>(&e).set_value("");
+                } />
+                <datalist id=list>{move || {
+                    let on = strs(&get());
+                    items(&dc.get(), &key.get_value()).into_iter().filter(|(i, _)| !on.contains(i)).map(|(_, l)| view! { <option value=l></option> }).collect_view()
+                }}</datalist>
             </div> }.into_any()
         }
         _ => view! { <input prop:value=move || show(&get()) on:change=move |e| { let s = event_target_value(&e); set(if s.is_empty() { Value::Null } else { json!(s) }) } /> }.into_any(),
@@ -880,9 +891,8 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
     if path == "joinraid.active_ms" {
         live.push(Signal::derive(move || raid_summary(&val.get())));
     }
-    // A switch says what it does in a grey line under its name (review); help that changes with the value stays a tip.
-    let line = (kind == "bool" && live.is_empty() && !fixed.is_empty()).then(|| fixed.clone());
-    let tip = (line.is_none() && (!fixed.is_empty() || !live.is_empty())).then(|| {
+    // Help text of any kind sits behind the info icon next to the name (owner decision 2026-11-22).
+    let tip = (!fixed.is_empty() || !live.is_empty()).then(|| {
         let text = Signal::derive(move || {
             let mut t = fixed.clone();
             for s in &live {
@@ -899,7 +909,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
         .as_str()
         .map_or_else(|| tail.replace('_', " "), String::from);
     // The group's name labels the control inside, whatever kind it is.
-    view! { <div class="row" class:tog=kind == "bool" role="group" aria-label=label.clone()><label>{label.clone()}{tip}</label>{input}{line.map(|t| view! { <span class="muted">{t}</span> })}</div> }
+    view! { <div class="row" class:tog=kind == "bool" role="group" aria-label=label.clone()><label>{label.clone()}{tip}</label>{input}</div> }
 }
 
 /// Raw JSON of one section of the config in `val`.

@@ -31,9 +31,8 @@ pub fn StylePage() -> impl IntoView {
                 <div class="row"><label>"Text field"</label><input aria-label="text field" placeholder="Type here" /></div>
                 <div class="row"><label>"Select"</label><select aria-label="select"><option>"First choice"</option><option>"Second choice"</option></select></div>
                 <div class="row tog" role="group" aria-label="toggle row sample">
-                    <label>"Toggle row"</label>
+                    <label>"Toggle row"<crate::common::Tip text="The info icon next to the name says what the switch does." /></label>
                     <input type="checkbox" class="sw" aria-label="toggle row" prop:checked=move || on.get() on:change=move |e| on.set(event_target_checked(&e)) />
-                    <span class="muted">"The grey line under the name says what the switch does."</span>
                 </div>
             </div>
             </div><div class="col">
