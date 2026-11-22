@@ -1,3 +1,4 @@
+use crate::modules;
 use crate::common::*;
 use crate::form::Section;
 use crate::wizard::{
@@ -392,6 +393,14 @@ const SYSTEMS: [(&str, &str, &str, bool); 5] = [
     ("verification", "Verification", "Brim's verification gate that your new members need to pass in order to get access to your server.", true),
 ];
 
+/// (module, description) of the modules shown after the systems. Their switches are the sidebar's (`modules::switch_of`).
+const MODULE_CARDS: [(&str, &str); 4] = [
+    ("Moderation", "Cases, notes, reports, mod stats and the catch channel."),
+    ("Tickets", "Members DM Brim, and staff answer in a private ticket channel."),
+    ("Messages", "Your own messages, the messages Brim sends by itself, and feeds."),
+    ("Logging", "Choose where Brim logs what happens."),
+];
+
 /// Master switch of a system: reads and writes its `enabled` key.
 /// `all` is the guild's config with its version, loaded once and shared by every switch: with a
 /// version each, the second switch flipped was refused with "config changed, reload".
@@ -571,6 +580,7 @@ pub fn Score(guild: String) -> impl IntoView {
     let setup_done = RwSignal::new(true);
     // The row whose fix runs ("*" for Fix all); every fix button waits for it.
     let busy = RwSignal::new(None::<String>);
+    let sw_busy = RwSignal::new(false);
     let g = guild.clone();
     // Also reloads the config, as a fix can save a version the system switches build on.
     let score = move |g: String| async move {
@@ -733,6 +743,9 @@ pub fn Score(guild: String) -> impl IntoView {
     // land after another switch's save and show that switch in its old state.
     let gs = guild.clone();
     let refresh = Callback::new(move |_| spawn_local(score(gs.clone())));
+    // The module cards use the sidebar's config, so the checks follow their switches too.
+    let side = expect_context::<modules::Cfg>().0;
+    Effect::new(move |first: Option<()>| { side.track(); if first.is_some() { refresh.run(()); } });
     let g = guild.clone();
     let row = move |r: Value| {
         let (g, load) = (g.clone(), load.clone());
@@ -815,6 +828,11 @@ pub fn Score(guild: String) -> impl IntoView {
         <h2 class="center">"Quick Systems Overview"</h2>
         <div class="tiles">
             {SYSTEMS.iter().map(|(k, t, d, sw)| view! { <div class="card sys"><h3>{*t}</h3><p>{*d}</p><div class="foot"><a class="btn" href=format!("#/{g2}/{k}")>"Settings"</a>{sw.then(|| view! { <SystemToggle guild=g2.clone() section=*k title=*t all locked=Signal::derive(move || busy.get().is_some()) saved=refresh /> })}</div></div> }).collect_view()}
+            {MODULE_CARDS.iter().map(|(m, d)| {
+                let (g, cfg) = (g2.clone(), expect_context::<modules::Cfg>().0);
+                let sw = move || modules::module_on(&cfg.get(), m).zip(modules::switch_of(m)).map(|(on, (sec, key))| view! { <modules::ModuleSwitch guild=g.clone() section=sec key group=m.to_string() on msg need busy=sw_busy /> });
+                view! { <div class="card sys"><h3>{*m}</h3><p>{*d}</p><div class="foot"><a class="btn" href=format!("#/{g2}/module/{}", modules::slug(m))>"Settings"</a>{sw}</div></div> }
+            }).collect_view()}
         </div>
         <Toast msg />
     }
