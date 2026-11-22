@@ -766,6 +766,11 @@ pub fn moderation_commands() -> &'static [&'static str] {
     COMMANDS[2].1
 }
 
+/// The ticket commands of the catalog, by name.
+pub(crate) fn ticket_commands() -> &'static [&'static str] {
+    COMMANDS[3].1
+}
+
 fn allowed(level: &Level, perm: &str) -> bool {
     match perm {
         "" => true,

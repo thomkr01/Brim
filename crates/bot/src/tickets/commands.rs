@@ -1,67 +1,19 @@
 use super::staff::{close, relay};
 use super::*;
 
-pub(super) const STAFF_CMDS: &[&str] = &[
-    "reply",
-    "r",
-    "areply",
-    "ar",
-    "close",
-    "c",
-    "aclose",
-    "ac",
-    "closeall",
-    "acloseall",
-    "blacklist",
-    "block",
-    "whitelist",
-    "unblock",
-    "blacklistclear",
-    "viewblacklist",
-    "snippet",
-    "s",
-    "asnippet",
-    "as",
-    "snippetadd",
-    "snippetremove",
-    "snippetclear",
-    "viewsnippet",
-    "viewsnippets",
-    "snippetlist",
-    "vs",
-    "claim",
-    "unclaim",
-    "reassign",
-    "priority",
-    "tickettype",
-    "ticketnote",
-    "tnote",
-    "ticketinfo",
-];
-pub(super) const ADMIN_CMDS: &[&str] = &[
-    "ticketsetup",
-    "category",
-    "pingrole",
-    "mentionrole",
-    "logging",
-    "logs",
-    "commandonly",
-    "commandrequired",
-    "greetingmessage",
-    "welcomemessage",
-    "greetmessage",
-    "closingmessage",
-    "goodbyemessage",
-    "closemessage",
-    "loggingplus",
-    "advancedlogging",
-    "advancedlogs",
-    "anonymous",
-    "toggle",
-    "enable",
-    "disable",
-    "viewconfig",
-];
+/// Whether `w` is a ticket command word, and then whether it is an admin one: the catalog's ticket
+/// commands with their aliases (admin: Owner, Extra Owner or Trusted Admin there), and the short
+/// words a ticket reads its own way.
+pub(super) fn ticket_word(w: &str) -> Option<bool> {
+    if crate::cmdcfg::TICKET_WORDS.contains(&w) {
+        return Some(false);
+    }
+    let c = crate::general::lookup(w)?;
+    crate::general::ticket_commands()
+        .contains(&c.0)
+        .then_some(c.2 == "immune")
+}
+
 /// Short names other commands already use; they mean the ticket command only inside a ticket.
 const TICKET_ONLY: &[&str] = &[
     "r",
@@ -134,10 +86,9 @@ pub async fn on_message(
         return Ok(true);
     };
     let w = word.as_str();
-    let admin = ADMIN_CMDS.contains(&w);
-    if !admin && !STAFF_CMDS.contains(&w) {
+    let Some(admin) = ticket_word(w) else {
         return Ok(false);
-    }
+    };
     let ticket = ticket_here(app, &cfg.tickets, gid, m.channel_id).await?;
     if TICKET_ONLY.contains(&w) && ticket.is_none() {
         return Ok(false);
@@ -857,6 +808,26 @@ async fn setup(
 
 #[cfg(test)]
 mod tests {
+    /// The catalog decides which ticket words need Owner, Extra Owner or Trusted Admin.
+    #[test]
+    fn ticket_words_come_from_the_catalog() {
+        for (w, admin) in [
+            ("reply", Some(false)),
+            ("ar", Some(false)),
+            ("r", Some(false)),
+            ("whitelist", Some(false)),
+            ("block", Some(false)),
+            ("ticketsetup", Some(true)),
+            ("logs", Some(true)),
+            ("enable", Some(true)),
+            ("viewconfig", Some(true)),
+            ("ban", None),
+            ("config", None),
+        ] {
+            assert_eq!(super::ticket_word(w), admin, "{w}");
+        }
+        assert_eq!(crate::tickets::words().count(), 57);
+    }
     use super::*;
 
     /// R5: a new snippet past the cap is refused on the saved config; one already there can go.

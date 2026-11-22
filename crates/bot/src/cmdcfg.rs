@@ -108,7 +108,7 @@ pub(crate) fn canonical(word: &str, in_ticket: bool) -> Option<&'static str> {
 }
 
 /// Words a ticket reads its own way (`tickets::commands::TICKET_ONLY`).
-const TICKET_WORDS: &[&str] = &["r", "c", "s", "whitelist"];
+pub(crate) const TICKET_WORDS: &[&str] = &["r", "c", "s", "whitelist"];
 
 /// A second command the same text runs, so its settings count too: a narrowed command is not
 /// reachable through a sibling word. `has` tells if the text holds a word.

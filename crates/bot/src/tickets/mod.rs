@@ -454,10 +454,11 @@ async fn send(
 
 /// Every prefix word the ticket commands answer.
 pub(crate) fn words() -> impl Iterator<Item = &'static str> {
-    commands::STAFF_CMDS
+    crate::general::ticket_commands()
         .iter()
-        .chain(commands::ADMIN_CMDS)
-        .copied()
+        .filter_map(|n| crate::general::lookup(n))
+        .flat_map(|c| std::iter::once(c.0).chain(c.1.iter().copied()))
+        .chain(crate::cmdcfg::TICKET_WORDS.iter().copied())
 }
 
 /// Whether `ch` holds an open ticket, where `r`, `c` and `s` mean the ticket commands.
