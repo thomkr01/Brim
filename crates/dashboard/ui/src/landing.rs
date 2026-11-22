@@ -25,42 +25,42 @@ type Scene = (&'static str, &'static str, &'static [Item]);
 const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Setup Wizard.", &[
         ("Answer a few questions", "base", &[P("Logging channel", &["-", "?Where should Brim log its actions?", "Logs|#brim-logs ▾", "Moderation|#mod-logs ▾", "Appeals|#appeals ▾", ">Next"]), P("", &["~Main role|@Member"]), P("Main roles", &["?Who may enter the server.", "Main role|@Member", ">Next"])]),
-        ("Switch on the protection you want", "base", &[P("Protection", &["?Pick what Brim watches.", "Auto Mod", "Anti-nuke", "Anti-raid", "Verification", ">Next"]), P("", &["~Anti-raid|Join gate|On"]), P("Antinuke status", &["?Watch your staff.", "Monitor staff actions", "Quarantine at the limit"])]),
-        ("Set up verification in one step", "base", &[P("Verification", &["-", "?Members solve a captcha first.", "Verification", "Web verify", ">Set up channel"]), P("", &["~Verify channel|#verify"]), E("verify_panel")])]),
+        ("Switch on the protection you want", "baseb", &[P("Protection", &["?Pick what Brim watches.", "Auto Mod", "Anti-nuke", "Anti-raid", "Verification", ">Next"]), P("", &["~Anti-raid|Join gate|On"]), P("Antinuke status", &["?Watch your staff.", "Monitor staff actions", "Quarantine at the limit"])]),
+        ("Set up verification in one step", "basec", &[P("Verification", &["-", "?Members solve a captcha first.", "Verification", "Web verify", ">Set up channel"]), P("", &["~Verify channel|#verify"]), E("verify_panel")])]),
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[P("Captcha", &["?Members type the letters shown.", "Time|2 min", "Attempts|3", "Captcha", "Web verify"]), P("", &["~Captcha|2 min|3 tries"]), E("verify_captcha")]),
-        ("A panel they press to start", "base", &[P("Verify panel", &["?The message members press.", "Channel|#verify", "Button|Verify", "Help button", ">Post"]), P("", &["~Post panel|#verify"]), E("verify_panel")]),
-        ("Set up in the dashboard", "base", &[P("Verification", &["?Who gets in, and how.", "Captcha", "Web verify", "Give role on pass", "Role|@Member", ">Save"]), P("", &["~Give role|@Member"]), E("verify_help")])]),
+        ("A panel they press to start", "baseb", &[P("Verify panel", &["?The message members press.", "Channel|#verify", "Button|Verify", "Help button", ">Post"]), P("", &["~Post panel|#verify"]), E("verify_panel")]),
+        ("Set up in the dashboard", "basec", &[P("Verification", &["?Who gets in, and how.", "Captcha", "Web verify", "Give role on pass", "Role|@Member", ">Save"]), P("", &["~Give role|@Member"]), E("verify_help")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[P("Join gate", &["?Pause joins during a wave.", "Join gate", "Raider list", "Limit|20 per 10s", "Pause|30m ▾", ">Save"]), P("", &["~Pause joins|30m|20 per 10s"]), E("raid")]),
-        ("Every raid gets a report", "base", &[P("Raid reports", &["?A report after every raid.", "Post report", "Channel|#raid-log ▾", "Ping|@Staff", ">Save"]), P("", &["~Report|#raid-log"]), E("raid_report")]),
-        ("Known raiders are flagged on arrival", "base", &[P("Anti-raid", &["?Flag known raiders.", "Join gate", "Raider list", "Quarantine newcomers", ">Save"]), P("", &["~Raider list|Flag|Quarantine"]), E("raider_alert")])]),
+        ("Every raid gets a report", "baseb", &[P("Raid reports", &["?A report after every raid.", "Post report", "Channel|#raid-log ▾", "Ping|@Staff", ">Save"]), P("", &["~Report|#raid-log"]), E("raid_report")]),
+        ("Known raiders are flagged on arrival", "basec", &[P("Anti-raid", &["?Flag known raiders.", "Join gate", "Raider list", "Quarantine newcomers", ">Save"]), P("", &["~Raider list|Flag|Quarantine"]), E("raider_alert")])]),
     ("Anti-nuke.", &[
         ("Mass bans and deletes are stopped", "base", &[P("Anti-nuke limits", &["?Stop mass bans and deletes.", "Bans|6 per hour", "Role deletes|3 per hour", "Channel deletes|4 per min", "Watch staff actions", ">Save"]), P("", &["~Bans|6 per hour|Quarantine ▾"]), E("nuke_quarantined")]),
-        ("Rogue bots are kicked", "base", &[P("Bots", &["?Unknown bots are kicked.", "Kick unknown bots", "Allow list|2 bots", "Notify|@Owner", ">Save"]), P("", &["~Bot kick|Instant"]), E("nuke_bot_kicked")]),
-        ("Staff powers are watched", "base", &[P("Anti-nuke", &["?Stop staff who delete or ban too fast.", "Bans|6 per hour", "Role deletes|3 per hour", "Watch staff actions", "Quarantine at the limit", "Restore from backup", ">Save"]), P("", &["~Channel deletes|4 per min"]), E("panic_report_loaded")])]),
+        ("Rogue bots are kicked", "baseb", &[P("Bots", &["?Unknown bots are kicked.", "Kick unknown bots", "Allow list|2 bots", "Notify|@Owner", ">Save"]), P("", &["~Bot kick|Instant"]), E("nuke_bot_kicked")]),
+        ("Staff powers are watched", "basec", &[P("Anti-nuke", &["?Stop staff who delete or ban too fast.", "Bans|6 per hour", "Role deletes|3 per hour", "Watch staff actions", "Quarantine at the limit", "Restore from backup", ">Save"]), P("", &["~Channel deletes|4 per min"]), E("panic_report_loaded")])]),
     ("Auto Mod.", &[
         ("Warn for blocked words", "base", &[P("Blocked words", &["?Remove messages with words you list.", "Words|free nitro", "Exempt|@Staff", "Filter", "Action|Warn ▾", "Strikes", "Delete", "Log", ">Save"]), P("", &["~Warn|3 strikes|Spam"]), E("automod_warn")]),
-        ("Kick for invite links", "base", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick ▾", "Allow|#partners", "Strikes", "Delete", "Log", ">Save"]), P("", &["~Kick|1 strike|Invite"]), E("automod_kick")]),
-        ("Time out spammers", "base", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout ▾", "Limit|5 per 4s", "Strikes", "Delete", "Log", ">Save"]), P("", &["~Timeout|10m|Spam"]), E("automod_timeout")])]),
+        ("Kick for invite links", "baseb", &[P("Invite links", &["?Remove invite links to other servers.", "Filter", "Action|Kick ▾", "Allow|#partners", "Strikes", "Delete", "Log", ">Save"]), P("", &["~Kick|1 strike|Invite"]), E("automod_kick")]),
+        ("Time out spammers", "basec", &[P("Spam", &["?Stop floods of repeated messages.", "Filter", "Action|Timeout ▾", "Limit|5 per 4s", "Strikes", "Delete", "Log", ">Save"]), P("", &["~Timeout|10m|Spam"]), E("automod_timeout")])]),
     ("Moderation.", &[
         ("Ban with a reason", "base", &[P("Ban", &["?Ban with a reason.", "Member|@Mika", "Reason|DM ads", "Delete messages|7d ▾", "Notify member", ">Ban"]), P("", &["~Reason|DM ads|3d"]), E("ban_result")]),
-        ("Short or full replies, your choice", "base", &[P("Replies", &["?Pick how Brim answers.", "Style|Full ▾", "Show reason", "Show case", "Show duration", ">Save"]), P("", &["~Style|Compact"]), E("ban_compact")]),
-        ("Cases your whole team can see", "base", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words"), ("#4148 ban", "Raid")]), P("", &["~Case 4151|Ban|3d"]), E("note_modified")])]),
+        ("Short or full replies, your choice", "baseb", &[P("Replies", &["?Pick how Brim answers.", "Style|Full ▾", "Show reason", "Show case", "Show duration", ">Save"]), P("", &["~Style|Compact"]), E("ban_compact")]),
+        ("Cases your whole team can see", "basec", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words"), ("#4148 ban", "Raid")]), P("", &["~Case 4151|Ban|3d"]), E("note_modified")])]),
     ("Logging.", &[
         ("Monitor every action on your server", "base", &[P("Log channels", &["?Each kind of log has its own channel.", "Moderation|#mod-logs ▾", "Auto Mod|#automod-logs ▾", "Anti-nuke|#nuke-logs ▾", "Verification|#verify-logs ▾", ">Save"]), P("", &["~Moderation|#mod-logs"]), E("mod_log")]),
-        ("A log for every kind of event", "base", &[P("Log types", &["?Pick what Brim writes.", "Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), P("", &["~Role updated|#brim-logs"]), E("note_modified")]),
-        ("Ignore users, roles or channels", "base", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), P("", &["~Ignore|@Bots|#spam"]), E("mod_log")])]),
+        ("A log for every kind of event", "baseb", &[P("Log types", &["?Pick what Brim writes.", "Message deleted", "Member banned", "Role updated", "Channel created", "Invite created"]), P("", &["~Role updated|#brim-logs"]), E("note_modified")]),
+        ("Ignore users, roles or channels", "basec", &[P("Ignored", &["?Brim skips these in your logs.", "Users|Add", "Roles|Add", "Channels|Add", ">Save"]), P("", &["~Ignore|@Bots|#spam"]), E("mod_log")])]),
     ("Tickets.", &[
         ("Members open a private ticket", "base", &[P("Ticket panel", &["?Members press to open.", "Channel|#support", "Button|Open ticket", "Category|Tickets ▾", ">Post"]), P("", &["~Open ticket|1 per member"]), E("ticket_intro")]),
-        ("Staff see the new ticket", "base", &[P("Tickets", &["?Where members open a ticket.", "Panel|#support", "Staff|@Support", "Limit|3 per member", "Transcript on close", ">Save"]), P("", &["~Close idle|3d|Notify"]), E("ticket_received")]),
-        ("Replies reach the member", "base", &[P("Replies", &["?Staff answer in the ticket.", "Staff|@Support", "Reply by DM", "Transcript", ">Save"]), P("", &["~Reply|DM|Transcript"]), E("ticket_reply")])]),
+        ("Staff see the new ticket", "baseb", &[P("Tickets", &["?Where members open a ticket.", "Panel|#support", "Staff|@Support", "Limit|3 per member", "Transcript on close", ">Save"]), P("", &["~Close idle|3d|Notify"]), E("ticket_received")]),
+        ("Replies reach the member", "basec", &[P("Replies", &["?Staff answer in the ticket.", "Staff|@Support", "Reply by DM", "Transcript", ">Save"]), P("", &["~Reply|DM|Transcript"]), E("ticket_reply")])]),
     ("Tools.", &[
         ("Build any message in the editor", "base", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), P("", &["~Colour|Green|Button"]), X("verify_panel")]),
-        ("See every change in History", "base", &[L("History", "", &[("Welcome message", "Brim · today", "Diff|Revert"), ("Log channels", "Mika · yesterday", "Diff|Revert"), ("Anti-raid", "Sam · Nov 20", "Diff|Revert")]), P("", &["~Diff|+ Asked twice|− Asked"]), P("Reverted", &["?Welcome message is back."])]),
-        ("Set up channels and roles", "base", &[G(&["Everyone", "Member", "Moderator"], &[("\u{25be} Info", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("# rules", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("\u{25be} Chat", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# general", &["\u{2717}", "\u{2713}", "\u{2713}"])]), P("", &["~# general|Member|Deny"]), P("Add role", &["?Pick a role.", "Role|@Member ▾", ">Add"])]),
+        ("See every change in History", "baseb", &[L("History", "", &[("Welcome message", "Brim · today", "Diff|Revert"), ("Log channels", "Mika · yesterday", "Diff|Revert"), ("Anti-raid", "Sam · Nov 20", "Diff|Revert")]), P("", &["~Diff|+ Asked twice|− Asked"]), P("Reverted", &["?Welcome message is back."])]),
+        ("Set up channels and roles", "basec", &[G(&["Everyone", "Member", "Moderator"], &[("\u{25be} Info", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("# rules", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("\u{25be} Chat", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# general", &["\u{2717}", "\u{2713}", "\u{2713}"])]), P("", &["~# general|Member|Deny"]), P("Add role", &["?Pick a role.", "Role|@Member ▾", ">Add"])]),
         ("Follow feeds into a channel", "base", &[L("Feeds", "Add feed", &[("Channel uploads", "YouTube", "Edit|Delete"), ("Blog posts", "RSS", "Edit|Delete"), ("Releases", "GitHub", "Edit|Delete")]), P("", &["~Sources|YouTube|RSS|GitHub|GitLab"]), P("New post", &["?Posted to #videos.", "Title|New video is out"])]),
-        ("Back up and load a layout", "base", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Load"), ("#9c20", "Brim · yesterday", "View|Load"), ("#77de", "Brim · Nov 18", "View|Load")]), P("", &["~Load|#a1f3|Preview"]), P("Restore", &["?Preview first, then load.", "Roles", "Channels", ">Load"])])]),
+        ("Back up and load a layout", "baseb", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Load"), ("#9c20", "Brim · yesterday", "View|Load"), ("#77de", "Brim · Nov 18", "View|Load")]), P("", &["~Load|#a1f3|Preview"]), P("Restore", &["?Preview first, then load.", "Roles", "Channels", ">Load"])])]),
 ];
 
 /// Each scene is drawn 616 wide and scaled to fit its box (at most 0.85), so it keeps every window.
@@ -109,18 +109,19 @@ fn sample(key: &str) -> serde_json::Value {
 /// so they only peek out at corners and edges.
 fn effects() -> impl IntoView {
     let r = || js_sys::Math::random();
-    // Three of the four corners, each with a shield and a spark touching the group's edge.
+    // Three of the four corners, each with a shield and a spark outside the group's edge.
     let mut c = [0, 1, 2, 3];
     for n in (1..4).rev() { c.swap(n, (r() * (n + 1) as f64) as usize); }
     (0..3)
         .flat_map(|k| {
-            let (cx, cy) = (if c[k] % 2 == 0 { 3.0 } else { 97.0 }, if c[k] < 2 { 2.0 } else { 98.0 });
-            let (sx, sy) = (if c[k] % 2 == 0 { 1.0 } else { -1.0 }, if c[k] < 2 { 1.0 } else { -1.0 });
+            let (x, y) = (if c[k] % 2 == 0 { 1.0 } else { 93.0 }, 1.0);
             let (a, b) = if k % 2 == 0 { ("spark lg ol", "hex") } else { ("hex lg ol", "spark") };
-            [(a, cx - sx * 2.0, cy - sy * 2.0), (b, cx + sx * 7.0, cy + sy * (6.0 + r() * 4.0))]
+            let edge = if c[k] < 2 { "top" } else { "bottom" };
+            let inward = if c[k] % 2 == 0 { 9.0 } else { -9.0 };
+            [(a, edge, x, y), (b, edge, x + inward, y + 2.0 + r() * 3.0)]
         })
-        .map(|(class, x, y)| {
-            let style = format!("left:{x:.0}%;top:{y:.0}%;rotate:{:.0}deg;--gp:{:.0}%", -40.0 + r() * 80.0, r() * 100.0);
+        .map(|(class, edge, x, y)| {
+            let style = format!("left:{x:.0}%;{edge}:{y:.0}%;rotate:{:.0}deg;--gp:{:.0}%", -40.0 + r() * 80.0, r() * 100.0);
             view! { <i class=class style=style aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>()
@@ -247,7 +248,7 @@ pub fn Landing(
                                         <div class="lhead"><span class="sel">"Member \u{25be}"</span><span class="pill">"Add role"</span></div></div> }.into_any(),
                                     X(key) => {
                                         let m = sample(key);
-                                        view! { <div class="win xs">{EDITS.iter().map(|(color, text)| {
+                                        view! { <div class="win xs">{EDITS.iter().take(2).map(|(color, text)| {
                                             let mut m = m.clone();
                                             if let Some(e) = m["embeds"].get_mut(0) {
                                                 e["color"] = (*color).into();
