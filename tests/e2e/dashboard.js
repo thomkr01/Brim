@@ -26,7 +26,10 @@ fs.mkdirSync(out, { recursive: true });
     refill();
     // 15: a page load sends up to about 10 requests.
     if (tokens < 15) await page.waitForTimeout(Math.ceil(((15 - tokens) / 20) * 1000));
-    return goto(...a);
+    const r = await goto(...a);
+    // A page with unsaved edits asks first (guard.rs); these steps never keep edits, so they discard.
+    await page.locator('[role="dialog"] button:text-is("Discard changes")').click({ timeout: 600 }).catch(() => {});
+    return r;
   };
   page.on('console', (m) => m.type() === 'error' && errors.push(`console: ${m.text()}`));
   page.on('response', (r) => r.status() >= 500 && errors.push(`${r.status()} ${r.url()}`));

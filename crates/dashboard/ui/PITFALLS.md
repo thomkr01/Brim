@@ -698,3 +698,7 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 
 ## One searchable picker for channels and roles (2026-11-22)
 - A role or channel is chosen with `form::ListPick` (type to search, or open the list), never a native `<select>`; many of them are chips plus search (`channels`/`roles` kinds). Focus empties the box so the whole list shows; leaving puts the pick back. "Pick, then Add" controls keep the pick in a signal, not a `NodeRef` to a select.
+
+## The release browser test waited for a page the leave guard held (2026-11-22)
+- Root cause: `tests/e2e/dashboard.js` changed the Verification page ("+" on the captcha preview) and then did `page.goto` to the Messages page. That is only a hash change, so the new leave guard (`guard::hold`) put the address back and asked "Unsaved changes". The Messages page never opened and "Add new message" timed out in the v1.2.0 release run. The e2e job runs only on a tag, so main stayed green.
+- **Rule:** a step in `dashboard.js` that leaves a page it edited goes through the shared `page.goto` wrapper, which answers "Discard changes" when the dialog shows. A new page guard needs no test change; a page that keeps edits on purpose must be tested with its own click.
