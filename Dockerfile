@@ -72,7 +72,7 @@ EXPOSE 8090
 CMD ["brim-mcp"]
 
 # Its own stage so Dependabot (which reads FROM lines only) proposes new digests.
-FROM docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d AS dockercli
+FROM docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509b7d7a7030740d6d AS dockercli
 
 # psql and the libraries it loads, copied out of the official Postgres image (the same pinned image the
 # updater used to be built on), so the updater is plain Alpine plus these files and no package is installed.
