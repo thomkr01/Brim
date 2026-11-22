@@ -57,6 +57,8 @@ pub fn SecureAccount(me: Signal<Option<Value>>) -> impl IntoView {
             move |v| {
                 key.set(String::new());
                 code.set(String::new());
+                // The session is gone: a later 401 must not send this page to sign-in (`reply`).
+                crate::common::signed_out();
                 done.set(Some(v));
             },
         ))

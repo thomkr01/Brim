@@ -444,7 +444,8 @@ pub fn DiscordRules(guild: String) -> impl IntoView {
                     rules.set(v.as_array().cloned().unwrap_or_default());
                     msg.clear();
                 }
-                Err(e) => msg.err(e),
+                // A failed load is no empty list: only the error shows.
+                Err(e) => return msg.err(e),
             }
             loaded.set(true);
         })

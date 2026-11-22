@@ -291,6 +291,14 @@ fn nav_key(p: &str) -> &str {
 
 /// "Module › Page" for a page in a sidebar group: ((group name, link to the group's first page this viewer
 /// may open), page name).
+/// The card of a hidden page, or of a server whose access answer failed (with a retry).
+fn no_access(access: Access, failed: bool, text: &'static str) -> AnyView {
+    if failed {
+        return view! { <div class="card empty"><Pose pose=Brim::Stop class="pose-top" /><h2>"Could not load your access"</h2><p>"Brim could not load what you may see on this server. Check your connection and try again."</p><button on:click=move |_| access.tick.update(|n| *n += 1)>"Try again"</button></div> }.into_any();
+    }
+    view! { <div class="card empty"><Pose pose=Brim::Stop class="pose-top" /><h2>"No access"</h2><p>{text}</p></div> }.into_any()
+}
+
 fn module_of(guild: &str, p: &str, visible: impl Fn(&str) -> bool) -> Option<((String, String), String)> {
     let key = nav_key(p);
     NAV.iter().find_map(|(grp, items)| {
@@ -762,10 +770,13 @@ fn App() -> impl IntoView {
             *cfg_guild.borrow_mut() = g.clone();
         }
         spawn_local(async move {
-            // A failed request shows the pages as before (the server still refuses), not a skeleton forever.
             let v = api("GET", &format!("/api/guilds/{g}/access"), None)
                 .await
-                .unwrap_or_else(|_| serde_json::json!({ "guild": g }));
+                .ok()
+                // A 200 without a body (proxy, cut answer) is no answer: it left the page on its skeleton.
+                .filter(|v| v["guild"].is_string())
+                // Failed: nothing is shown as allowed (the server still refuses); the page offers a retry.
+                .unwrap_or_else(|| serde_json::json!({ "guild": g, "failed": true }));
             // A late answer for a server the user already left must not overwrite the new one; on a
             // page without a server only the last server's answer counts.
             let Some(now) = guild.try_get_untracked() else {
@@ -797,12 +808,20 @@ fn App() -> impl IntoView {
                     .pages
                     .with(|a| a["guild"].as_str() == Some(g.as_str())) =>
             {
-                access.of(p)
+                // "failed" apart from "hidden", so a retry that changes the kind rebuilds the card.
+                if access.pages.with(|a| a["failed"] == true) { "failed".to_string() } else { access.of(p) }
             }
             (Some(g), Some(_)) if g.bytes().all(|b| b.is_ascii_digit()) => "loading".to_string(),
             (_, Some(p)) => access.of(p),
             _ => String::new(),
         }
+    });
+    // Home of a server with no level, or whose access failed. A memo, so an unchanged answer does not
+    // rebuild the page.
+    // Some(failed), so a retry that changes the kind rebuilds the card.
+    let home_blocked = Memo::new(move |_| {
+        let r = route.get();
+        access.pages.with(|a| (r.len() == 1 && a["guild"].as_str() == r.first().map(String::as_str) && (a["level"] == "none" || a["failed"] == true)).then(|| a["failed"] == true))
     });
     // 2FA on request, for protected changes made in Discord (the bot checks this step-up).
     let two_fa = step_up();
@@ -858,13 +877,7 @@ fn App() -> impl IntoView {
                 });
                 set_guilds.set(list);
             }
-            // Discord refused the login (app removed or token expired): the session is gone, log in again.
-            Err(e) if e == "login required" => {
-                let _ = web_sys::window()
-                    .unwrap()
-                    .location()
-                    .set_href("/auth/login");
-            }
+            // "login required" (Discord refused the login) never lands here: `api` sends a 401 to sign-in.
             Err(e) => set_guilds_note.set(format!("Could not load servers: {e}")),
         }
     };
@@ -906,15 +919,20 @@ fn App() -> impl IntoView {
     };
     // Nothing is drawn until /api/me answers: the landing page drawn first showed for a moment
     // after every login before the app replaced it.
-    let checked = RwSignal::new(false);
+    let (checked, me_err) = (RwSignal::new(false), RwSignal::new(None::<String>));
     spawn_local(async move {
         let r = api("GET", "/api/me", None).await;
         // `me` first: the landing page must not show between the two sets.
         let ok = r.is_ok();
-        if let Ok(v) = r {
-            CSRF.with(|c| *c.borrow_mut() = v["csrf"].as_str().unwrap_or("").to_string());
-            set_enrolled.set(v["totp_enrolled"].as_bool().unwrap_or(false));
-            set_me.set(Some(v));
+        match r {
+            Ok(v) => {
+                CSRF.with(|c| *c.borrow_mut() = v["csrf"].as_str().unwrap_or("").to_string());
+                set_enrolled.set(v["totp_enrolled"].as_bool().unwrap_or(false));
+                set_me.set(Some(v));
+            }
+            // Only "not signed in" is the landing page; a failed server is said as it is.
+            Err(e) if e != "login required" => me_err.set(Some(e)),
+            Err(_) => {}
         }
         checked.set(true);
         if ok {
@@ -924,7 +942,7 @@ fn App() -> impl IntoView {
     // The header logo opens the public front page, also when signed in.
     let front = move || route.get().first().is_some_and(|a| a == "front");
     view! {
-        <Show when=move || me.get().is_some() && !front() fallback=move || if !checked.get() { view! { <main class="boot"><Working /></main> }.into_any() } else if route.get().first().is_some_and(|a| a == "commands") { view! { <main><Commands /></main> }.into_any() } else { view! { <landing::Landing signed_in=me.get().is_some() /> }.into_any() }>
+        <Show when=move || me.get().is_some() && !front() fallback=move || if !checked.get() { view! { <main class="boot"><Working /></main> }.into_any() } else if let Some(e) = me_err.get() { view! { <main><div class="card empty"><h2>"Brim could not load your sign-in"</h2><p>{e}</p><button on:click=|_| { let _ = web_sys::window().unwrap().location().reload(); }>"Try again"</button></div></main> }.into_any() } else if route.get().first().is_some_and(|a| a == "commands") { view! { <main><Commands /></main> }.into_any() } else { view! { <landing::Landing signed_in=me.get().is_some() /> }.into_any() }>
             <header>
                 <button class="ghost menu-btn" class:hide=move || route.get().is_empty() aria-label="menu" aria-expanded=move || nav_open.get().to_string() on:click=move |_| set_nav_open.update(|o| *o = !*o)>{icons::icon("menu")}</button>
                 <a class="logo" href="#/front" aria-label="Brim front page"><img src="/logo.svg" alt="" width="32" height="32" /><span>"Brim"</span></a><Show when=move || guild.get().is_some()><SearchBox guild pages=pages.get_value() /></Show><span class="sp"></span>
@@ -934,7 +952,7 @@ fn App() -> impl IntoView {
                 <button class="ghost" aria-label="turn animations on or off" title="Animations on or off" on:click=|_| toggle_motion()>{icons::icon("sparkle")}</button>
                 <details>
                     <summary aria-label="account menu">{move || me.get().and_then(|m| m["username"].as_str().and_then(|u| u.chars().next()).map(|c| c.to_uppercase().to_string())).unwrap_or_default()}</summary>
-                    <div><a href="#/">"Servers"</a><a class="m-only" href="#/commands">"Commands"</a><Show when=move || me.get().is_some_and(|m| m["bot_owner"] == true)><a class="m-only" href="#/update">"Update"</a><a href="#/mcp-tokens">"MCP tokens"</a><a href="#/raiders">"Raider List review"</a><a href="#/data-requests">"Data requests"</a><a href="#/secure-account">"Secure my account"</a></Show><a href="#/raider-appeal">"Raider List status"</a><button title="Lets you make protected changes in Discord for 10 minutes" on:click=move |_| two_fa.set(true)>"Confirm 2FA"</button><button on:click=move |_| spawn_local(async { let _ = api("POST", "/auth/logout", None).await; web_sys::window().unwrap().location().reload().ok(); })>"Logout"</button></div>
+                    <div><a href="#/">"Servers"</a><a class="m-only" href="#/commands">"Commands"</a><Show when=move || me.get().is_some_and(|m| m["bot_owner"] == true)><a class="m-only" href="#/update">"Update"</a><a href="#/mcp-tokens">"MCP tokens"</a><a href="#/raiders">"Raider List review"</a><a href="#/data-requests">"Data requests"</a><a href="#/secure-account">"Secure my account"</a></Show><a href="#/raider-appeal">"Raider List status"</a><button title="Lets you make protected changes in Discord for 10 minutes" on:click=move |_| two_fa.set(true)>"Confirm 2FA"</button><button on:click=move |_| spawn_local(async { let _ = api("POST", "/auth/logout", None).await; signed_out(); web_sys::window().unwrap().location().reload().ok(); })>"Logout"</button></div>
                 </details>
             </header>
             <Toast msg=switch_msg /><StepUp enrolled /><Dialog /><RescuePrompt guild page=Signal::derive(move || route.get().get(1).cloned()) />
@@ -1038,12 +1056,14 @@ fn App() -> impl IntoView {
                         [a] if a == "secure-account" => view! { <secure::SecureAccount me=Signal::derive(move || me.get()) /> }.into_any(),
                         [a] if a == "raider-appeal" => view! { <RaiderAppeal /> }.into_any(),
                         [a, g] if a == "appeal" =>view! { <AppealForm guild=g.clone() /> }.into_any(),
+                        // No level on this server, or its access did not load: no Home (it offered the wizard).
+                        [g] if home_blocked.get().is_some() => view! { <Head guild=g.clone() page="Home".to_string() />{no_access(access, home_blocked.get_untracked() == Some(true), "You have no access to this server in Brim. Ask a server owner if you need it.")} }.into_any(),
                         [g] => view! { <Head guild=g.clone() page="Home".to_string() /><home::Home guild=g.clone() /> }.into_any(),
                         [g, p, rest @ ..] => {
                             // Nothing of the page is built before its access is known, so a hidden page loads nothing.
                             let acc = page_access.get();
-                            if acc == "loading" || acc == "hidden" {
-                                let body = if acc == "hidden" { view! { <div class="card empty"><Pose pose=Brim::Stop class="pose-top" /><h2>"No access"</h2><p>"Your permit does not give access to this page. Ask a server owner if you need it."</p></div> }.into_any() } else { view! { <div class="skel"></div> }.into_any() };
+                            if acc == "loading" || acc == "hidden" || acc == "failed" {
+                                let body = if acc != "loading" { no_access(access, acc == "failed", "Your permit does not give access to this page. Ask a server owner if you need it.") } else { view! { <div class="skel"></div> }.into_any() };
                                 return view! { <Head guild=g.clone() page=title(p).0 />{body} }.into_any();
                             }
                             let sec = |name: &str, part: &str| view! { <Section guild=g.clone() name=name.to_string() part=part.to_string() /> }.into_any();

@@ -54,7 +54,8 @@ pub fn Backups(guild: String, open: String) -> impl IntoView {
             spawn_local(async move {
                 match api("GET", &format!("/api/guilds/{g}/backups"), None).await {
                     Ok(v) => rows.set(v.as_array().cloned().unwrap_or_default()),
-                    Err(e) => msg.err(e),
+                    // A failed load is no empty list: only the error shows.
+                    Err(e) => return msg.err(e),
                 }
                 loaded.set(true);
             })

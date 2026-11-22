@@ -17,6 +17,11 @@ pub fn Fade(#[prop(into)] when: Signal<bool>, children: ChildrenFn) -> impl Into
 
 thread_local! { pub static CSRF: RefCell<String> = const { RefCell::new(String::new()) }; }
 
+/// After a logout: no later 401 may send the page to sign-in (that signed the person in again).
+pub fn signed_out() {
+    CSRF.with(|c| c.borrow_mut().clear());
+}
+
 fn request(method: &str, path: &str) -> gloo_net::http::RequestBuilder {
     let csrf = CSRF.with(|c| c.borrow().clone());
     match method {
@@ -46,11 +51,22 @@ pub async fn api_file(method: &str, path: &str, file: web_sys::Blob) -> Result<V
 }
 
 async fn reply(req: gloo_net::http::Request) -> Result<Value, String> {
+    // Logout itself may meet a dead session: that 401 must not send the person to sign-in again.
+    let own = !req.url().contains("/auth/");
     let resp = req.send().await.map_err(|e| {
         format!("Could not reach the dashboard server. Check your connection and try again. ({e})")
     })?;
     let (ok, status, status_text) = (resp.ok(), resp.status(), resp.status_text());
     let v: Value = resp.json().await.unwrap_or(Value::Null);
+    // A signed-in page whose session ended (expired, idle, deleted): back to sign-in and then to this
+    // page, not an error under a shell that no longer works. Signed out, CSRF is empty and the page
+    // (landing, appeal, verify) handles the 401 itself.
+    if status == 401 && own && CSRF.with(|c| !c.borrow().is_empty()) {
+        if let Some(w) = web_sys::window() {
+            let hash = w.location().hash().unwrap_or_default();
+            let _ = w.location().set_href(&format!("/auth/login?next=/{}", js_sys::encode_uri_component(&hash)));
+        }
+    }
     if ok {
         Ok(v)
     } else {
@@ -816,16 +832,19 @@ pub struct Access {
 }
 
 impl Access {
-    /// Unknown pages and a not yet loaded answer count as `full`; the server still refuses.
+    /// Unknown pages and a not yet loaded answer count as `full`; the server still refuses. A user with
+    /// no level on this server sees no page (Home offered the wizard to them). A failed answer
+    /// (`failed`) hides every page and button until a retry loads it.
     pub fn of(&self, page: &str) -> String {
         self.pages
-            .with(|p| p["pages"][page].as_str().unwrap_or("full").to_string())
+            .with(|p| if p["level"] == "none" || p["failed"] == true { "hidden" } else { p["pages"][page].as_str().unwrap_or("full") }.to_string())
     }
     /// The user's level as a rank (viewer 1 .. owner 4) for buttons on pages everyone may open.
     /// Unknown counts as owner; the server still refuses.
     pub fn rank(&self) -> u8 {
         self.pages.with(|p| match p["level"].as_str() {
             Some("none") => 0,
+            _ if p["failed"] == true => 0,
             Some("viewer") => 1,
             Some("editor") => 2,
             Some("admin") => 3,

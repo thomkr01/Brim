@@ -193,7 +193,8 @@ pub fn Cases(guild: String) -> impl IntoView {
                     more.set(v["more"] == true);
                     rows.set(list)
                 }
-                Err(e) => msg.err(e),
+                // A failed load is no empty list: only the error shows.
+                Err(e) => return msg.err(e),
             }
             loaded.set(true);
         });

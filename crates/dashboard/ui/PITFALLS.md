@@ -680,3 +680,13 @@ The new top bar rule wrote `padding:... calc((100% - 992px) / 2)`. `tools/ui-siz
 - At 375 px a part card held icon, text, switch and chevron; the title wrapped in an 80 px column and the chevron left the card.
 - Root cause: the switches were tested only on the good path, as Owner, at desktop width.
 - **Rule:** a control that reads the state again after a save reports a failed read as an error. A part switch shows what runs (`part_on` reads the module too), and its `may` asks for every bar the server checks for that write. A card row that adds a control is measured at 375 px.
+
+## A dead session, a failed load and level none showed false pages (bug hunt 2026-11-22)
+
+- A session that ended while a page was open (expired, idle, deleted) kept the signed-in shell; Cases said "login required" next to "No cases found.", with no way back to sign-in.
+- Six list pages set `loaded` after a failed load too, so the empty-list text ("No cases found.", "No backups yet.", "No open tickets.") showed under the error as if it were real data.
+- A failed access answer showed a Viewer every page (it counted as Owner).
+- `/api/me` failing (500, no connection) showed a signed-in person the public front page. An access answer of 200 with no body left the page on its skeleton. A signed-in member with no level got Home with "Open the wizard".
+- Root cause: the pages were tested only with a live session and good answers.
+- **Rule:** `reply` sends a 401 on a signed-in page (CSRF set) to sign-in with `next`; logout and Secure my account call `signed_out()` first, so a late 401 does not sign the person in again. A list sets `loaded` only after a good load. Only "login required" from `/api/me` is the front page; other errors say so. An access answer counts only with its `guild`; a failed one fails closed (`failed`: no page, rank 0, a Try again card). Level `none` sees no page and no Home.
+

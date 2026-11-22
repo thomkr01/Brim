@@ -123,8 +123,9 @@ pub fn Commands() -> impl IntoView {
     let guilds = use_context::<ReadSignal<Vec<Value>>>();
     let denied = move |name: &str| {
         access.is_some_and(|a| {
+            // A failed access answer is unknown, so every command shows as not allowed (fail closed).
             a.pages.with(|p| {
-                p["commands_denied"]
+                p["failed"] == true || p["commands_denied"]
                     .as_array()
                     .is_some_and(|d| d.iter().any(|n| n == name))
             })

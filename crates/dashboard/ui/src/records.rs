@@ -47,7 +47,8 @@ pub(crate) fn fetch(path: String, rows: WriteSignal<Vec<Value>>, msg: Msg, loade
                 msg.clear();
                 rows.set(v.as_array().cloned().unwrap_or_default())
             }
-            Err(e) => msg.err(e),
+            // A failed load is no empty list: only the error shows.
+            Err(e) => return msg.err(e),
         }
         loaded.set(true);
     });

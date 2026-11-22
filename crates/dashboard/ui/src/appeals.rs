@@ -44,7 +44,8 @@ pub fn AppealList(guild: String) -> impl IntoView {
                     msg.clear();
                     set_rows.set(v.as_array().cloned().unwrap_or_default())
                 }
-                Err(e) => msg.err(e),
+                // A failed load is no empty list: only the error shows.
+                Err(e) => return msg.err(e),
             }
             loaded.set(true);
         })
@@ -150,7 +151,8 @@ pub fn Blacklist(
             .await
             {
                 Ok(v) => set_rows.set(v.as_array().cloned().unwrap_or_default()),
-                Err(e) => msg.err(e),
+                // A failed load is no empty list: only the error shows.
+                Err(e) => return msg.err(e),
             }
             loaded.set(true);
         })
