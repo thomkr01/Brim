@@ -81,6 +81,7 @@ jobs:
     permissions:
       packages: write
       id-token: write
+      actions: read # only to see when the early build of the Image cache workflow ends
       attestations: write
     # One group per image and release: a re-run of a release replaces its own build, never another
     # release's (one group for the matrix would make its legs cancel each other).
@@ -101,6 +102,28 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The Image cache workflow builds this image while CI runs. A build that starts before it ends
+      # finds an empty cache and does all the work again. This step only waits: the gate above has
+      # decided, and the build below runs whatever this step finds.
+      - name: Wait for the early build of this release
+        continue-on-error: true
+        timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: Image cache for ${{ github.event.workflow_run.head_branch }} at ${{ github.event.workflow_run.head_sha }}
+          JOB: build (${{ matrix.target }})
+        run: |
+          for _ in $(seq 40); do
+            id=$(gh api "repos/$GH_REPO/actions/workflows/image-cache.yml/runs?per_page=30" \
+              --jq '[.workflow_runs[] | select(.display_title == env.TITLE)][0].id // empty') || break
+            [ -n "$id" ] || { echo "No early build for this release."; exit 0; }
+            st=$(gh api "repos/$GH_REPO/actions/runs/$id/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name == env.JOB)][0].status // "completed"') || break
+            [ "$st" = completed ] && { echo "The early build has ended."; exit 0; }
+            sleep 30
+          done
+          echo "Building without waiting longer."
       - name: Short sha
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}

@@ -1457,6 +1457,9 @@ Fix with `cargo update -p <crate>`. A new dependency can also pull a crate back 
 **Each release compiled every Rust library again.** (CI speed look, 2026-11-21)
 The builder stage started with `COPY . .`, so any change in the code threw away the layer that held the compiled libraries, and each image build took 8 to 10 minutes. *Avoid:* the Dockerfile copies only the manifests, the lock file and `vendor/` first, builds the libraries against empty stand-in crates, and then deletes every `brim*` artifact before the real code is copied, so no stand-in output can reach an image. A new workspace crate needs its own `COPY crates/<name>/Cargo.toml` line and a stand-in in that step; without it the build stops with a manifest error.
 
+**The early image build ran beside the real one and saved nothing.** (v1.1.0 release, 2026-11-22)
+CI on the tag ended in 7 minutes, the Image cache builds in 8 to 11.5, so Images started while the cache was still empty and compiled everything again. *Avoid:* each Images build job first waits (at most 20 minutes, and only waits) for the Image cache build job of the same release and target to end. The gate decides before that step; the wait never changes what is published.
+
 ## 8. Tests
 
 **Two tests waited 30 seconds on a database that never answers.** (CI speed look, 2026-11-21)
