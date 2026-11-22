@@ -635,9 +635,12 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat-tab[aria-pressed="true"] .feat-dot { background:var(--copper); }
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
 .land .feat-shot { position:relative; flex:1.5 1 0; min-width:0; isolation:isolate; }
-.land .feat-shot { height:calc(var(--sh, 0px) * var(--k, 1)); }
+.land .feat-shot { display:grid; grid-template-columns:minmax(0,1fr); height:calc(var(--sh, 0px) * var(--k, 1)); }
+/* Switching lines: the old scene fades out while the new one fades in, stacked in the same box. */
+.land .feat-shot > .scene { grid-area:1/1; align-self:start; opacity:0; pointer-events:none; transition:opacity .3s ease; }
+.land .feat-shot > .scene.on { opacity:1; pointer-events:auto; }
 /* A scene is drawn at one natural width and scaled to fit (landing.rs sets --k, --dx and --sh). */
-.land .scene { z-index:1; text-align:left; width:calc(var(--space-56) * 11); translate:var(--dx, 0px) 0; scale:var(--k, 1); transform-origin:0 0; position:relative; isolation:isolate; display:grid; grid-template-columns:repeat(12,1fr); align-items:start; padding:var(--space-16) 0 var(--space-8); animation:feat-in .4s ease; }
+.land .scene { z-index:1; text-align:left; width:calc(var(--space-56) * 11); translate:var(--dx, 0px) 0; scale:var(--k, 1); transform-origin:0 0; position:relative; isolation:isolate; display:grid; grid-template-columns:repeat(12,1fr); align-items:start; padding:var(--space-16) 0 var(--space-8); }
 .land .win { position:relative; overflow:hidden; min-width:calc(var(--space-56) * 7); border-radius:var(--radius-card); background:#313338; box-shadow:0 var(--space-24) var(--space-48) #0008; transition:transform .4s cubic-bezier(.34,1.56,.64,1); min-width:0; }
 .land .win .dmsg { margin:0; }
 .land .win:hover { transform:translateY(-2%) !important; z-index:9 !important; }
@@ -684,17 +687,19 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .badge { position:absolute; z-index:5; right:0; top:0; min-width:var(--space-56); padding:var(--space-8) var(--space-16); border-radius:var(--radius-button); background:linear-gradient(135deg,var(--accent),var(--copper)); color:var(--on-primary); font-size:2em; font-weight:800; text-align:center; box-shadow:0 0 var(--space-32) #f07f2299; }
+.land .fbadges { position:absolute; inset:0; z-index:5; pointer-events:none; }
+.land .fb { position:absolute; width:var(--space-44); height:var(--space-44); display:grid; place-items:center; background:var(--accent); color:#fff; fill:currentColor; clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); animation:feat-wander 8s ease-in-out infinite alternate; --wx:.6rem; --wy:-.6rem; --wr:8deg; }
+.land .fb svg { width:var(--space-24); height:var(--space-24); }
+.land .fb:nth-child(1) { left:-4%; top:-6%; } .land .fb:nth-child(2) { right:-4%; top:-8%; background:var(--copper); animation-delay:-2s; } .land .fb:nth-child(3) { left:-5%; bottom:-6%; background:var(--copper); animation-delay:-4s; } .land .fb:nth-child(4) { right:-3%; bottom:-4%; animation-delay:-6s; }
 .land .scene > i { position:absolute; z-index:0; pointer-events:none; }
 .land .spark, .land .hex { width:var(--space-24); height:var(--space-24); background:var(--accent); animation:feat-twinkle 3s ease-in-out infinite, feat-wander 9s ease-in-out infinite alternate; animation-duration:var(--td,3s), var(--wd,9s); animation-delay:var(--dl,0s), var(--dl,0s); clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark.lg { width:var(--space-44); height:var(--space-44); background:#fff; }
 .land .hex.lg { width:var(--space-36); height:var(--space-36); }
 .land .hex { background:var(--copper); clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%); filter:none; }
 .land .mote { width:var(--space-8); height:var(--space-8); border-radius:50%; background:#ffd9a0; box-shadow:0 0 var(--space-12) var(--space-4) var(--accent); opacity:0; animation:feat-rise 6s ease-in-out infinite; }
-.land .burst { z-index:0; left:12%; top:30%; width:var(--space-56); height:var(--space-56); margin:calc(-1 * var(--space-28)); border-radius:50%; background:radial-gradient(#ffd9a0,#f07f2288 40%,#0000 70%); animation:feat-burst .7s ease-out both; }
 @keyframes feat-twinkle { 50% { scale:.5; opacity:.5; } }
 @keyframes feat-wander { to { translate:var(--wx,0) var(--wy,0); rotate:var(--wr,0deg); } }
 @keyframes feat-rise { 0% { transform:translate(0,0); opacity:0; } 20% { opacity:1; } 100% { transform:translate(var(--sx,0%),var(--sy,-100%)); opacity:0; } }
-@keyframes feat-burst { from { transform:scale(.2); opacity:1; } to { transform:scale(4); opacity:0; } }
 @keyframes feat-shimmer { 0%,60% { transform:translateX(-100%); } 100% { transform:translateX(100%); } }
 .land .land-edit { margin:calc(var(--space-56) * 3) auto 0; max-width:min(36em,100%); font-size:1.5em; font-weight:600; }
 .land .u { background:linear-gradient(var(--accent),var(--accent)) 0 100% / 100% var(--space-4) no-repeat; padding-bottom:var(--space-4); }
@@ -705,7 +710,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 /* Each block fades in as it scrolls into view. Outside the animation range the block is fully shown, so nothing hides without support. */
 @supports (animation-timeline:view()) { .land .feat, .land .land-edit, .land .land-close { animation:feat-reveal linear; animation-timeline:view(); animation-range:entry 0% entry 60%; } }
 @keyframes feat-reveal { from { opacity:0; transform:translateY(var(--space-24)); } }
-@media (prefers-reduced-motion:reduce) { .land .land-edit, .land .land-close, .land .win, .land .feat, .land .scene, .land .spark, .land .hex, .land .mote, .land .burst, .land .win::after { transition:none; animation:none; } .land .mote, .land .burst { display:none; } }
+@media (prefers-reduced-motion:reduce) { .land .land-edit, .land .land-close, .land .win, .land .feat, .land .feat-shot > .scene, .land .spark, .land .hex, .land .mote, .land .win::after { transition:none; animation:none; } .land .mote { display:none; } }
 @media (max-width:760px) {
   .land .feat, .land .feat.flip { flex-direction:column; gap:var(--space-16); padding:var(--space-32) 0; text-align:center; border-bottom:1px solid var(--surface); }
   .land .feat-tabs { align-items:center; }

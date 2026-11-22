@@ -10,6 +10,8 @@ enum Item {
     P(&'static str, &'static [&'static str]),
     /// The same sample three times, each with its own edit from EDITS.
     X(&'static str),
+    /// Hex badges with the feed sources Brim supports, at the corners of the scene.
+    F,
     /// The Channel Setup grid: role columns, rows of (channel or category name, one mark per role).
     G(&'static [&'static str], &'static [(&'static str, &'static [&'static str])]),
     /// A dashboard list card: title, header button, rows of (name, grey text, action pills joined by |).
@@ -19,7 +21,7 @@ enum Item {
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
 }
-use Item::{C, E, G, L, P, T, X};
+use Item::{C, E, F, G, L, P, T, X};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -61,6 +63,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Build any message in the editor", "side", &[P("Message Builder", &["?Edit the message with the visual fields.", "Title|Verification Required", "Colour|Green", "Buttons", "Schedule", ">Preview", ">Post"]), X("verify_panel")]),
         ("See every change in History", "diag", &[L("History", "", &[("Welcome message", "Brim · today", "Diff|Revert"), ("Log channels", "Mika · yesterday", "Diff|Revert"), ("Anti-raid", "Sam · Nov 20", "Diff|Revert")])]),
         ("Set up channels and roles", "diag", &[G(&["Everyone", "Member", "Moderator"], &[("\u{25be} Info", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("# rules", &["\u{2713}", "\u{2713}", "\u{2713}"]), ("\u{25be} Chat", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# general", &["\u{2717}", "\u{2713}", "\u{2713}"]), ("# mod-chat", &["\u{2717}", "\u{2717}", "\u{2713}"])])]),
+        ("Follow feeds into a channel", "diag", &[L("Feeds", "Add feed", &[("Channel uploads", "YouTube", "Edit|Delete"), ("Blog posts", "RSS", "Edit|Delete"), ("Releases", "GitHub", "Edit|Delete"), ("Pipelines", "GitLab", "Edit|Delete")]), F]),
         ("Back up and load a layout", "tall", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Preview & load|Delete"), ("#9c20", "Brim · yesterday", "View|Preview & load|Delete"), ("#77de", "Brim · Nov 18", "View|Preview & load|Delete")])])]),
 ];
 
@@ -72,7 +75,7 @@ fn fit() {
     for i in 0..boxes.length() {
         use wasm_bindgen::JsCast;
         let Some(b) = boxes.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
-        let Some(s) = b.query_selector(".scene").ok().flatten().and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
+        let Some(s) = b.query_selector(".scene.on").ok().flatten().and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok()) else { continue };
         let w = f64::from(b.client_width());
         let k = (w / 616.0).min(0.85).min((520.0 / f64::from(s.offset_height())).max(0.55));
         let st = b.style();
@@ -237,8 +240,8 @@ pub fn Landing(
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot" aria-live="polite">
-                                {move || view! { <div class=format!("scene l-{}", tabs[on.get()].1)><i class="burst" aria-hidden="true"></i>{effects()}{tabs[on.get()].2.iter().map(|it| match *it {
+                            <div class="feat-shot">
+                                {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{effects()}{tab.2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{crate::discord::show_msg(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card"><b class="ph">{name}</b>{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
                                         (Some(t), _, _) => view! { <p class="muted">{t}</p> }.into_any(),
@@ -251,6 +254,12 @@ pub fn Landing(
                                     G(roles, rows) => view! { <div class="win lcard card"><div class="lhead"><b>"Channel Setup"</b></div><p class="muted">"Each role's Discord permissions here: \u{2713} allow, \u{2717} deny, \u{2013} neutral."</p>
                                         <table class="data matrix"><thead><tr><th></th>{roles.iter().map(|r| view! { <th>{*r}</th> }).collect_view()}</tr></thead><tbody>{rows.iter().map(|(name, marks)| view! { <tr class:cat=name.starts_with('\u{25be}')><td><b>{*name}</b></td>{marks.iter().map(|m| view! { <td><span class="gmark" class:al=*m == "\u{2713}" class:de=*m == "\u{2717}">{*m}</span></td> }).collect_view()}</tr> }).collect_view()}</tbody></table>
                                         <div class="lhead"><span class="sel">"Member \u{25be}"</span><span class="pill">"Add role"</span></div></div> }.into_any(),
+                                    F => view! { <span class="fbadges" aria-hidden="true">
+                                        <span class="fb"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg></span>
+                                        <span class="fb"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2" /><path d="M4 4a16 16 0 0 1 16 16h-3A13 13 0 0 0 4 7zM4 10a10 10 0 0 1 10 10h-3a7 7 0 0 0-7-7z" /></svg></span>
+                                        <span class="fb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="8" r="2" /><path d="M6 8v8M18 10c0 4-6 3-10 6" /></svg></span>
+                                        <span class="fb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="19" r="2" /><path d="M12 7v4M6 17v-3h12v3M12 11v3" /></svg></span>
+                                    </span> }.into_any(),
                                     X(key) => {
                                         let m = sample(key);
                                         EDITS.iter().map(|(color, text)| {
@@ -264,7 +273,7 @@ pub fn Landing(
                                     }
                                     C(text) => view! { <div class="win cmd">{crate::discord::chat("Mika", view! { <span class="md">{text}</span> }.into_any())}</div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
-                                }).collect_view()}</div> }}
+                                }).collect_view()}</div> }).collect_view()}
                             </div>
                         </section>
                     }
