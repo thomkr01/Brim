@@ -2,6 +2,7 @@
 //! make them; everyone with access sees them. The next runs come from the server, worked out on the
 //! real calendar in the rule's time zone.
 use crate::common::*;
+use crate::msgparts::RuleList;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
@@ -273,49 +274,10 @@ pub fn automate_tab(
     picker: impl Fn(RwSignal<Value>) + Copy + Send + Sync + 'static,
     msg: Msg,
 ) -> impl IntoView {
-    let embed = Signal::derive(move || cur.with(|c| c["id"].as_i64()));
-    // Why a schedule cannot be on yet: unsaved changes (a schedule sends the saved message), or a
-    // message that is not ready.
-    let ready_why = Signal::derive(move || {
-        if dirty.get() {
-            Some("save or cancel your changes to the message first".into())
-        } else {
-            cur.with(|c| c["missing"].as_str().map(String::from))
-        }
-    });
-    let base = StoredValue::new(base);
-    let rules = RwSignal::new(Vec::<Value>::new());
-    let editing = RwSignal::new(None::<RwSignal<Value>>);
-    // The open editor's draft, made here: a signal made in a click handler belongs to the list,
-    // and a list redraw would drop it while the editor still reads it.
-    let draft = RwSignal::new(Value::Null);
-    let open_editing = move |v: Value| {
-        draft.set(v);
-        editing.set(Some(draft))
-    };
+    let l = RuleList::new(base.clone(), "rules", "missing", cur, dirty, rank, msg);
+    let RuleList { embed, ready_why, rows: rules, editing, busy, locked, .. } = l;
+    let (open_editing, url, load) = (move |v| l.open(v), move || l.url(), move || l.load());
     let next = RwSignal::new(json!({}));
-    let busy = RwSignal::new(false);
-    let locked = Signal::derive(move || rank.get() < 3);
-    let url = move || embed.get_untracked().map(|id| format!("{}/{id}/rules", base.get_value()));
-    let load = move || {
-        let Some(u) = url() else { return rules.set(vec![]) };
-        let asked = embed.get_untracked();
-        spawn_local(async move {
-            let r = api("GET", &u, None).await;
-            // Another message was opened meanwhile, or the page left.
-            if embed.try_get_untracked() != Some(asked) {
-                return;
-            }
-            match r {
-                Ok(v) => rules.set(v.as_array().cloned().unwrap_or_default()),
-                Err(e) => msg.err(e),
-            }
-        })
-    };
-    Effect::new(move |_| {
-        embed.track();
-        load()
-    });
     // The next runs of the rule being edited, asked again when its times or zone change.
     // `seq` drops an older answer that lands last; another rule starts with no times shown.
     let seq = StoredValue::new(0u32);
@@ -471,7 +433,7 @@ pub fn automate_tab(
             }}
         </div>
         {move || editing.get().map(editor)}
-        {crate::msgtrig::triggers(base.get_value(), cur, dirty, rank, chan_name, picker, msg)}
+        {crate::msgtrig::triggers(base, cur, dirty, rank, chan_name, picker, msg)}
     }
 }
 

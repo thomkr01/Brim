@@ -977,3 +977,79 @@ mod tests {
         assert!(var_at("{server.name}").is_some());
     }
 }
+
+/// The list frame of the schedule, trigger and sticky cards: the open message's `path` rows, the
+/// editor's draft, busy and the rank lock. Opening another message reloads the list, and a list
+/// that lands after that is dropped.
+#[derive(Clone, Copy)]
+pub struct RuleList {
+    pub embed: Signal<Option<i64>>,
+    /// Why a rule cannot be on yet: unsaved changes (it sends the saved message), or the
+    /// message's `missing` reason.
+    pub ready_why: Signal<Option<String>>,
+    pub rows: RwSignal<Vec<Value>>,
+    pub editing: RwSignal<Option<RwSignal<Value>>>,
+    // Made here: a signal made in a click handler belongs to the list, and a list redraw would
+    // drop it while the editor still reads it.
+    draft: RwSignal<Value>,
+    pub busy: RwSignal<bool>,
+    pub locked: Signal<bool>,
+    base: StoredValue<String>,
+    path: &'static str,
+    msg: Msg,
+}
+
+impl RuleList {
+    pub fn new(base: String, path: &'static str, missing: &'static str, cur: RwSignal<Value>, dirty: Memo<bool>, rank: Signal<u8>, msg: Msg) -> Self {
+        let embed = Signal::derive(move || cur.with(|c| c["id"].as_i64()));
+        let ready_why = Signal::derive(move || {
+            if dirty.get() {
+                Some("save or cancel your changes to the message first".to_string())
+            } else {
+                cur.with(|c| c[missing].as_str().map(String::from))
+            }
+        });
+        let l = RuleList {
+            embed,
+            ready_why,
+            rows: RwSignal::new(vec![]),
+            editing: RwSignal::new(None),
+            draft: RwSignal::new(Value::Null),
+            busy: RwSignal::new(false),
+            locked: Signal::derive(move || rank.get() < 3),
+            base: StoredValue::new(base),
+            path,
+            msg,
+        };
+        Effect::new(move |_| {
+            embed.track();
+            l.load()
+        });
+        l
+    }
+
+    pub fn open(self, v: Value) {
+        self.draft.set(v);
+        self.editing.set(Some(self.draft))
+    }
+
+    pub fn url(self) -> Option<String> {
+        self.embed.get_untracked().map(|id| format!("{}/{id}/{}", self.base.get_value(), self.path))
+    }
+
+    pub fn load(self) {
+        let Some(u) = self.url() else { return self.rows.set(vec![]) };
+        let asked = self.embed.get_untracked();
+        spawn_local(async move {
+            let r = api("GET", &u, None).await;
+            // Another message was opened meanwhile, or the page left.
+            if self.embed.try_get_untracked() != Some(asked) {
+                return;
+            }
+            match r {
+                Ok(v) => self.rows.set(v.as_array().cloned().unwrap_or_default()),
+                Err(e) => self.msg.err(e),
+            }
+        })
+    }
+}

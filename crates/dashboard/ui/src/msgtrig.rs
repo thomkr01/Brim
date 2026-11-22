@@ -2,6 +2,7 @@
 //! channels, words and patterns with their own on/off, a "Try a message" box, the answer (channel
 //! or DM, reply), cooldown, delete after, DM on cooldown, and member roles.
 use crate::common::*;
+use crate::msgparts::RuleList;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
@@ -58,53 +59,16 @@ pub fn triggers(
     picker: impl Fn(RwSignal<Value>) + Copy + Send + Sync + 'static,
     msg: Msg,
 ) -> impl IntoView {
-    let embed = Signal::derive(move || cur.with(|c| c["id"].as_i64()));
     // A trigger answer has a member, so member variables are fine there.
-    let ready_why = Signal::derive(move || {
-        if dirty.get() {
-            Some("save or cancel your changes to the message first".to_string())
-        } else {
-            cur.with(|c| c["missing_answer"].as_str().map(String::from))
-        }
-    });
-    let base = StoredValue::new(base);
-    let rules = RwSignal::new(Vec::<Value>::new());
-    let editing = RwSignal::new(None::<RwSignal<Value>>);
-    // The open editor's draft, made here: a signal made in a click handler belongs to the list,
-    // and a list redraw would drop it while the editor still reads it.
-    let draft = RwSignal::new(Value::Null);
-    let open_editing = move |v: Value| {
-        draft.set(v);
-        editing.set(Some(draft))
-    };
-    let busy = RwSignal::new(false);
-    let locked = Signal::derive(move || rank.get() < 3);
+    let l = RuleList::new(base, "triggers", "missing_answer", cur, dirty, rank, msg);
+    let RuleList { embed, ready_why, rows: rules, editing, busy, locked, .. } = l;
+    let (open_editing, url, load) = (move |v| l.open(v), move || l.url(), move || l.load());
     let roles = use_context::<crate::msgparts::Parts>().map(|p| p.roles);
     let role_name = move |id: &str| {
         roles
             .and_then(|r| r.with(|l| l.iter().find(|(i, _)| i == id).map(|(_, n)| n.clone())))
             .unwrap_or_else(|| id.to_string())
     };
-    let url = move || embed.get_untracked().map(|id| format!("{}/{id}/triggers", base.get_value()));
-    let load = move || {
-        let Some(u) = url() else { return rules.set(vec![]) };
-        let asked = embed.get_untracked();
-        spawn_local(async move {
-            let r = api("GET", &u, None).await;
-            // Another message was opened meanwhile, or the page left.
-            if embed.try_get_untracked() != Some(asked) {
-                return;
-            }
-            match r {
-                Ok(v) => rules.set(v.as_array().cloned().unwrap_or_default()),
-                Err(e) => msg.err(e),
-            }
-        })
-    };
-    Effect::new(move |_| {
-        embed.track();
-        load()
-    });
     let save = move |r: Value| {
         let Some(u) = url() else { return };
         busy.set(true);

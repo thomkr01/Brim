@@ -1,6 +1,7 @@
 //! Message Builder phase 7: the sticky card in the Automate tab. One card per channel where the message stays the last
 //! message: its order (with more than one sticky in a channel) and "Also after other bots".
 use crate::common::*;
+use crate::msgparts::RuleList;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
@@ -18,53 +19,10 @@ pub fn sticky_tab(
     picker: impl Fn(RwSignal<Value>) + Copy + Send + Sync + 'static,
     msg: Msg,
 ) -> impl IntoView {
-    let embed = Signal::derive(move || cur.with(|c| c["id"].as_i64()));
     // A sticky has no member, so member variables make the message not ready here.
-    let ready_why = Signal::derive(move || {
-        if dirty.get() {
-            Some("save or cancel your changes to the message first".to_string())
-        } else {
-            cur.with(|c| c["missing"].as_str().map(String::from))
-        }
-    });
-    let base = StoredValue::new(base);
-    let rows = RwSignal::new(Vec::<Value>::new());
-    let editing = RwSignal::new(None::<RwSignal<Value>>);
-    // The open editor's draft, made here: a signal made in a click handler belongs to the list,
-    // and a list redraw would drop it while the editor still reads it.
-    let draft = RwSignal::new(Value::Null);
-    let open_editing = move |v: Value| {
-        draft.set(v);
-        editing.set(Some(draft))
-    };
-    let busy = RwSignal::new(false);
-    let locked = Signal::derive(move || rank.get() < 3);
-    let url = move || {
-        embed
-            .get_untracked()
-            .map(|id| format!("{}/{id}/stickies", base.get_value()))
-    };
-    let load = move || {
-        let Some(u) = url() else {
-            return rows.set(vec![]);
-        };
-        let asked = embed.get_untracked();
-        spawn_local(async move {
-            let r = api("GET", &u, None).await;
-            // Another message was opened meanwhile, or the page left.
-            if embed.try_get_untracked() != Some(asked) {
-                return;
-            }
-            match r {
-                Ok(v) => rows.set(v.as_array().cloned().unwrap_or_default()),
-                Err(e) => msg.err(e),
-            }
-        })
-    };
-    Effect::new(move |_| {
-        embed.track();
-        load()
-    });
+    let l = RuleList::new(base, "stickies", "missing", cur, dirty, rank, msg);
+    let RuleList { embed, ready_why, rows, editing, busy, locked, .. } = l;
+    let (open_editing, url, load) = (move |v| l.open(v), move || l.url(), move || l.load());
     let save = move |r: Value| {
         let Some(u) = url() else { return };
         busy.set(true);
