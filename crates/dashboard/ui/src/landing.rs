@@ -114,16 +114,15 @@ fn effects() -> impl IntoView {
     for n in (1..4).rev() { c.swap(n, (r() * (n + 1) as f64) as usize); }
     (0..3)
         .flat_map(|k| {
-            let (x, y) = (if c[k] % 2 == 0 { 1.0 } else { 93.0 }, 1.0);
-            let (a, b) = if k % 2 == 0 { ("spark ol", "hex") } else { ("hex ol", "spark") };
+            let side = if c[k] % 2 == 0 { "left" } else { "right" };
             let edge = if c[k] < 2 { "top" } else { "bottom" };
-            let inward = if c[k] % 2 == 0 { 9.0 } else { -9.0 };
-            [(a, edge, x, y), (b, edge, x + inward, y + 2.0 + r() * 3.0)]
+            let (a, b) = if k % 2 == 0 { ("spark ol", "hex") } else { ("hex ol", "spark") };
+            [(a, side, edge, 1.0, 1.0), (b, side, edge, 12.0, 0.5 + r() * 1.5)]
         })
-        .map(|(class, edge, x, y)| {
+        .map(|(class, side, edge, x, y)| {
             // Only the spark turns; the shield always stands upright.
             let turn = if class.starts_with("spark") { -40.0 + r() * 80.0 } else { 0.0 };
-            let style = format!("left:{x:.0}%;{edge}:{y:.0}%;rotate:{turn:.0}deg;--gp:{:.0}%", r() * 100.0);
+            let style = format!("{side}:{x:.0}%;{edge}:{y:.0}%;rotate:{turn:.0}deg;--gp:{:.0}%", r() * 100.0);
             view! { <i class=class style=style aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>()
