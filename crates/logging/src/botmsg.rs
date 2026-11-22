@@ -4544,8 +4544,8 @@ fn feeds(out: &mut Vec<Def>) {
         out.push(d);
     }
     // GitHub and GitLab events (feeds plan 9a): by default the embed Discord's own GitHub webhook
-    // posts, recorded from GitHub's sample events on 2026-11-20 (tommybot-data
-    // feeds/github-look-2026-11-20.md). `{headline}` is that embed's title, built per event by
+    // posts, recorded from GitHub's sample events on 2026-11-20 (see the design notes).
+    // `{headline}` is that embed's title, built per event by
     // the dashboard (`feedhooks.rs`); the bot sets the event's own colour while the default is used.
     for (event, name, color) in GITHUB_EVENTS {
         let mut d = def(

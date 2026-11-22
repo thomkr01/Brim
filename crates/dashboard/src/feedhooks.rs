@@ -10,7 +10,7 @@
 //! with the same checks before posting as RSS items.
 //!
 //! The post looks as Discord's own GitHub webhook posts it, recorded from GitHub's sample events
-//! (tommybot-data feeds/github-look-2026-11-20.md): `{headline}` is that embed's title; GitLab
+//! (sample events recorded 2026-11-20, see the design notes): `{headline}` is that embed's title; GitLab
 //! events get the same look.
 use crate::AppState;
 use axum::{
