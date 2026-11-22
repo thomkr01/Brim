@@ -850,4 +850,4 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .l-base > div:nth-of-type(3) { max-height:calc(var(--space-56) * 5); mask-image:linear-gradient(#000 82%, #0000); }
 .land .win.xs { display:flex; flex-direction:column; background:none; box-shadow:none; gap:var(--space-8); overflow:visible; }
 .land .win.xs > * { transform:scale(.98); }
-@media (max-width:760px) { .land .l-base .pane { font-size:1em; } .land .l-base > div:nth-of-type(3) { max-height:calc(var(--space-56) * 6); } }
+@media (max-width:760px) { .land .lcard { min-width:0; } .land .l-base > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } .land .l-base .pane { font-size:1em; } .land .l-base > div:nth-of-type(3) { max-height:calc(var(--space-56) * 6); } }
