@@ -40,13 +40,14 @@ pub fn part_on(cfg: &Value, page: &str) -> Option<bool> {
 }
 
 /// The config section and key behind a module's master switch. Auto Mod, Anti Nuke and Tickets use
-/// their own `enabled`; the others a key of the `modules` section. Moderation has none.
+/// their own `enabled`; the others a key of the `modules` section.
 pub fn switch_of(group: &str) -> Option<(&'static str, &'static str)> {
     match group {
         "Auto Mod" => Some(("automod", "enabled")),
         "Anti Nuke" => Some(("antinuke", "enabled")),
         "tickets" => Some(("tickets", "enabled")),
         "Server Joins" => Some(("modules", "server_joins")),
+        "Moderation" => Some(("modules", "moderation")),
         "Messages" => Some(("modules", "messages")),
         "logging" => Some(("modules", "logging")),
         _ => None,
@@ -72,6 +73,7 @@ pub fn module_on(cfg: &Value, group: &str) -> Option<bool> {
 fn off_effect(section: &str) -> &'static str {
     match section {
         "server_joins" => "New members are not checked: Join Gate, Join Raid, Verification and the Raider List stop. Their settings are kept.",
+        "moderation" => "Staff lose the moderation commands: ban, kick, timeout, warn, purge, slowmode, cases, notes and the others. Members cannot report messages and the catch channel stops. Lock, unlock, unquarantine, unban, untimeout, unwarn and closecase still work, and Anti Nuke and Auto Mod still punish and record cases. Their settings are kept.",
         "messages" => "Triggers, sticky messages, schedules, tags and automatic feed posts stop. Their settings are kept.",
         "logging" => "Event logs (messages, members, channels, roles and more) stop. Security and moderation logs still post.",
         "antinuke" => "Nobody is counted or punished for dangerous actions. Changes only permit holders may make (dangerous permissions, the vanity URL) are still undone.",

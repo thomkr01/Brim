@@ -120,7 +120,7 @@ pub(super) async fn click(
         "kick" => "kick",
         _ => "quarantine",
     };
-    if let Some(no) = crate::cmdcfg::button(app, gid, clicker, &level, cmd).await? {
+    if let Some(no) = crate::cmdcfg::button_settings(app, gid, clicker, &level, cmd).await? {
         return Ok(no);
     }
     let why = format!("{PREFIX} {}", entry.category);

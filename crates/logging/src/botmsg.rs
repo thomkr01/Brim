@@ -4768,6 +4768,12 @@ fn report_case_replies(out: &mut Vec<Def>) {
                     "Reports are not set up on this server",
                 ),
                 (
+                    "report.module_off",
+                    "Moderation module is off",
+                    &[],
+                    "Reports are off on this server",
+                ),
+                (
                     "report.bot_message",
                     "bot messages cannot be reported",
                     &[],

@@ -156,6 +156,10 @@ impl GuildCfg {
             c.raider_list.enabled = false;
         }
         c.logging.off = !c.modules.logging;
+        // Moderation off: its commands are refused by the command gates (`cmdcfg::module_off`).
+        if !c.modules.moderation {
+            c.catch.enabled = false;
+        }
         c
     }
 }
@@ -774,6 +778,22 @@ mod tests {
             .as_ref()
             .is_some_and(|r| !r.enabled && !r.voice.enabled));
         assert!(c.logging.off && !c.modules.messages);
+        // Moderation off: its commands are off, the safety commands and Backups are not.
+        let mut m = on.clone();
+        m["catch"] = json!({"enabled": true});
+        let c = GuildCfg::parse(&m);
+        assert!(c.catch.enabled && !crate::cmdcfg::module_off(&c, "ban"));
+        m["modules"] = json!({"moderation": false});
+        let c = GuildCfg::parse(&m);
+        let off = |n| crate::cmdcfg::module_off(&c, n);
+        assert!(!c.catch.enabled && off("ban") && off("purge"));
+        assert!(
+            !off("lock")
+                && !off("unban")
+                && !off("raider")
+                && !off("backups")
+                && c.joingate.enabled
+        );
         assert!(c.fallbacks.is_empty());
     }
 

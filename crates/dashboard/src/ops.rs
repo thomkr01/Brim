@@ -282,7 +282,7 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
         config["catch"]["channel"]
             .as_str()
             .and_then(|x| x.parse().ok()),
-        config["catch"]["enabled"] == true,
+        config["catch"]["enabled"] == true && config["modules"]["moderation"] != false,
     ));
     rows.extend(brim_antinuke::security::ticket_log_check(
         &l.image.channels,

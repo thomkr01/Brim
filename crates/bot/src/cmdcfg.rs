@@ -154,6 +154,31 @@ fn wait(
     }
 }
 
+/// Moderation commands that stay on with the Moderation module off: the safety commands
+/// (`cmdcfg::SAFETY`), the ones that lift a punishment of Anti Nuke or Auto Mod, and those of other
+/// modules (Backups, the Raider List, manual verification).
+const KEPT: &[&str] = &[
+    "backups",
+    "raider",
+    "verify",
+    "unban",
+    "untimeout",
+    "unwarn",
+    "closecase",
+];
+
+/// Whether the Moderation module switch stops command `name`.
+pub fn module_off(cfg: &crate::app::GuildCfg, name: &str) -> bool {
+    !cfg.modules.moderation
+        && general::moderation_commands().contains(&name)
+        && !KEPT.contains(&name)
+        && !cmdcfg::SAFETY.contains(&name)
+}
+
+fn module_refusal(shown: &str) -> String {
+    format!("`{shown}` is off: the Moderation module is turned off on this server.")
+}
+
 /// Why the server's settings stop this use, as the text for the member. `on` is the switch of the
 /// form used and `shown` the command as typed (`t!ban`, `/ban`).
 #[allow(clippy::too_many_arguments)]
@@ -202,7 +227,7 @@ pub async fn prefix(
     cfg: &crate::app::GuildCfg,
     rest: Option<&str>,
 ) -> Result<Option<(Option<String>, Run)>> {
-    let (Some(rest), false) = (rest, cfg.commands.is_empty()) else {
+    let (Some(rest), false) = (rest, cfg.commands.is_empty() && cfg.modules.moderation) else {
         return Ok(Some((rest.map(String::from), Run::default())));
     };
     let r = rest.trim_start();
@@ -219,6 +244,17 @@ pub async fn prefix(
     let Some(name) = canonical(&word, in_ticket) else {
         return pass(rest);
     };
+    if module_off(cfg, name) {
+        if crate::commands::ignored(app, m, gid, &rest).await? {
+            return pass(rest);
+        }
+        let owner = app.guild_info(gid).await?.owner;
+        if app.level(gid, owner, m.author.id).await? != Level::None {
+            let shown = format!("{}{name}", cfg.misc.prefix);
+            crate::commands::say(app, m, &module_refusal(&shown)).await?;
+        }
+        return Ok(None);
+    }
     let has = |w: &str| tail.split_whitespace().any(|t| t.eq_ignore_ascii_case(w));
     let sibling = also(name, has).and_then(|n| Some((n, cmdcfg::of(&cfg.commands, n)?)));
     let own = cmdcfg::of(&cfg.commands, name);
@@ -287,13 +323,20 @@ pub async fn slash(app: &App, i: &Interaction, data: &CommandData) -> Result<Opt
         return Ok(None);
     };
     let cfg = app.cfg(gid.get()).await?;
-    if cfg.commands.is_empty() {
+    if cfg.commands.is_empty() && cfg.modules.moderation {
         return Ok(None);
     }
     let word = slash_word(crate::slash::flatten(&data.name, &data.options).0);
     let Some(name) = canonical(&word, false) else {
         return Ok(None);
     };
+    if module_off(&cfg, name) {
+        let shown = match data.kind {
+            CommandType::ChatInput => format!("/{name}"),
+            _ => data.name.clone(),
+        };
+        return Ok(Some(module_refusal(&shown)));
+    }
     // `/cases modify` is `cases modify`, `/info server` is `info -server`.
     let sub = data.options.first().map(|o| o.name.as_str());
     let has = |w: &str| sub.is_some_and(|s| s == w.trim_start_matches('-'));
@@ -318,6 +361,20 @@ pub async fn slash(app: &App, i: &Interaction, data: &CommandData) -> Result<Opt
 /// Gate of a button that runs command `name` (the Ban button of a report): the same settings
 /// as the typed command. Off means both forms are off.
 pub async fn button(
+    app: &App,
+    gid: Id<GuildMarker>,
+    user: Id<UserMarker>,
+    level: &Level,
+    name: &'static str,
+) -> Result<Option<String>> {
+    if module_off(&*app.cfg(gid.get()).await?, name) {
+        return Ok(Some(module_refusal(name)));
+    }
+    button_settings(app, gid, user, level, name).await
+}
+
+/// [`button`] without the Moderation module check: a Raider List alert button belongs to Server Joins.
+pub async fn button_settings(
     app: &App,
     gid: Id<GuildMarker>,
     user: Id<UserMarker>,

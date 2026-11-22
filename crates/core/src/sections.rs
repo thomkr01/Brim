@@ -1303,6 +1303,9 @@ pub enum CatchAction {
 pub struct ModulesCfg {
     /// Join Gate, Join Raid (with voice raids), Verification and the Raider List.
     pub server_joins: bool,
+    /// The moderation commands (not lock, unlock and unquarantine), member reports and the catch
+    /// channel. Anti Nuke and Auto Mod still punish and record cases.
+    pub moderation: bool,
     /// Triggers, sticky messages, "every N messages" and clock schedules, tags and feeds.
     pub messages: bool,
     /// Event logs. Security and moderation logs still post (`LogKind::ignorable`).
@@ -1313,6 +1316,7 @@ impl Default for ModulesCfg {
     fn default() -> Self {
         Self {
             server_joins: true,
+            moderation: true,
             messages: true,
             logging: true,
         }
@@ -1321,11 +1325,11 @@ impl Default for ModulesCfg {
 
 /// The module a part's `enabled` switch belongs to, for a part that has a module switch.
 pub fn module_of(section: &str) -> Option<&'static str> {
-    matches!(
-        section,
-        "joingate" | "joinraid" | "verification" | "raider_list"
-    )
-    .then_some("server_joins")
+    match section {
+        "joingate" | "joinraid" | "verification" | "raider_list" => Some("server_joins"),
+        "catch" => Some("moderation"),
+        _ => None,
+    }
 }
 
 /// The module a write must turn on with its part: the part goes from off (`before`) to on (`after`)
@@ -1643,7 +1647,12 @@ mod tests {
             module_to_turn_on("verification", &no, &yes, &serde_json::json!({})),
             None
         );
-        assert_eq!(module_to_turn_on("catch", &no, &yes, &off), None);
+        assert_eq!(module_to_turn_on("automod", &no, &yes, &off), None);
+        let mod_off = serde_json::json!({"moderation": false});
+        assert_eq!(
+            module_to_turn_on("catch", &no, &yes, &mod_off),
+            Some("moderation")
+        );
         assert_eq!(module_to_turn_on("raider_list", &no, &no, &off), None);
     }
 

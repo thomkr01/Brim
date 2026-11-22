@@ -115,6 +115,9 @@ async fn report(
 ) -> Result<Option<Said>> {
     let g = gid.get() as i64;
     let no = |key| async move { Ok(Some(reply::say(app, gid, key, &[]).await)) };
+    if !app.cfg(gid.get()).await?.modules.moderation {
+        return no("reply.report.module_off").await;
+    }
     let Some(log) = app
         .cfg(gid.get())
         .await?
@@ -342,6 +345,24 @@ const MODAL: &str = "reportm:";
 /// Report Message asks for a reason first ("Report Message" modal).
 #[allow(deprecated)]
 async fn open_modal(app: &App, i: &Interaction, data: &CommandData) -> Result<()> {
+    // Moderation off: no form; the member gets the refusal at once.
+    if let Some(gid) = i.guild_id {
+        if !app.cfg(gid.get()).await?.modules.moderation {
+            let said = reply::say(app, gid, "reply.report.module_off", &[]).await;
+            let resp = InteractionResponse {
+                kind: InteractionResponseType::ChannelMessageWithSource,
+                data: Some(InteractionResponseData {
+                    content: (!said.text.is_empty()).then_some(said.text),
+                    embeds: Some(said.embeds),
+                    flags: Some(MessageFlags::EPHEMERAL),
+                    ..Default::default()
+                }),
+            };
+            let client = app.http.interaction(Id::new(app.me.get()));
+            client.create_response(i.id, &i.token, &resp).await?;
+            return Ok(());
+        }
+    }
     let msg = data
         .target_id
         .zip(data.resolved.as_ref())
@@ -467,6 +488,9 @@ async fn act(
             })
         }
         "delete" => {
+            if !app.cfg(gid.get()).await?.modules.moderation {
+                return no("reply.report.module_off").await;
+            }
             // A reported log message stays: nobody deletes in a log channel (owner decision 11-15).
             if app
                 .cfg(gid.get())

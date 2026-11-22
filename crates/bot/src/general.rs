@@ -763,6 +763,11 @@ fn who(perm: &str) -> String {
     }
 }
 
+/// The prefix commands the Moderation module switch turns off.
+pub fn moderation_commands() -> &'static [&'static str] {
+    CATEGORIES[2].1
+}
+
 const CATEGORIES: [(&str, &[&str]); 4] = [
     (
         "General Commands:",

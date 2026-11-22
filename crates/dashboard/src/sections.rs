@@ -1209,6 +1209,10 @@ pub(crate) async fn make_catch(
     let channel = create(st, guild, existing.clone(), "channels", body).await?;
     config["catch"]["channel"] = json!(channel);
     config["catch"]["enabled"] = json!(true);
+    // The catch channel runs only with Moderation on; this route has that switch's bar.
+    if config["modules"]["moderation"] == false {
+        config["modules"]["moderation"] = json!(true);
+    }
     if fresh {
         config["catch"]["keep_top"] = json!(true);
     }
