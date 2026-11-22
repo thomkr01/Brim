@@ -660,3 +660,9 @@ The sidebar's "refresh server" button only fetched `/api/guilds` again. The serv
 
 **An extra panel went live as a "New panel" button.** (tickets, 2026-11-22)
 "Add panel" gave every panel after the first the placeholder label "New panel" and no emoji. Staff often save without a rename, so members saw "New panel" in #open-a-ticket, and a re-made channel posted it again. **Rule:** a default that the bot posts is text members can read as is ("Open a ticket"), never a placeholder. New panels carry no category, so their tickets go to the ticket category. Migration 4057 gives a saved panel that still has the placeholder ("New panel", no emoji) the default button and drops its category; the bot posts the panel message again at start.
+
+## The front page top bar never showed on a short screen (2026-11-22)
+
+The bar is hidden until the visitor scrolls past the hero's copper line. The first test, "the line has left the top of the screen", never fired on a 1366x768 screen: the page ends 418 px below the top, so the line stays 350 px down.
+
+**Rule:** a scroll trigger that depends on a position must first check that the page can scroll that far. `landing.rs` shows the bar at the line, or at half of the scroll range when the line is out of reach. A hidden bar uses `visibility:hidden`, so it is not focusable; do not use opacity alone.

@@ -84,6 +84,29 @@ pub fn Landing(
         }
     };
 
+    // The top bar stays hidden until the visitor has scrolled past the hero's copper line. On a short
+    // screen the page ends before the line can leave the top, so half of the scroll range counts too.
+    let hero = NodeRef::<html::Section>::new();
+    let bar = RwSignal::new(false);
+    let check = move || {
+        let (Some(Some(h)), Some(w)) = (hero.try_get_untracked(), web_sys::window()) else { return };
+        let y = w.scroll_y().unwrap_or(0.0);
+        let room = w.document().and_then(|d| d.document_element()).map_or(0.0, |e| f64::from(e.scroll_height()))
+            - w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let past = y > 0.0 && y >= (y + h.get_bounding_client_rect().bottom()).min(room / 2.0);
+        if bar.try_get_untracked() != Some(past) {
+            bar.try_set(past);
+        }
+    };
+    let on_scroll = window_event_listener(leptos::ev::scroll, move |_| check());
+    let on_resize = window_event_listener(leptos::ev::resize, move |_| check());
+    on_cleanup(move || {
+        on_scroll.remove();
+        on_resize.remove();
+    });
+    // A reload keeps the scroll position, so the first check waits for the page to be drawn.
+    request_animation_frame(check);
+
     let sheet = NodeRef::<html::Dialog>::new();
     let id = RwSignal::new(String::new());
     let err = RwSignal::new("");
@@ -91,13 +114,13 @@ pub fn Landing(
     view! {
         <div class="tb-root tb-page land">
             // "line" = version A, a copper line closes the section. Remove it for version B, the long fade (both in style.css).
-            <section class="hero line">
+            <section class="hero line" node_ref=hero>
                 <div class="hero-split" aria-hidden="true"></div>
                 <svg class="hero-lines" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
                     <path d="M500 0 L315 600" /><path d="M0 130 H210 L240 100 H340" /><path class="hot" d="M0 70 H70" />
                 </svg>
                 <div class="hero-stripes" aria-hidden="true"></div>
-                <header class="tb-header">
+                <header class="tb-header" class:is-shown=move || bar.get()>
                     <a class="tb-brand" href="#/"><img src="/logo.svg" alt="" width="30" height="30" />"Brim"</a>
                     <a class="tb-btn tb-btn-header" href=login.clone()>{if signed_in { view! { "Dashboard" }.into_any() } else { view! { <span class="tb-login-long">"Log in with Discord"</span><span class="tb-login-short">"Log in"</span> }.into_any() }}</a>
                 </header>
