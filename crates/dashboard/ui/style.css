@@ -651,7 +651,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land [class*="l-base"] > div:nth-of-type(1) { grid-area:1/1/4/10; margin-top:var(--space-40); z-index:2; }
 .land [class*="l-base"] > div:nth-of-type(2) { grid-area:4/1/5/13; margin-top:calc(-1 * var(--space-12)); z-index:4; display:flex; align-items:center; }
 .land .embed .fields .blk > b { font-size:.88em; }
-.land [class*="l-base"] > div:nth-of-type(3) { grid-area:1/6/4/13; z-index:3; }
+.land [class*="l-base"] > div:nth-of-type(3) { grid-area:1/6/4/13; z-index:3; margin-bottom:var(--space-16); }
 /* B and C: the row hangs over the panel's top edge; the message covers only the panel's lower right corner. */
 .land :is(.l-baseb, .l-basec) > div:nth-of-type(1) { grid-area:2/1/5/10; margin-top:calc(-1 * var(--space-16)); }
 .land .l-baseb > div:nth-of-type(2) { grid-area:1/1/2/9; margin-top:0; }
@@ -660,6 +660,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .l-basec > div:nth-of-type(3) { grid-area:4/6/7/13; margin-top:var(--space-8); }
 /* A small dashboard card as the third piece hangs over the right edge. */
 .land [class*="l-base"] > .pane:nth-of-type(3) { grid-area:4/8/6/14; margin:calc(-1 * var(--space-8)) calc(-1 * var(--space-24)) 0 0; }
+.land .l-base > .pane:nth-of-type(3) { grid-area:5/8/7/14; margin-top:var(--space-8); }
 .land [class*="l-base"] > .pane:nth-of-type(2) { padding:var(--space-12) var(--space-16); }
 .land [class*="l-base"] > .pane:nth-of-type(2) .tog { width:100%; gap:var(--space-12); font-size:1.1em; white-space:nowrap; }
 .land [class*="l-base"] > .pane:nth-of-type(2) .tog label { flex:none; margin-right:auto; }

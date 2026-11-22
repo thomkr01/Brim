@@ -76,6 +76,10 @@ fn cap_message(scene: &web_sys::HtmlElement, limit: f64) {
     // Hide whole field rows (name and value together, an inline row as one) from the end only; the first row always stays.
     let top = |i| items.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
     let mut keep = items.length();
+    // The picture (after the fields) goes first, as one whole block.
+    if f64::from(win.offset_height()) > limit {
+        if let Ok(Some(img)) = win.query_selector(".embed > img") { let _ = img.unchecked_ref::<web_sys::HtmlElement>().style().set_property("display", "none"); }
+    }
     while keep > 1 && f64::from(win.offset_height()) > limit {
         let Some(last) = top(keep - 1) else { return };
         let y = last.offset_top();
@@ -100,7 +104,7 @@ fn fit() {
             let Some(s) = html(scenes.item(j)) else { continue };
             cap_message(&s, if w < 500.0 { 336.0 } else { 280.0 });
             let nat = f64::from(s.offset_width());
-            let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.55));
+            let k = (w / nat).min(0.85).min(((if w < 500.0 { 900.0 } else { 520.0 }) / f64::from(s.offset_height())).max(0.8));
             let _ = s.style().set_property("--k", &k.to_string());
             let _ = s.style().set_property("--dx", &format!("{}px", (w - nat * k) / 2.0));
             if s.class_list().contains("on") {
