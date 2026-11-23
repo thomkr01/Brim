@@ -18,10 +18,12 @@ enum Item {
     C(&'static str),
     /// The Cases page: rows of (number, kind, open or closed, grey text).
     K(&'static [(&'static str, &'static str, &'static str, &'static str)]),
-    /// A dashboard settings page, built from the page's own classes: breadcrumb, title and cards of (card title, fields of (kind, label, value)).
+    /// A dashboard settings page, built from the page's own parts: module, page, and cards of (card title, fields of (kind, label, value)).
     /// Kinds: s switch (on), c choice, p channel picker, r role picker with chips, n text field.
-    D(&'static str, &'static str, &'static [(&'static str, &'static [(char, &'static str, &'static str)])]),
+    D(&'static str, &'static str, &'static [Card]),
 }
+/// A card of a dashboard page: its title and its fields of (kind, label, value).
+type Card = (&'static str, &'static [(char, &'static str, &'static str)]);
 use Item::{C, D, E, K, L, M, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
@@ -35,7 +37,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
         ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
-        ("Set up in the dashboard", "dash", &[D("Verification \u{203a} General Settings", "Verification", &[
+        ("Set up in the dashboard", "dash", &[D("Verification", "General Settings", &[
             ("General", &[('s', "Use the verification module", ""), ('c', "Verification mode", "Captcha"), ('p', "Verification channel", "#verify"), ('c', "Fail action", "Kick"), ('c', "Verification targets", "Everyone")]),
             ("Captcha", &[('n', "Captcha answer length", "6"), ('s', "Show a colored trace that follows the captcha characters", ""), ('s', "Show small spread-around characters to trick scripts", "")])]), C("Settings")])]),
     ("Anti-raid.", &[
@@ -130,7 +132,7 @@ fn fit() {
             all.push((s.clone(), group(&s)));
         }
         let max = |f: fn(&(f64, f64, f64, f64)) -> f64| all.iter().map(|(_, g)| f(g)).fold(0.0, f64::max);
-        let (mgw, mgh, mw1, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.2), max(|g| g.3));
+        let (mgw, mgh, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.3));
         let mnw1 = all.iter().map(|(_, g)| g.2).fold(f64::MAX, f64::min);
         // The bottom stars sit 72 px under the first piece, so a first piece that is the tallest gets more room below.
         let pad = (mh1 + 72.0 - mgh).max(48.0);
@@ -208,6 +210,8 @@ pub fn Landing(
     #[prop(optional)]
     signed_in: bool,
 ) -> impl IntoView {
+    // Head (the page header a scene shows) reads the server list from the context; the front page has none.
+    provide_context(signal(Vec::<serde_json::Value>::new()).0);
     // A ban DM links to #/appeal/<id>, and the login comes back to the page that was open.
     let hash = web_sys::window().unwrap().location().hash().unwrap_or_default();
     let login = if signed_in {
@@ -312,7 +316,7 @@ pub fn Landing(
                                     C(text) => view! { <div class="co">{text}</div> }.into_any(),
                                     M(name, text) => view! { <div class="win mm"><i class="mmav" aria-hidden="true"></i><div><b>{name}</b><p>{text}</p></div></div> }.into_any(),
                                     K(rows) => view! { <div class="win tbl caselist stack">{rows.iter().map(|(no, kind, state, meta)| view! { <div class="card link"><b class="no">{*no}</b><span class="what"><span><b>{*kind}</b>" "<span class="chip" class:ok=(*state == "open")>{*state}</span></span><span class="muted">{*meta}</span></span></div> }).collect_view()}</div> }.into_any(),
-                                    D(crumb, title, cards) => view! { <div class="win dash" inert=true><div class="head"><small>{crumb}</small><h1>{title}</h1></div><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|(k, label, v)| match k {
+                                    D(module, page, cards) => view! { <div class="win dash" inert=true><crate::common::Head guild=String::new() page=page.to_string() big=module.to_string() module=Some((module.to_string(), "#".to_string())) /><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|(k, label, v)| match k {
                                         's' => view! { <div class="row tog"><label>{*label}</label><input type="checkbox" class="sw" prop:checked=true /></div> }.into_any(),
                                         'c' => view! { <div class="row"><label>{*label}</label><select><option>{*v}</option></select></div> }.into_any(),
                                         'p' => view! { <div class="row"><label>{*label}</label><div class="lp"><input readonly value=*v /></div></div> }.into_any(),
@@ -421,7 +425,7 @@ mod tests {
                             }
                         }
                         Item::L(title, btn, _) => { check(title); check(btn) }
-                        Item::D(_, title, cards) => { check(title); for (name, fields) in cards.iter() { check(name); for (_, label, _) in fields.iter() { check(label) } } }
+                        Item::D(module, page, cards) => { check(module); check(page); for (name, fields) in cards.iter() { check(name); for (_, label, _) in fields.iter() { check(label) } } }
                         _ => {}
                     }
                 }
