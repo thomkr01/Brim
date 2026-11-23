@@ -980,9 +980,18 @@ mod tests {
             lanes.spawn(async move {
                 let mut started = 0;
                 loop {
-                    // Only these plans: other tests may leave a due plan behind.
-                    let mut due = due(&pool, 200).await.unwrap();
-                    due.retain(|d| (base..base + 100_000).contains(&d.1));
+                    // Only these plans, picked in the query: `due` takes the oldest of all servers,
+                    // so another test's older due plans fill its 200 and this lane saw none.
+                    let due: Vec<(i64, i64, i64)> = sqlx::query_as(
+                        "SELECT id, guild_id, created_by FROM giveaway_plans
+                         WHERE enabled AND next_at <= now()
+                           AND guild_id >= $1 AND guild_id < $1 + 100000
+                         ORDER BY next_at LIMIT 200",
+                    )
+                    .bind(base)
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
                     if due.is_empty() {
                         return started;
                     }
