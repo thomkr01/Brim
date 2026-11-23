@@ -173,7 +173,7 @@ fs.mkdirSync(out, { recursive: true });
   // A link in the text asks before it opens; a click on any other part edits that part.
   await desc.click();
   await page.keyboard.press('Control+End');
-  await page.keyboard.type(' [site](https://example.com/a)');
+  await page.keyboard.insertText(' [site](https://example.com/a)');
   await page.locator('.pvwrap .embed a[href]').first().click();
   if (!(await page.locator('text=Open this link?').count())) failed.push('embeds: link did not ask before opening');
   await page.keyboard.press('Escape');
