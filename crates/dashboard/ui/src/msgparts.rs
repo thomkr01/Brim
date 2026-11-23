@@ -257,7 +257,8 @@ pub fn chip(tok: &str) -> String {
     }
     if let Some((n, plus, style, _)) = time_at(tok) {
         return format!(
-            "<span class=\"vchip ts\" {attrs}>🕒 {}</span>",
+            "<span class=\"vchip ts\" {attrs}>{} {}</span>",
+            crate::icons::tag_html("clock").unwrap_or_default(),
             esc(&time_label(n, plus, style))
         );
     }

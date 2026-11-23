@@ -1106,7 +1106,7 @@ pub fn schema() -> Vec<Value> {
         ),
         hp(
             ti(dv(fg("Moderation commands", "always_dm", "bool"), true), "DM members when they are punished or when a punishment is removed"),
-            "Punishment DMs are sent before the action, removal DMs (unquarantine, untimeout, unban) once it worked. If the member has closed DMs, the action still happens and the result shows DM-Members ❎. Unban DMs usually fail because the member no longer shares a server with Brim. Off: only ?dm sends one.",
+            "Punishment DMs are sent before the action, removal DMs (unquarantine, untimeout, unban) once it worked. If the member has closed DMs, the action still happens and the result shows DM-Members as not sent. Unban DMs usually fail because the member no longer shares a server with Brim. Off: only ?dm sends one.",
         ),
         ti(fg("Moderation commands", "delete_invocation", "bool"), "Always delete the moderation execution messages for regular prefix commands"),
         ti(fg("Moderation commands", "hide_staff_in_dms", "bool"), "Hide the staff member responsible when DMing the punished member"),

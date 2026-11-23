@@ -1132,24 +1132,24 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     (
         "details",
         "The Details block, heading and lines (empty when the command has none)",
-        "🗒️ **Details:**\n▸ DM-Members: ✅",
+        "{e:note} **Details:**\n▸ DM-Members: {e:success}",
     ),
     (
         "successful",
         "The Successful block: heading and members",
-        "✅ **Successful bans**\n▸ <@1> [`1`]",
+        "{e:success} **Successful bans**\n▸ <@1> [`1`]",
     ),
     (
         "unsuccessful",
         "The Unsuccessful block: heading and what failed",
-        "❎ **Unsuccessful bans**\nAll members were banned!",
+        "{e:checkbox_off} **Unsuccessful bans**\nAll members were banned!",
     ),
     ("ok", "How many worked", "3"),
     ("failed", "How many failed", "1"),
     (
         "reason_line",
         "The Reason line (empty without a reason)",
-        "📄 Reason: spam",
+        "{e:reason} Reason: spam",
     ),
     (
         "failures",
@@ -1189,22 +1189,22 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "When the member joined the server (Discord time stamp)",
         "<t:1700000000:R>",
     ),
-    ("in_server", "Whether the user is in the server", "❌"),
-    ("left_timed_out", "Whether they left while timed out", "❌"),
-    ("left_quarantined", "Whether they left while quarantined", "❌"),
-    ("banned", "Whether they are banned here", "✅"),
-    ("is_bot", "Whether the account is a bot", "❌"),
+    ("in_server", "Whether the user is in the server", "{e:error}"),
+    ("left_timed_out", "Whether they left while timed out", "{e:error}"),
+    ("left_quarantined", "Whether they left while quarantined", "{e:error}"),
+    ("banned", "Whether they are banned here", "{e:success}"),
+    ("is_bot", "Whether the account is a bot", "{e:error}"),
     ("color", "The colour of their highest coloured role", "#3498db"),
     ("badges", "Their Discord badges", "Hypesquad Online House 1"),
     (
         "suspicious",
         "Signs of a suspicious account (no avatar, young account)",
-        "✅ No Avatar\n❌ Account Younger Than 7d",
+        "{e:success} No Avatar\n{e:error} Account Younger Than 7d",
     ),
     (
         "whitelist",
         "Which Brim whitelists hold the member or role",
-        "✅ Spam\n❌ Ping\n❌ Advertising\n❌ @everyone",
+        "{e:success} Spam\n{e:error} Ping\n{e:error} Advertising\n{e:error} @everyone",
     ),
     ("warn_points", "Their warn points (code style)", "`3`"),
     ("strikes", "Their active strikes (code style)", "`1`"),
@@ -1218,7 +1218,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     (
         "accessories",
         "Their account accessories (decoration, banner, Nitro, server avatar)",
-        "✅ Avatar Decoration\n❌ Banner\n✅ Nitro\n❌ Server Avatar",
+        "{e:success} Avatar Decoration\n{e:error} Banner\n{e:success} Nitro\n{e:error} Server Avatar",
     ),
     ("member.roles", "The member's roles (mentions)", "@Helpers, @Trial"),
     ("webhooks", "Names of the webhooks they made", "Alerts"),
@@ -1233,7 +1233,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     (
         "role_details",
         "The role's settings (managed, mentionable, hoisted, main role)",
-        "❌ Managed\n✅ Mentionable\n✅ Hoisted\n❌ Main Role",
+        "{e:error} Managed\n{e:success} Mentionable\n{e:success} Hoisted\n{e:error} Main Role",
     ),
     ("guild.name", "Server name", "My Server"),
     ("guild.owner_id", "The server owner (mention with ID)", "@sam *`123456789012345679`*"),
@@ -1302,11 +1302,11 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "How long it took, in ms with two decimals",
         "390.11",
     ),
-    ("locks", "The active locks, one per line", "🔒 Channels"),
+    ("locks", "The active locks, one per line", "{e:lock} Channels"),
     (
         "lists",
-        "Each whitelist with ✅ (on it) or ❌ (not on it), one per line",
-        "✅ Spam Whitelist\n❌ Ping Whitelist",
+        "Each whitelist with {e:success} (on it) or {e:error} (not on it), one per line",
+        "{e:success} Spam Whitelist\n{e:error} Ping Whitelist",
     ),
     ("prefix", "The server's command prefix", "t!"),
     (
@@ -1314,19 +1314,19 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "Where every command is explained: the dashboard's commands page, or the commands command",
         "https://example.com/#/commands",
     ),
-    ("quarantine_role", "The quarantine role, or ❌", "@Quarantined"),
-    ("anti_nuke_on", "Anti Nuke on or off", "🟢"),
-    ("heat_on", "Heat System on or off", "🟢"),
-    ("verification_on", "Verification on or off", "🔴"),
-    ("join_gate_on", "Join Gate on or off", "🟢"),
-    ("join_raid_on", "Join Raid on or off", "🟢"),
-    ("persistence_on", "Persistence on or off", "🔴"),
+    ("quarantine_role", "The quarantine role, or {e:error}", "@Quarantined"),
+    ("anti_nuke_on", "Anti Nuke on or off", "{e:toggle_on}"),
+    ("heat_on", "Heat System on or off", "{e:toggle_on}"),
+    ("verification_on", "Verification on or off", "{e:toggle_off}"),
+    ("join_gate_on", "Join Gate on or off", "{e:toggle_on}"),
+    ("join_raid_on", "Join Raid on or off", "{e:toggle_on}"),
+    ("persistence_on", "Persistence on or off", "{e:toggle_off}"),
     ("member.tag", "Member's name with the old #tag", "alex#0000"),
     ("case_total", "How many cases the member has", "3"),
     (
         "case_list",
         "The member's cases on this page, one per line",
-        "✅ 12 [+BAN] <t:1700000000:R>",
+        "{e:success} 12 [+BAN] <t:1700000000:R>",
     ),
     ("tries", "How many tries or changes failed", "5"),
     ("backup", "Backup ID", "a1b2c3"),
@@ -1408,11 +1408,11 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ("effect", "What it means for the server", "It will not come back on release."),
     ("reverted", "Changes reverted, of all", "`5/5`"),
     ("reinvite", "Members kicked by the nuker, to invite back", "@alex"),
-    ("applied", "Whether the action was applied (✅ or ❌)", "✅"),
+    ("applied", "Whether the action was applied ({e:success} or {e:error})", "{e:success}"),
     (
         "bot_role",
         "Whether the bot role was cleared (empty for a person)",
-        "✅",
+        "{e:success}",
     ),
     ("recreated", "Channels and roles made again", "`2`"),
     (
@@ -1449,12 +1449,12 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     (
         "quarantined",
         "The panic case and who was quarantined (empty without a case)",
-        "▸ **CASE:** `a1b2`\n🧍 **Members Quarantined:** 1 ✅ | 0 ❌",
+        "▸ **CASE:** `a1b2`\n{e:quarantine_role} **Members Quarantined:** 1 {e:success} | 0 {e:error}",
     ),
     (
         "backup_result",
         "What the backup step did",
-        "✅ **Backup System loaded the recent backup successfully!**",
+        "{e:success} **Backup System loaded the recent backup successfully!**",
     ),
     (
         "failed_steps",
@@ -1465,7 +1465,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ("backup_channels", "Channels the backup changed", "Deleted: `0`"),
     ("backup_categories", "Categories the backup changed", "Deleted: `0`"),
     ("backup_webhooks", "Webhooks the backup deleted", "Deleted: `0`"),
-    ("backup_settings", "Settings the backup set", "▸ Server: ✅"),
+    ("backup_settings", "Settings the backup set", "▸ Server: {e:success}"),
     ("pattern", "The kind of raid pattern", "join"),
     (
         "next",
@@ -6886,7 +6886,7 @@ fn var_info_raw(key: &str, name: &str) -> (&'static str, &'static str) {
             );
         }
         if name == "toggle" {
-            return ("On or off sign after Status", " 🟢");
+            return ("On or off sign after Status", " {e:toggle_on}");
         }
     }
     let list = if key.starts_with("feed.") {
