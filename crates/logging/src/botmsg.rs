@@ -7941,7 +7941,10 @@ mod tests {
             "```{text}\ncode```",
         ] {
             let why = missing_text("log.panic", &e(hidden));
-            assert!(why.is_some_and(|w| w.contains("not in a spoiler")), "{hidden}");
+            assert!(
+                why.is_some_and(|w| w.contains("not in a spoiler")),
+                "{hidden}"
+            );
             // Other entries keep the old rule.
             assert!(
                 missing_text("log.message", &e(hidden)).is_none(),
