@@ -21,10 +21,12 @@ enum Item {
     /// A dashboard settings page, built from the page's own parts: module, page, and cards of (card title, fields of (kind, label, value)).
     /// Kinds: s switch (on), c choice, p channel picker, r role picker with chips, n text field.
     D(&'static str, &'static str, &'static [Card]),
+    /// The Message Builder itself (editor and live preview) on the verification panel, from the dashboard's own editor.
+    B,
 }
 /// A card of a dashboard page: its title and its fields of (kind, label, value).
 type Card = (&'static str, &'static [(char, &'static str, &'static str)]);
-use Item::{C, D, E, K, L, M, P, T};
+use Item::{B, C, D, E, K, L, M, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -37,6 +39,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
         ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
+        ("Make the panel your own, in the builder", "builder", &[B]),
         ("Set up in the dashboard", "dash", &[D("Verification", "General Settings", &[
             ("General", &[('s', "Use the verification module", ""), ('c', "Verification mode", "Captcha"), ('p', "Verification channel", "#verify"), ('c', "Fail action", "Kick"), ('c', "Verification targets", "Everyone")]),
             ("Captcha", &[('n', "Captcha answer length", "6"), ('s', "Show a colored trace that follows the captcha characters", ""), ('s', "Show small spread-around characters to trick scripts", "")])]), C("Settings")])]),
@@ -316,6 +319,17 @@ pub fn Landing(
                                     C(text) => view! { <div class="co">{text}</div> }.into_any(),
                                     M(name, text) => view! { <div class="win mm"><i class="mmav" aria-hidden="true"></i><div><b>{name}</b><p>{text}</p></div></div> }.into_any(),
                                     K(rows) => view! { <div class="win tbl caselist stack">{rows.iter().map(|(no, kind, state, meta)| view! { <div class="card link"><b class="no">{*no}</b><span class="what"><span><b>{*kind}</b>" "<span class="chip" class:ok=(*state == "open")>{*state}</span></span><span class="muted">{*meta}</span></span></div> }).collect_view()}</div> }.into_any(),
+                                    B => {
+                                        // The panel's own default text with its variable, as the editor shows it.
+                                        let mut body = sample("verify_panel");
+                                        // The samples load after the first draw; until then the editor shows an empty message.
+                                        if let Some(e) = body["embeds"].get_mut(0) { e["description"] = "To access `{guild.name}`, you need to pass the verification first.".into(); } else { body = serde_json::json!({}); }
+                                        let cur = RwSignal::new(serde_json::json!({"body": body}));
+                                        let ed = crate::embeds::Editor::new(cur, StoredValue::new(String::new()), true);
+                                        let (message_tab, preview_tab, pop_view) = ed.views();
+                                        ed.edit.set(Some(true));
+                                        view! { <div class="win builder" inert=true>{crate::embeds::split(ed.edit, message_tab, preview_tab)}{pop_view}</div> }.into_any()
+                                    }
                                     D(module, page, cards) => view! { <div class="win dash" inert=true><crate::common::Head guild=String::new() page=page.to_string() big=module.to_string() module=Some((module.to_string(), "#".to_string())) /><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|(k, label, v)| match k {
                                         's' => view! { <div class="row tog"><label>{*label}</label><input type="checkbox" class="sw" prop:checked=true /></div> }.into_any(),
                                         'c' => view! { <div class="row"><label>{*label}</label><select><option>{*v}</option></select></div> }.into_any(),
