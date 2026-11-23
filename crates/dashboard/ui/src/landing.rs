@@ -330,7 +330,7 @@ pub fn Landing(
                 <button class="tb-link tb-link-strong" type="button" on:click=move |_| { if let Some(d) = sheet.get() { let _ = d.show_modal(); } }>"Appeal a ban"</button>
                 <a class="tb-link" href=format!("{REPO}/TERMS.md")>"Terms"</a>
                 <a class="tb-link" href=format!("{REPO}/PRIVACY.md")>"Privacy"</a>
-                <a class="tb-link tb-link-rust" href="https://www.rust-lang.org/">"Made in Rust "<span aria-hidden="true">"🦀"</span></a>
+                <a class="tb-link tb-link-rust" href="https://www.rust-lang.org/">"Made in Rust "<span aria-hidden="true" inner_html=crate::icons::tag_html("crab").unwrap_or_default()></span></a>
             </footer>
             <dialog class="tb-sheet" aria-labelledby="tb-appeal-title" node_ref=sheet
                 on:click=move |e| {

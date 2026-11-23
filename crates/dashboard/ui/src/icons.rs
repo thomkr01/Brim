@@ -17,6 +17,7 @@ icons!(
     "image",
     "calendar",
     "clock",
+    "crab",
     "reason",
     "quarantine_role",
     "toggle_on",
