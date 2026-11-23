@@ -1,6 +1,6 @@
 // Emoji tooling. SVGs in assets/icons are the source; PNGs are only made in memory.
 //   node tools/emojis.mjs check [names...] [--sheet out.png]  validate SVGs, report ink bbox/weight, draw a contact sheet
-//   node tools/emojis.mjs upload [--replace]                  upload missing icons as application emojis
+//   node tools/emojis.mjs upload [--replace] [names...]       upload missing icons as application emojis; --replace makes every (or the named) icon new
 // Needs Playwright with Chromium (preinstalled in the cloud env). upload needs DISCORD_TOKEN and DISCORD_CLIENT_ID.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -99,27 +99,47 @@ async function sheet(page) {
 async function upload() {
   const { DISCORD_TOKEN: token, DISCORD_CLIENT_ID: app } = process.env;
   if (!token || !app) throw new Error('DISCORD_TOKEN and DISCORD_CLIENT_ID must be set');
+  const sleep = s => new Promise(f => setTimeout(f, s * 1000));
+  // Retries a 429 (after its retry_after), a 502/503/504 and a network error, up to 5 times.
   const api = async (method, path, body) => {
-    for (;;) {
-      const r = await fetch(`https://discord.com/api/v10/applications/${app}/emojis${path}`, {
-        method, headers: { authorization: `Bot ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body),
-      });
-      if (r.status === 429) { const w = (await r.json()).retry_after ?? 1; await new Promise(f => setTimeout(f, w * 1000)); continue; }
-      if (!r.ok) throw new Error(`${method} ${path}: ${r.status} ${await r.text()}`);
-      return r.status === 204 ? null : r.json();
+    for (let t = 1; ; t++) {
+      let r, text = '';
+      try {
+        r = await fetch(`https://discord.com/api/v10/applications/${app}/emojis${path}`, {
+          method, headers: { authorization: `Bot ${token}`, 'content-type': 'application/json' }, body: body && JSON.stringify(body),
+        });
+        text = await r.text();
+      } catch (e) { r = null; text = String(e.cause?.code ?? e.message); }
+      if (r?.ok) return r.status === 204 ? null : JSON.parse(text);
+      const short = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+      const retry = !r || r.status === 429 || [502, 503, 504].includes(r.status);
+      if (!retry || t >= 5) throw new Error(`${method} ${path || '/'}: ${r?.status ?? 'network'} ${short}`);
+      let wait = 2 ** t;
+      if (r?.status === 429) try { wait = JSON.parse(text).retry_after ?? 1; } catch { wait = +r.headers.get('retry-after') || 1; }
+      console.log(`retry ${t} ${method} ${path || '/'} in ${wait}s (${r?.status ?? 'network'})`);
+      await sleep(wait);
     }
   };
   const have = new Map((await api('GET', '')).items.map(e => [e.name, e.id]));
+  const done = { replaced: 0, created: 0 }, failed = [];
   await withPage(async page => {
     for (const n of names) {
       if (have.has(n) && !replace) continue;
-      if (have.has(n)) await api('DELETE', `/${have.get(n)}`);
-      const { png } = await raster(page, src(n));
-      const e = await api('POST', '', { name: n, image: `data:image/png;base64,${png}` });
-      console.log(`uploaded ${n} ${e.id}`);
+      try {
+        // The new PNG is ready before the old emoji is deleted.
+        const { png } = await raster(page, src(n));
+        if (have.has(n)) await api('DELETE', `/${have.get(n)}`);
+        const e = await api('POST', '', { name: n, image: `data:image/png;base64,${png}` });
+        done[have.has(n) ? 'replaced' : 'created']++;
+        console.log(`${have.has(n) ? 'replaced' : 'created'} ${n} ${e.id}`);
+      } catch (e) { failed.push(n); console.log(`FAILED ${n}: ${e.message}`); }
     }
   });
-  console.log('done; restart the bot so it loads the new ids');
+  console.log(`replaced ${done.replaced}, created ${done.created}, failed ${failed.length}`);
+  if (failed.length) {
+    console.log(`rerun for the failed ones only (a deleted one is created again): node tools/emojis.mjs upload --replace ${failed.join(' ')}`);
+    process.exitCode = 1;
+  } else console.log('done; restart the bot so it loads the new ids');
 }
 
 await ({ check, upload }[cmd] ?? (() => { console.error('usage: node tools/emojis.mjs check|upload'); process.exit(2); }))();

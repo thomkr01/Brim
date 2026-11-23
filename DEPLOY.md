@@ -154,6 +154,16 @@ Check (optional): `docker compose exec postgres psql -U brim brim -c "select use
 
 Going back to a build from before this: **Install** on the Update page fails and puts the running version back (that bot looks for the token in its environment, and that dashboard cannot start on the new role). By hand, take the compose file of that build as well, then pin it: `git checkout <sha> -- docker-compose.yml`, add `BRIM_TAG=<sha>` to `.env`, `docker compose pull && docker compose up -d`. Forward again: remove the `BRIM_TAG` line, `git checkout HEAD -- docker-compose.yml`, `docker compose pull && docker compose up -d`.
 
+### Emojis
+
+The icons in `assets/icons` are the bot's custom emojis. After a change to them, upload them as application emojis (they get new ids, so restart the bot right after: the Update button does it). The upload needs `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`, Node 18 or newer, and Playwright with Chromium to draw the PNGs. On the server, with Docker and the token in `.env`:
+
+```
+cd ~/brim && git pull && docker run --rm --env-file .env -v "$PWD":/app -w /app node:22-bookworm sh -c 'npm install --no-save playwright && npx playwright install --with-deps chromium && node tools/emojis.mjs upload --replace; rm -rf node_modules'
+```
+
+The tool retries a Discord 429, 502, 503, 504 or network error and ends with the counts (replaced, created, failed). If some failed, it prints the one command that does only those; run it again after a short wait. An old emoji is deleted only after its new PNG is drawn, but a delete followed by a failed create leaves that emoji missing until the rerun.
+
 ### Rolling back
 
 Use **Install** on the Update page (see above). Without the dashboard: pin an older release in `.env` (its version, for example `BRIM_TAG=v1.1.0`, or its short sha; see the package versions on GitHub), then `docker compose pull && docker compose up -d`. Remove the line to follow `latest` again. Migrations only add to the database, so an older image keeps working on it, with one exception: migration 3989 removed the old `embeds.embed` column, so an image from before it (before 11-17) cannot save or show Message Builder messages. To bring the database back to its state before an update as well, restore the updater's dump from before it (see Restoring for real in section 8).
