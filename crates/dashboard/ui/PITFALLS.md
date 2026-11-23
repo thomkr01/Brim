@@ -841,3 +841,9 @@ The white layer of a pressed front page button (`::before`, `z-index:-1`) lay ov
 
 **The saved message categories got their own copy of the Default messages group opener.** The markup and class names matched, but it was a second copy with a grip and a row of labeled pill buttons added, so the owner saw a new design for a job that already had one. Before a new row, opener, list or button, find the page that already does the job and use its component; if it is a local closure there, move it to `common.rs` first (as `HubRow`) and use it on both pages. Extra controls on a shared part stay as quiet as the page's existing ones (icon buttons with a title, like the message row actions).
 **Follow-up (same day):** the shared opener alone was not enough. The grip column on the left and a line of buttons under the open row still made the page look new. A list that reuses another page's look takes all of it: same left edge, same indent (`.hubsubs`), nothing added beside the rows. Extra controls go inside the row where that page already puts its actions.
+
+## The remove × of a chip dropped to a second line (2026-11-23)
+
+In a picked list (Verification roles, channels, aliases) the chip is a flex item beside the search box, and the row shrank it until the × wrapped under the name, so the chip grew to two lines. The × button also carries the class `link`, a flex row meant for card links. Seen on the real Verification page, opened on the local test stack, in Chromium.
+
+**Rule:** a chip in a picked list keeps its name and × on one line (`.pick > .chip`, `flex:none`, `white-space:nowrap`), and the × is inline (`.chip > .link`). Every chip with a remove button uses these (roles, channels, aliases, giveaway lists, extra entries). A part that shares a flex row with an input is checked with a still of the real page.
