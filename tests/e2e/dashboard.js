@@ -371,7 +371,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.click('button:text-is("Remove tag")');
   await page.waitForSelector('text=Tag removed.', { timeout: 5000 }).catch(() => failed.push('tag: remove failed'));
-  await page.click('text=← Saved messages');
+  await page.click('text=← Custom messages');
   if (!(await page.locator('.mrow', { hasText: 'e2e' }).locator('.states .tip').count())) failed.push('embeds: list shows no Sent icon');
   const sent = await (await fetch(`${mock}/sent`)).json();
   if (!sent.some((m) => /\/messages\/1$/.test(m.path) && m.body.includes('Hello'))) failed.push('embeds: no edit reached Discord');

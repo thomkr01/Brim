@@ -280,7 +280,7 @@ fn info_text(
     let cats = img.channels.iter().filter(|c| c.kind == CATEGORY).count();
     let mark = |b: bool| if b { YES } else { NO };
     let saved = messages.map_or(String::new(), |m| {
-        format!(" · Saved messages: {}", crate::msgbackup::count(m))
+        format!(" · Custom messages: {}", crate::msgbackup::count(m))
     });
     format!(
         "**Backup `{code}`**\nTaken by {by} <t:{at}:R>\nRoles: {} · Channels: {} · Categories: {cats} · Webhooks: {} · Server settings: {}",
@@ -339,7 +339,7 @@ pub async fn load(
         let sum = restore(app, gid, &image, &keep, None).await;
         let sum = match (sum, &messages) {
             (Err(e), Some(_)) => {
-                return Err(e.context("the saved messages were already loaded from the backup"))
+                return Err(e.context("the custom messages were already loaded from the backup"))
             }
             (sum, _) => sum?,
         };
@@ -396,7 +396,7 @@ pub async fn load(
     }
     if let Some(m) = &messages {
         text.push_str(&format!(
-            "\nThe saved messages, schedules, triggers, stickies, tags and edited bot messages are replaced by the backup's ({} saved messages).",
+            "\nThe custom messages, schedules, triggers, stickies, tags and edited bot messages are replaced by the backup's ({} custom messages).",
             crate::msgbackup::count(m)
         ));
     }

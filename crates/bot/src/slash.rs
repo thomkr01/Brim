@@ -436,7 +436,7 @@ pub fn definitions() -> Vec<Command> {
         )),
     ]);
     defs.push(guild_only(
-        chat("tag", "Post a saved message by its tag in this channel").option(
+        chat("tag", "Post a custom message by its tag in this channel").option(
             StringBuilder::new("name", "The tag")
                 .required(true)
                 .autocomplete(true),

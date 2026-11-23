@@ -268,7 +268,7 @@ async fn order(
     let what = if b.reset {
         "sorted the message categories A to Z"
     } else {
-        "changed the order of the saved messages"
+        "changed the order of the custom messages"
     };
     audit(&st, &s, guild, what.to_string()).await?;
     Ok(Json(json!({"ok": true})))

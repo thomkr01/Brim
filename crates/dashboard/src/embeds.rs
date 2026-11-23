@@ -1274,7 +1274,7 @@ async fn save(
         )),
         (None, Some(_)) => Err(ApiError::NotFound),
         (None, None) => Err(ApiError::BadRequest(format!(
-            "this server already has {MAX_MESSAGES} saved messages: delete one first"
+            "this server already has {MAX_MESSAGES} custom messages: delete one first"
         ))),
     }
 }

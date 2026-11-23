@@ -126,7 +126,7 @@ const NAV: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "Messages",
-        &[("embeds", "Saved messages"), ("bot_messages", "Default messages"), ("feeds", "Feeds"), ("giveaways", "Giveaways")],
+        &[("embeds", "Custom messages"), ("bot_messages", "Default messages"), ("feeds", "Feeds"), ("giveaways", "Giveaways")],
     ),
     (
         "Tools",

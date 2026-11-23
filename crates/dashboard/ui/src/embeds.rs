@@ -1798,7 +1798,7 @@ pub fn Embeds(
     let del_sent = move |send: i64| {
         ask(
             Ask::new("Delete this copy?")
-                .text("Brim deletes it in Discord and removes it from the Sent log. The saved message stays.")
+                .text("Brim deletes it in Discord and removes it from the Sent log. The custom message stays.")
                 .yes("Delete")
                 .danger(),
             move |_| {
@@ -2037,7 +2037,7 @@ pub fn Embeds(
     let builder = move || {
         view! {
             <div class="mbhead">
-                <button class="ghost back" on:click=move |_| back()>"← Saved messages"</button>
+                <button class="ghost back" on:click=move |_| back()>"← Custom messages"</button>
                 <input class="name" placeholder="Name this message" maxlength="100" aria-label="message name" class:need=move || cur.with(|c| c["name"].as_str().unwrap_or("").trim().is_empty())
                     prop:value=move || cur.with(|c| c["name"].as_str().unwrap_or("").to_string()) on:input=move |e| { let v = event_target_value(&e); cur.update(|c| c["name"] = json!(v)) } />
                 {move || cur.with(|c| states(c))}

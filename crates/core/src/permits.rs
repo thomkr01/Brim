@@ -275,7 +275,7 @@ pub const CATALOG: &[PermSection] = &[
             perm(
                 "tags",
                 "Post Tags",
-                "Post a saved message by its tag with /tag",
+                "Post a custom message by its tag with /tag",
             ),
             perm(
                 "giveaways",
