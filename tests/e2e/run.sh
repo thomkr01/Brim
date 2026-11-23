@@ -25,7 +25,9 @@ if ! pg_isready -q -h localhost; then
 fi
 
 [ -n "${SKIP_UNIT:-}" ] || cargo test --workspace
-[ -f $DASHBOARD_DIST/index.html ] || (cd crates/dashboard/ui && trunk build --release)
+# The web app builds while the dashboard server builds below, so the two builds overlap.
+ui=
+[ -f $DASHBOARD_DIST/index.html ] || { (cd crates/dashboard/ui && trunk build --release) & ui=$!; }
 
 # The permission matrix runs at the same time as dashboard.js, on its own database, dashboard and
 # mock (each counts what its mock was sent), so neither sees the other's rows. DEEP=1 runs all of
@@ -34,6 +36,7 @@ matrix_db=${DATABASE_URL%/*}/matrix_$db_name
 python3 tests/e2e/mock_discord.py & mock=$!
 python3 tests/e2e/mock_discord.py 9101 & mock2=$!
 cargo build -q --release -p brim-dashboard
+[ -z "$ui" ] || wait "$ui"
 target/release/brim-dashboard & dash=$!
 dash2=
 trap 'kill $mock $mock2 $dash $dash2 2>/dev/null' EXIT
