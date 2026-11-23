@@ -7313,19 +7313,11 @@ fn missing_code(d: &Def, msg: &Value) -> Option<String> {
         .map(|v| format!("{{{}}}", public_name(key, v)))
         .collect();
     (!gone.is_empty()).then(|| {
-        let (place, insert) = if in_text {
-            ("its text or first embed", "Put it back")
-        } else {
-            ("its first embed", "Press Insert Bot text")
-        };
-        let plain = if d.strict() {
-            ", as plain text (not in a spoiler, a link or <...>)"
-        } else {
-            ""
-        };
-        let key = if gone.len() == 1 { "the key variable" } else { "the key variables" };
+        let place = if in_text { "in the text or the first embed" } else { "in the first embed" };
+        let plain = if d.strict() { ", not in a spoiler or a link" } else { "" };
+        let (are, it) = if gone.len() > 1 { ("are", "them") } else { ("is", "it") };
         format!(
-            "this message must keep {key} {} in {place}{plain}: Brim puts {} there. {insert}, or use Revert to default",
+            "{} {are} missing. Put {it} back {place}{plain}, or use Revert to default. Brim fills {it} in with {}",
             gone.join(", "),
             d.what
         )
@@ -7949,7 +7941,7 @@ mod tests {
             "```{text}\ncode```",
         ] {
             let why = missing_text("log.panic", &e(hidden));
-            assert!(why.is_some_and(|w| w.contains("plain text")), "{hidden}");
+            assert!(why.is_some_and(|w| w.contains("not in a spoiler")), "{hidden}");
             // Other entries keep the old rule.
             assert!(
                 missing_text("log.message", &e(hidden)).is_none(),

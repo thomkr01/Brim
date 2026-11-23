@@ -429,6 +429,7 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .note.setup-first > b, .note.req-text > b { flex:0 0 100%; }
 .note.setup-first > .muted, .note.req-text > .muted { flex:1; min-width:200px; }
 .note.req-text.bad { border-color:color-mix(in srgb, var(--bad) 60%, var(--line)); background:color-mix(in srgb, var(--bad) 10%, var(--b3)); }
+.note.req-text .chipset { flex:0 0 100%; } .note.req-text button.chip.copyvar { margin:0; cursor:pointer; } .note.req-text button.chip.copyvar.need { border-color:var(--bad); color:var(--bad); }
 @media (max-width:600px) { .note.chk:has(> .acts) { flex-wrap:wrap; } .note.chk:has(> .acts) > div { flex-basis:100%; } .note.chk > .acts { margin-left:0; justify-content:flex-start; } }
 /* Bot Profile: one panel, images left, fields middle, live previews right (two columns below 1200 px wide, one on a phone). */
 .bp { display:grid; grid-template-columns:200px minmax(0,1fr) 300px; gap:var(--space-24); align-items:start; } .bp-fields > .row:first-child { margin-top:0; }

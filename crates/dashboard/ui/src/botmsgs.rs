@@ -642,20 +642,22 @@ pub fn BotMessages(
                 let what = what.clone();
                 let r4 = r3.clone();
                 let all: Vec<String> = r3["required"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|v| format!("{{{v}}}")).collect();
-                let var = all.join(" and ");
-                let key = if all.len() > 1 { "Key variables" } else { "Key variable" };
-                let (place, button) = if r3["in_text"] == true {
-                    ("in the message text or the first embed", format!("Insert {var}"))
-                } else if all.len() > 1 {
-                    ("in the first embed", format!("Insert {var}"))
-                } else {
-                    ("in the first embed", "Insert Bot text".to_string())
-                };
-                let place = if r3["plain_facts"] == true { format!("{place}, as plain text (not in a spoiler, a link or <...>)") } else { place.to_string() };
+                let lost = missing(&r3, &cur.with(|c| c["body"].clone()));
+                let many = all.len() > 1;
+                let button = if many || r3["in_text"] == true { "Put them back" } else { "Insert Bot text" };
+                let place = if r3["in_text"] == true { "in the text or the first embed" } else { "in the first embed" };
+                let hide = if r3["plain_facts"] == true { " Don't hide them in a spoiler or a link." } else { "" };
+                // Each variable copies itself on a click, missing ones in red.
+                let chips = all.into_iter().map(|v| {
+                    let miss = lost.iter().any(|l| format!("{{{l}}}") == v);
+                    let t = v.clone();
+                    view! { <button class="chip copyvar" class:need=miss title="Click to copy" on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}</button> }
+                }).collect_view();
                 view! {
                     <div class="note req-text" class:bad=gone>
-                        <b>{if gone { format!("{key} {var} {}: this message cannot be saved without {}.", if all.len() > 1 { "are missing" } else { "is missing" }, if all.len() > 1 { "them" } else { "it" }) } else { format!("This message must use the {} {var}.", key.to_lowercase()) }}</b>
-                        <span class="muted">{format!("What is {var}? Brim puts {what} there. Write anything you like around it, but keep {var} {place}.")}</span>
+                        <b>{if gone { "The red ones are missing. Put them back to save." } else if many { "Keep these in the message:" } else { "Keep this in the message:" }}</b>
+                        <span class="chipset">{chips}</span>
+                        <span class="muted">{format!("Brim fills them in with {what}. Write what you like around them, but keep them {place}.{hide}")}</span>
                         {gone.then(|| view! { <button class="ghost" on:click=move |_| { cur.update(|c| insert_required(&r4, &mut c["body"])); ed.reset() }>{button}</button> })}
                     </div>
                 }

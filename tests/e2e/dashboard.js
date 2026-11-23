@@ -629,6 +629,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('.mrow .nm b:text-is("Message Edited")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Message Edited row'));
   await page.locator('.note.req-text').waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Bot text notice on a log entry'));
   if (await page.locator('.note.req-text.bad').count()) failed.push('bot messages: the default log entry is marked as missing {text}');
+  if (!(await page.locator('.note.req-text button.chip.copyvar:text-is("{text}")').count())) failed.push('bot messages: the key variable has no copy chip');
   await page.click('button:text-is("← Default messages")', { timeout: 5000 }).catch(() => failed.push('bot messages: no way back from a log entry'));
   await find.fill('');
   // Cancel on a changed setting puts dropdowns back too: a plain `selected=` attribute stops counting once the user has picked.
