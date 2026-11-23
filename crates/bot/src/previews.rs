@@ -314,6 +314,7 @@ fn added_buttons() -> Value {
     let claim = json!([crate::giveaways::claim_row(1)]);
     let jump = || "https://discord.com/channels/1/2/3".to_string();
     let link = |label: &'static str| crate::events::link_row(Some(&(label, jump())));
+    let links = |labels: &[&str]| json!({"type": 1, "components": labels.iter().map(|l| crate::welcome::link(l, jump())).collect::<Vec<_>>()});
     use brim_logging::{GO_CHANNEL, GO_MESSAGE, GO_POLL};
     let mut m = json!({
         "giveaway.running": [crate::giveaways::enter_row(1, "", "{e:giveaway_enter}")],
@@ -330,7 +331,41 @@ fn added_buttons() -> Value {
         "verify.ban_ended": [verify::row(crate::welcome::link("Join again", jump()))],
         "log.report.message_reported": crate::reports::rows(1, jump(), true),
         "log.join_raid.raid_report": crate::events::link_row(Some(&(joingate::RAID_REPORT, jump()))),
+        "log.auto_mod.nsfw_image_found": [crate::nsfw::row(1)],
+        "log.report.discord_automod_report": crate::reports::rows(1, jump(), false),
+        "reply.report.user_cases": [crate::reports::pager(1, 0, 3)],
+        "welcome.added": [links(&["Setup Wizard", "Support"])],
+        "reply.help.invite": [links(&["Add Brim", "Dashboard", "Support"])],
     });
+    // One link button, with the label the sender gives it.
+    for (label, keys) in [
+        ("Message Logs", &["log.ticket.ticket_closed"][..]),
+        ("Join", &["dm.invite_link"]),
+        ("Open the queue", &["dm.raider_notify"]),
+        ("Dashboard", &["reply.help.dashboard"]),
+        (
+            "Appeal",
+            &[
+                "dm.punish.warn",
+                "dm.punish.timeout",
+                "dm.punish.quarantine",
+                "dm.punish.kick",
+                "dm.punish.softban",
+                "dm.punish.tempban",
+                "dm.punish.unquarantine",
+                "dm.punish.untimeout",
+                "dm.punish.unban",
+                "dm.punish.ban",
+            ],
+        ),
+    ] {
+        for k in keys {
+            m[*k] = json!([links(&[label])]);
+        }
+    }
+    for (k, row) in crate::settings::pagers(MEMBER) {
+        m[k] = json!([row]);
+    }
     // The links the log entries carry (`render.rs`): the label comes from the same constant.
     for (label, keys) in [
         (
@@ -360,6 +395,8 @@ fn added_buttons() -> Value {
                 "log.thread.thread_create",
                 "log.thread.thread_update",
                 "log.thread.thread_archived_automatically",
+                "log.channel.stage_start",
+                "log.channel.stage_update",
             ],
         ),
     ] {
@@ -384,6 +421,95 @@ pub async fn publish(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
     Ok(())
+}
+
+/// Each source file and how many sends with buttons or menus it has. A new send fails
+/// `every_send_with_buttons_is_known`: declare its buttons in `added_buttons` (or as a panel in
+/// the dashboard's `added_buttons`), then raise its count here.
+// shortcut: counts call sites by text, so a send through a new helper is not seen; replace it with a
+// typed send path when one exists.
+#[cfg(test)]
+const SENDS_WITH_BUTTONS: &[(&str, usize)] = &[
+    ("bot/src/antinuke.rs", 2),
+    ("bot/src/appeals.rs", 3),
+    ("bot/src/automod.rs", 1),
+    ("bot/src/confirm.rs", 5),
+    ("bot/src/events.rs", 4),
+    ("bot/src/giveaways.rs", 8),
+    ("bot/src/invite_cmds.rs", 1),
+    ("bot/src/joingate.rs", 1),
+    ("bot/src/nsfw.rs", 1),
+    ("bot/src/owner.rs", 2),
+    ("bot/src/raiders/join.rs", 1),
+    ("bot/src/raiders/review.rs", 2),
+    ("bot/src/raiders/tasks.rs", 1),
+    ("bot/src/reply.rs", 7),
+    ("bot/src/reports.rs", 6),
+    ("bot/src/scheduler.rs", 1),
+    ("bot/src/settings/mod.rs", 2),
+    ("bot/src/slash.rs", 1),
+    ("bot/src/tickets/commands.rs", 1),
+    ("bot/src/tickets/dm.rs", 6),
+    ("bot/src/tickets/panel.rs", 7),
+    ("bot/src/tickets/public.rs", 2),
+    ("bot/src/tickets/staff.rs", 1),
+    ("bot/src/undo.rs", 1),
+    ("bot/src/verify.rs", 9),
+    ("bot/src/welcome.rs", 2),
+    ("bot/src/whitelist.rs", 5),
+    ("dashboard/src/appeals.rs", 1),
+    ("dashboard/src/discord.rs", 1),
+    ("dashboard/src/embeds.rs", 2),
+    ("dashboard/src/sections.rs", 1),
+];
+
+#[test]
+fn every_send_with_buttons_is_known() {
+    let marks = [
+        ".components(",
+        "components: Some(",
+        "send_log_rows(",
+        "send_log_link(",
+        "dm_msg(",
+        "send_dm(",
+        "\"components\":",
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut found = Vec::new();
+    for dir in ["bot/src", "dashboard/src"] {
+        let mut todo = vec![root.join(dir)];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                let name = p.to_string_lossy().replace('\\', "/");
+                if p.is_dir() {
+                    todo.push(p);
+                    continue;
+                }
+                if !name.ends_with(".rs")
+                    || name.ends_with("test.rs")
+                    || name.ends_with("tests.rs")
+                    || name.ends_with("previews.rs")
+                    || name.ends_with("test_support.rs")
+                {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&p).unwrap();
+                let code = src.split("\n#[cfg(test)]\nmod ").next().unwrap();
+                let n: usize = marks.iter().map(|m| code.matches(m).count()).sum();
+                if n > 0 {
+                    let short = name.split("/../").last().unwrap().to_string();
+                    found.push((short, n));
+                }
+            }
+        }
+    }
+    found.sort();
+    let pinned: Vec<(String, usize)> = SENDS_WITH_BUTTONS
+        .iter()
+        .map(|(f, n)| (f.to_string(), *n))
+        .collect();
+    assert_eq!(found, pinned);
 }
 
 #[test]

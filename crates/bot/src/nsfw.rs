@@ -527,7 +527,12 @@ async fn hit_log(
     s: &[f32; 5],
 ) -> Result<()> {
     let log = found_log(m.author.id.get(), m.channel_id.get(), id, s);
-    let row = Component::ActionRow(ActionRow {
+    send_log_rows(app, gid.get(), LogKind::AutoMod, log, &[row(id)]).await
+}
+
+/// Not NSFW and Correct under the hit log of scan `id`.
+pub(crate) fn row(id: i64) -> Component {
+    Component::ActionRow(ActionRow {
         id: None,
         components: vec![
             button(
@@ -537,8 +542,7 @@ async fn hit_log(
             ),
             button("Correct", &format!("{BUTTON}ok:{id}"), ButtonStyle::Danger),
         ],
-    });
-    send_log_rows(app, gid.get(), LogKind::AutoMod, log, &[row]).await
+    })
 }
 
 /// `nsfw:fp:{scan}` / `nsfw:ok:{scan}` on the hit log: needs the purge permit (timeout and up).
