@@ -768,3 +768,9 @@ The revert path replaced the whole editor value with `{"body": ..}`. The `added`
 `{text}` had one example, "What happened, written by Brim.", in every message. In the ticket panel it read as a panel line, in a ticket reply as a member's words, which is wrong.
 
 **Rule:** when a variable name is shared by messages that fill it with different things, give each message its own example (`var_info` in `crates/logging/src/botmsg.rs`), and take it from the server's real data where the dashboard knows it (the ticket panel lines).
+
+## A long link in a Discord preview ran past the message box
+
+A message line with a long link had no break point, so on a phone it ran outside the box. Discord breaks such a link.
+
+**Rule:** the text column of `.dmsg` has `overflow-wrap:anywhere`. Check a preview at 390 px with a long link in it.
