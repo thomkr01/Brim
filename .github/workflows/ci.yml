@@ -143,6 +143,16 @@ jobs:
           # Pinned by commit, the action no longer reads the toolchain from its ref name.
           toolchain: stable
           targets: wasm32-unknown-unknown
+      # A branch or main run builds the dashboard server and the web app light: a low optimisation
+      # level, no fat LTO. A release tag run keeps the profile that ships, so the run that decides if a
+      # release gets images tests the shipping build. This step comes before the cache step: the cache
+      # key follows these variables.
+      - name: Light build profile (not for a tag)
+        if: github.ref_type != 'tag'
+        run: |
+          echo CARGO_PROFILE_RELEASE_OPT_LEVEL=1 >> "$GITHUB_ENV"
+          echo CARGO_PROFILE_RELEASE_LTO=false >> "$GITHUB_ENV"
+          echo CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: |
