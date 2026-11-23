@@ -6833,6 +6833,19 @@ fn to_code(d: &Def, msg: &Value) -> Value {
 
 /// The editor name and example of a template variable of entry `key`.
 pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
+    // A command's answer is not a log: its title and text get their own examples.
+    if key.starts_with("cmd.") {
+        match name {
+            "title" => return ("Title of the answer", "Commands"),
+            "text" => {
+                return (
+                    "The answer of the command",
+                    "Here is what the command found.",
+                )
+            }
+            _ => {}
+        }
+    }
     // `{text}` is a different thing in each message: give each the example that fits it.
     if name == "text" {
         let ex = match key {
@@ -7880,6 +7893,16 @@ mod tests {
 
     /// Security texts (plan section 6): editable, but every required placeholder must show as
     /// plain text, and a fact that does not arrive whole sends the default.
+    #[test]
+    fn a_command_answer_has_no_log_example() {
+        assert_eq!(var_info("cmd.commands", "title").1, "Commands");
+        assert_ne!(
+            var_info("cmd.ban", "text").1,
+            var_info("log.message", "text").1
+        );
+        assert_eq!(var_info("log.message", "title").1, "Message Deleted");
+    }
+
     #[test]
     fn security_texts_keep_their_facts() {
         let sec: Vec<&str> = defs()
