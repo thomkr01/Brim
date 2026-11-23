@@ -1707,7 +1707,6 @@ Default messages can carry buttons that code adds (`giveaway.running`, `ticket.c
 ## One dropped request ended the whole access matrix and named nothing (e2e, 2026-11-23)
 
 In CI run 45195154781 the browser sweep failed with `FAIL matrix: crashed: page.evaluate: TypeError: Failed to fetch`. The page tests passed, the server log held no error and no panic, and the same page code passed on the next commit. The log could not say which of the hundreds of calls was dropped, because one thrown error ended the whole matrix loop and only the crash text was kept. Whether it was the runner or a route that closes a connection without an answer could not be told.
-
 **Rule:** a test loop that makes many calls catches the error of each call and fails with the call's own name (user, method, path), then goes on. A crash that names nothing is a finding nobody can follow up. The matrix in `tests/e2e/deep.js` now does this. If the same route drops again, it is a real fault in that route, not the runner.
 
 
