@@ -885,7 +885,7 @@ pub async fn tell(app: &App, gid: Id<GuildMarker>, user: Id<UserMarker>, n: Noti
     send_dm(app, user, &text, &embeds, &rows).await
 }
 
-async fn send_dm(
+pub(crate) async fn send_dm(
     app: &App,
     user: Id<UserMarker>,
     text: &str,

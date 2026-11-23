@@ -381,7 +381,7 @@ pub(super) async fn bypasses(app: &App, gid: Id<GuildMarker>, user: Id<UserMarke
 /// A ticket DM goes through the server's word, scam and invite filters. The local word
 /// list is used even when words go to Discord's AutoMod, which never sees a DM.
 /// shortcut: no shortener lookup and no attachment scan; add them if scams move there.
-pub(super) fn filtered(app: &App, cfg: &crate::app::GuildCfg, text: &str) -> bool {
+pub(crate) fn filtered(app: &App, cfg: &crate::app::GuildCfg, text: &str) -> bool {
     use brim_automod::filters;
     let am = &cfg.automod;
     if !am.enabled {

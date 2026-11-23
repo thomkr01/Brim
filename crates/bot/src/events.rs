@@ -889,6 +889,17 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
             }
             crate::catch::keep_top(app, c).await?;
         }
+        Event::MessageDelete(m) => {
+            if let Some(g) = m.guild_id {
+                crate::giveaways::on_message_delete(app, g, &[m.id.get() as i64]).await?;
+            }
+        }
+        Event::MessageDeleteBulk(m) => {
+            if let Some(g) = m.guild_id {
+                let ids: Vec<i64> = m.ids.iter().map(|i| i.get() as i64).collect();
+                crate::giveaways::on_message_delete(app, g, &ids).await?;
+            }
+        }
         Event::ChannelDelete(c) => {
             app.note_parent(&c.0);
             // A server channel always has its server; the rows below all belong to one.
@@ -903,6 +914,9 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
                     crate::msgrules::channel_deleted(app, g, c.id.get(), c.name.as_deref()).await
                 {
                     tracing::warn!(?e, "pausing a deleted channel's message schedules failed");
+                }
+                if let Err(e) = crate::giveaways::on_channel_delete(app, g, c.id.get()).await {
+                    tracing::warn!(?e, "marking a deleted channel's giveaways failed");
                 }
                 // Logged, not `?`: the log and verification channel remakes below must still run.
                 if let Err(e) = tickets::on_channel_delete(app, g, c.id).await {
@@ -999,6 +1013,9 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
             if let Err(e) = crate::sticky::on_member_update(app, m).await {
                 tracing::warn!(?e, "saving sticky roles failed");
             }
+            if let Err(e) = crate::giveaways::on_member_update(app, m).await {
+                tracing::warn!(?e, "checking giveaway entries after a role change failed");
+            }
             if !crate::joingate::on_member_update(app, m).await? {
                 let (user, nick) = (&m.user, m.nick.as_deref());
                 let r = crate::dehoist::check(app, m.guild_id, user, nick, &m.roles).await;
@@ -1023,6 +1040,9 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
             if let Err(e) = crate::profile_log::on_leave(app, m.guild_id, m.user.id).await {
                 tracing::warn!(?e, "removing a leaver's stored name and avatar failed");
             }
+            if let Err(e) = crate::giveaways::on_member_remove(app, m.guild_id, m.user.id).await {
+                tracing::warn!(?e, "removing a leaver's giveaway entries failed");
+            }
             crate::sticky::on_leave(app, m.guild_id, m.user.id).await?
         }
         Event::BanAdd(b) => {
@@ -1041,6 +1061,7 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
                 && !crate::nsfw::handle(app, &i.0).await?
                 && !crate::msgmenu::handle(app, &i.0).await?
                 && !crate::undo::handle(app, &i.0).await?
+                && !crate::giveaways::handle(app, &i.0).await?
             {
                 slash::handle(app, &i.0).await?
             }

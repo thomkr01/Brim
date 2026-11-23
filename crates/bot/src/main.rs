@@ -25,6 +25,7 @@ mod dehoist;
 mod events;
 mod feeds;
 mod general;
+mod giveaways;
 mod hierarchy;
 mod http_err;
 mod info;

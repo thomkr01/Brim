@@ -1484,6 +1484,39 @@ pub fn schema() -> Vec<Value> {
                 ti(fg("Whitelist", "users", "users"), "Whitelisted members"),
             ],
         ),
+        (
+            "giveaways",
+            "Giveaways",
+            vec![
+                hp(
+                    dv(ti(fg("General", "enabled", "bool"), "Use giveaways"), true),
+                    "Off: nobody can start or enter a giveaway. Running giveaways still end and draw their winners.",
+                ),
+                ti(dv(fg("New giveaways", "button_label", "text"), "Enter"), "Button label"),
+                ti(dv(fg("New giveaways", "button_emoji", "text"), "🎉"), "Button emoji"),
+                hp(
+                    ti(fg("New giveaways", "blocked_roles", "roles"), "Blocked roles"),
+                    "Members with one of these roles cannot enter, also with a bypass role.",
+                ),
+                hp(
+                    ti(dv(fg("New giveaways", "min_account_age_days", "int"), 7), "Minimum account age (days)"),
+                    "New accounts are often made to farm giveaways. 0 turns this off.",
+                ),
+                hp(
+                    ti(dv(fg("New giveaways", "min_member_hours", "int"), 0), "Minimum time in the server (hours)"),
+                    "Counts from the member's latest join. 0 turns this off.",
+                ),
+                hp(
+                    ti(fg("New giveaways", "block_raid_joiners", "bool"), "Refuse members a join raid caught"),
+                    "Members that Join Raid caught in their current stay cannot enter.",
+                ),
+                hp(
+                    ti(dv(fg("New giveaways", "claim_hours", "int"), 48), "Claim time (hours)"),
+                    "How long a winner has to claim the prize.",
+                ),
+                ti(dv(fg("Limits", "max_running", "int"), 25), "Running giveaways at once"),
+            ],
+        ),
         ("panic", "Panic mode", panic),
         ("backups", "Backups", backups),
         ("appeals", "Appeals", appeals),

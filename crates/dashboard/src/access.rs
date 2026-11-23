@@ -52,6 +52,7 @@ pub const SECTIONS: &[&str] = &[
     "misc",
     "logging",
     "raider_list",
+    "giveaways",
     "retention",
     "commands",
     "modules",

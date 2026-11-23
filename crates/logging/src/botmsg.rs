@@ -545,6 +545,7 @@ fn build() -> Vec<Def> {
     out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["name", "page"], embed("Rescue key expired", ORANGE, &["⚠️ The rescue key of **{name}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {page}. It needs your dashboard 2FA.".into()])));
     out.push(def("dm.dashboard_2fa", "Dashboard 2FA setup code", s, false, &["code"], embed("Your setup code", BLUE, &["🔐 Your Brim authenticator setup code is **{code}**. If you didn't start this, don't share it: someone may have your dashboard session.".into()])));
     feeds(&mut out);
+    giveaways(&mut out);
     mod_entries(&mut out);
     d3_entries(&mut out);
     d5_entries(&mut out);
@@ -4524,6 +4525,171 @@ const SECURITY: &str = "Security";
 /// Feed posts (feeds plan 4b): by default as if the source posted it, the plain link so Discord
 /// shows the site's own preview, no Brim branding. `{link}` is required: it is what a feed
 /// post is for. Each feed may also keep its own edited version (`feeds.message`).
+/// Giveaways (Messages module): the posted message in its three states, the winners post, the
+/// winner DM, the private answers to the Enter button and the command replies. The default
+/// message follows the usual giveaway layout: the prize as the title, then the end time, the host,
+/// the entries and the winner count.
+fn giveaways(out: &mut Vec<Def>) {
+    const G: &str = "Giveaways";
+    let msg = |key: &str, name: &str, vars: &[&'static str], req: &[&'static str], m: Value| {
+        let mut d = def(key, name, G, false, vars, m);
+        d.required = req.to_vec();
+        d.what = "";
+        d
+    };
+    let card = |title: &str, color: u32, lines: &[&str]| {
+        embed(
+            title,
+            color,
+            &lines.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
+        )
+    };
+    out.push(msg(
+        "giveaway.running",
+        "Giveaway message (running)",
+        &[
+            "prize",
+            "ends",
+            "host",
+            "sponsor",
+            "entries",
+            "winners",
+            "requirements",
+            "id",
+        ],
+        &["prize", "ends"],
+        card(
+            "{prize}",
+            ORANGE,
+            &[
+                "{e:clock} **Ends:** {ends}",
+                "{e:user_id} **Hosted by:** {host}",
+                "{e:star} **Sponsored by:** {sponsor}",
+                "{e:members} **Entries:** {entries}",
+                "{e:trophy} **Winners:** {winners}",
+                "{requirements}",
+            ],
+        ),
+    ));
+    out.push(msg(
+        "giveaway.ended",
+        "Giveaway message (ended)",
+        &[
+            "prize", "ended", "host", "sponsor", "entries", "winners", "note", "id",
+        ],
+        &["prize", "winners"],
+        card(
+            "{prize}",
+            GREY,
+            &[
+                "{e:clock} **Ended:** {ended}",
+                "{e:user_id} **Hosted by:** {host}",
+                "{e:star} **Sponsored by:** {sponsor}",
+                "{e:members} **Entries:** {entries}",
+                "{e:trophy} **Winners:** {winners}",
+                "{note}",
+            ],
+        ),
+    ));
+    out.push(msg(
+        "giveaway.cancelled",
+        "Giveaway message (cancelled)",
+        &["prize", "host", "sponsor", "id"],
+        &["prize"],
+        card(
+            "{prize}",
+            GREY,
+            &[
+                "This giveaway was cancelled. Nobody won.",
+                "{e:user_id} **Hosted by:** {host}",
+                "{e:star} **Sponsored by:** {sponsor}",
+            ],
+        ),
+    ));
+    out.push(msg(
+        "giveaway.winners",
+        "Winners post",
+        &["winners", "prize", "sponsor", "link"],
+        &["winners", "prize"],
+        json!({"content": "{e:trophy} Congratulations {winners}! You won **{prize}**!\n{e:star} **Sponsored by:** {sponsor}\n{link}", "embeds": []}),
+    ));
+    out.push(msg(
+        "giveaway.no_winners",
+        "Winners post: nobody could win",
+        &["prize", "link"],
+        &["prize"],
+        json!({"content": "Nobody could win **{prize}**: no entrant was still allowed to win.\n{link}", "embeds": []}),
+    ));
+    out.push(msg(
+        "giveaway.reroll",
+        "Reroll post",
+        &["winners", "prize", "link"],
+        &["winners", "prize"],
+        json!({"content": "{e:trophy} New winner: {winners}! You won **{prize}**!\n{link}", "embeds": []}),
+    ));
+    out.push(msg(
+        "giveaway.winner_dm",
+        "Winner DM",
+        &["prize", "server", "sponsor", "link"],
+        &["prize", "link"],
+        card(
+            "You won a giveaway!",
+            ORANGE,
+            &[
+                "{e:trophy} You won **{prize}** in `{server}`.",
+                "{e:star} **Sponsored by:** {sponsor}",
+                "[Go to the giveaway]({link})",
+            ],
+        ),
+    ));
+    out.push(msg(
+        "giveaway.entry_removed",
+        "Entry removed DM",
+        &["prize", "server", "reason"],
+        &["prize", "reason"],
+        card(
+            "Giveaway entry removed",
+            ORANGE,
+            &["Your entry in **{prize}** in `{server}` was removed: {reason}"],
+        ),
+    ));
+    let rows: &[(&str, &str, &[&'static str], &str)] = &[
+        ("giveaway.entry_ok", "Enter: entered", &["prize", "entries", "why"], "{e:success} You entered **{prize}**. You have **{entries}** entries.\n{why}"),
+        ("giveaway.entry_again", "Enter: already in", &["prize", "entries"], "You are already in **{prize}**, with **{entries}** entries."),
+        ("giveaway.entry_denied", "Enter: refused", &["prize", "reason"], "{e:error} You cannot enter **{prize}**: {reason}"),
+        ("reply.giveaway.started", "started", &["id", "prize", "channel", "ends"], "Giveaway `#{id}` for **{prize}** started in {channel}. It ends {ends}."),
+        ("reply.giveaway.not_found", "no such giveaway", &["id"], "There is no giveaway `#{id}` on this server."),
+        ("reply.giveaway.not_running", "not running", &["id"], "Giveaway `#{id}` is not running."),
+        ("reply.giveaway.not_ended", "not ended yet", &["id"], "Giveaway `#{id}` has not ended yet."),
+        ("reply.giveaway.ending", "ends now", &["id"], "Giveaway `#{id}` ends now. The winners are drawn within a few seconds."),
+        ("reply.giveaway.cancelled", "cancelled", &["id"], "Giveaway `#{id}` is cancelled. Nobody won."),
+        ("reply.giveaway.rerolled", "new winners drawn", &["id", "winners"], "New winners of giveaway `#{id}`: {winners}"),
+        ("reply.giveaway.none_left", "nobody left to draw", &["id"], "No other entrant of giveaway `#{id}` can win."),
+        ("reply.giveaway.time", "end time moved", &["id", "ends"], "Giveaway `#{id}` now ends {ends}."),
+        ("reply.giveaway.off", "giveaways are off", &[], "Giveaways are off on this server."),
+        ("reply.giveaway.confirm", "confirm question", &["action", "id", "prize"], "{action} giveaway `#{id}` (**{prize}**)? Press Yes to go on."),
+        ("reply.giveaway.stale", "question out of date", &[], "This question is out of date: the giveaway changed since. Run the command again."),
+        ("reply.giveaway.busy", "another draw ran first", &["id"], "Another draw of giveaway `#{id}` ran at the same time. Look at the giveaway and try again."),
+    ];
+    for (key, name, vars, text) in rows {
+        let name = if key.starts_with("reply.") {
+            format!("Reply: giveaway {name}")
+        } else {
+            name.to_string()
+        };
+        out.push(say(key, &name, G, vars, text));
+    }
+    out.push(plain(
+        "reply.giveaway.list",
+        "Reply: giveaway list",
+        G,
+        &["giveaways"],
+        "Giveaways",
+        ORANGE,
+        "{giveaways}",
+    ));
+}
+
 fn feeds(out: &mut Vec<Def>) {
     for (key, name) in [
         ("feed.rss", "RSS feed post"),
@@ -5654,6 +5820,12 @@ pub const LOG_TYPES: &[(&str, &[&str])] = &[
             "Scheduled Action Failed",
             "Scheduled Action Dropped",
             "Unlock Incomplete",
+            "Giveaway Started",
+            "Giveaway Ended",
+            "Giveaway Cancelled",
+            "Giveaway Rerolled",
+            "Giveaway Edited",
+            "Giveaway Message Problem",
             "App Command Permission Update",
             "Boost Level Changed",
         ],
@@ -5942,6 +6114,7 @@ pub const COMMANDS: &[(&str, &[&str])] = &[
             "viewconfig",
         ],
     ),
+    ("Giveaway commands", &["giveaway"]),
 ];
 
 fn commands(out: &mut Vec<Def>) {
@@ -6099,7 +6272,8 @@ pub fn area(d: &Def) -> Option<(&'static str, &'static str)> {
         "Tickets" if d.name.starts_with("Reply:") => ("Tickets", "Ticket replies"),
         "Tickets" => ("Tickets", "Ticket messages"),
         "Ticket commands" => ("Tickets", g),
-        "Verification" | "Welcome" | "Feeds" => ("Members and server", g),
+        "Verification" | "Welcome" | "Feeds" | "Giveaways" => ("Members and server", g),
+        "Giveaway commands" => ("Commands", g),
         OUTSIDE | "Owner DMs" => ("Members and server", "Bot owner"),
         "Security" => {
             let n = d.name.to_lowercase();
@@ -6123,6 +6297,54 @@ pub fn area(d: &Def) -> Option<(&'static str, &'static str)> {
 
 /// (variable, name in the editor, example for the preview and the test DM).
 const VAR_INFO: &[(&str, &str, &str)] = &[
+    (
+        "giveaways",
+        "The running and recently ended giveaways, one per line",
+        "`12` Nitro: ends in 2 days",
+    ),
+    ("prize", "The giveaway prize", "Nitro for a month"),
+    (
+        "ends",
+        "When the giveaway ends (time left and date)",
+        "in 2 days (23 November 2026 20:00)",
+    ),
+    (
+        "ended",
+        "When the giveaway ended",
+        "2 hours ago (23 November 2026 20:00)",
+    ),
+    ("host", "The giveaway host (mention)", "@alex"),
+    (
+        "sponsor",
+        "Who the giveaway is on behalf of (mention); empty without one",
+        "@sam",
+    ),
+    ("entries", "Number of entries", "42"),
+    (
+        "winners",
+        "The winners (mentions), or the winner count while it runs",
+        "@sam, @kai",
+    ),
+    (
+        "requirements",
+        "Who may enter, one rule per line",
+        "Needs @Members",
+    ),
+    (
+        "note",
+        "A note under the winners (ended late, fewer winners)",
+        "Only 2 members could win.",
+    ),
+    (
+        "why",
+        "Why the member has more than one entry",
+        "Booster role: 5 entries",
+    ),
+    (
+        "link",
+        "Link to the giveaway message",
+        "https://discord.com/channels/1/2/3",
+    ),
     ("server", "Server name", "My Server"),
     (
         "permissions",
@@ -6655,9 +6877,10 @@ pub fn unknown_vars(key: &str, msg: &Value) -> Vec<String> {
     let Some(d) = find(key) else { return vec![] };
     let mut found = Vec::new();
     collect(msg, &mut found);
-    // The panel message fills Brim emoji tags itself.
+    // The ticket panel and the giveaway messages fill Brim emoji tags themselves.
     found.retain(|n| {
-        !d.vars.contains(&n.as_str()) && !(key == "ticket.panel" && n.starts_with("e:"))
+        !d.vars.contains(&n.as_str())
+            && !((key == "ticket.panel" || key.starts_with("giveaway.")) && n.starts_with("e:"))
     });
     found.sort();
     found.dedup();
@@ -7376,6 +7599,7 @@ mod tests {
                 "reply.report.sent",
                 "reply.catch.warning",
                 "reply.mod.result",
+                "reply.giveaway.list",
             ]
             .contains(&d.key.as_str())
                 // The lock command answers  are one embed each.

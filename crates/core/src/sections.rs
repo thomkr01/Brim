@@ -1370,7 +1370,7 @@ pub struct ModulesCfg {
     /// The moderation commands (not lock, unlock and unquarantine), member reports and the catch
     /// channel. Anti Nuke and Auto Mod still punish and record cases.
     pub moderation: bool,
-    /// Triggers, sticky messages, "every N messages" and clock schedules, tags and feeds.
+    /// Triggers, sticky messages, "every N messages" and clock schedules, tags, feeds and giveaways.
     pub messages: bool,
     /// Event logs. Security and moderation logs still post (`LogKind::ignorable`).
     pub logging: bool,
@@ -1392,6 +1392,7 @@ pub fn module_of(section: &str) -> Option<&'static str> {
     match section {
         "joingate" | "joinraid" | "verification" | "raider_list" => Some("server_joins"),
         "catch" => Some("moderation"),
+        "giveaways" => Some("messages"),
         _ => None,
     }
 }
@@ -1426,6 +1427,42 @@ pub struct CatchCfg {
     /// Never punished, besides bots, permit holders and owners.
     pub roles: Vec<Id<RoleMarker>>,
     pub users: Vec<Id<UserMarker>>,
+}
+
+/// Giveaways (part of the Messages module): the switch and what a new giveaway starts with.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct GiveawaysCfg {
+    pub enabled: bool,
+    pub button_label: String,
+    pub button_emoji: String,
+    /// Members with one of these roles never enter a giveaway made with the defaults.
+    pub blocked_roles: Vec<Id<RoleMarker>>,
+    pub min_account_age_days: u32,
+    pub min_member_hours: u32,
+    /// Members a join raid caught cannot enter.
+    pub block_raid_joiners: bool,
+    /// Hours a winner has to claim the prize.
+    pub claim_hours: u32,
+    /// Running giveaways at once, up to `giveaways::MAX_RUNNING`.
+    pub max_running: u32,
+}
+
+impl Default for GiveawaysCfg {
+    fn default() -> Self {
+        Self {
+            // Off until the server turns it on (owner decision 2026-11-23).
+            enabled: false,
+            button_label: "Enter".into(),
+            button_emoji: "🎉".into(),
+            blocked_roles: vec![],
+            min_account_age_days: 7,
+            min_member_hours: 0,
+            block_raid_joiners: false,
+            claim_hours: 48,
+            max_running: crate::giveaways::MAX_RUNNING as u32,
+        }
+    }
 }
 
 /// The position that puts channel `me` (id, parent, position) below every other channel of

@@ -12,8 +12,8 @@ use brim_automod::{
 use brim_core::{
     permits::{self, Level, RateLimiter},
     sections::{
-        AntinukeCfg, AppealsCfg, AutomodCfg, BackupsCfg, CatchCfg, LockdownCfg, MiscCfg, PanicCfg,
-        RaiderListCfg, TicketsCfg, WhitelistCfg,
+        AntinukeCfg, AppealsCfg, AutomodCfg, BackupsCfg, CatchCfg, GiveawaysCfg, LockdownCfg,
+        MiscCfg, PanicCfg, RaiderListCfg, TicketsCfg, WhitelistCfg,
     },
 };
 use brim_logging::{LogConfig, Logger};
@@ -48,6 +48,7 @@ pub struct GuildCfg {
     pub tickets: TicketsCfg,
     pub catch: CatchCfg,
     pub raider_list: RaiderListCfg,
+    pub giveaways: GiveawaysCfg,
     pub modules: brim_core::sections::ModulesCfg,
     /// Per-command settings (`cmdcfg`); empty on a server that changed none.
     pub commands: brim_core::cmdcfg::CommandsCfg,
@@ -97,6 +98,7 @@ pub fn check_section(name: &str, v: &Value, old: &Value) -> Result<(), String> {
         "verification" => t::<VerificationCfg>(v),
         "tickets" => t::<TicketsCfg>(v),
         "raider_list" => t::<RaiderListCfg>(v),
+        "giveaways" => t::<GiveawaysCfg>(v),
         "modules" => t::<brim_core::sections::ModulesCfg>(v),
         "commands" => t::<brim_core::cmdcfg::CommandsCfg>(v),
         _ => Ok(()),
@@ -139,6 +141,7 @@ impl GuildCfg {
             tickets: section(cfg, "tickets", &mut f),
             catch: section(cfg, "catch", &mut f),
             raider_list: section(cfg, "raider_list", &mut f),
+            giveaways: section(cfg, "giveaways", &mut f),
             modules: section(cfg, "modules", &mut f),
             commands: section(cfg, "commands", &mut f),
             fallbacks: vec![],
@@ -156,6 +159,9 @@ impl GuildCfg {
             c.raider_list.enabled = false;
         }
         c.logging.off = !c.modules.logging;
+        if !c.modules.messages {
+            c.giveaways.enabled = false;
+        }
         // Moderation off: its commands are refused by the command gates (`cmdcfg::module_off`).
         if !c.modules.moderation {
             c.catch.enabled = false;

@@ -1003,7 +1003,7 @@ fn action_row(components: Vec<Component>) -> Component {
 }
 
 mod commands;
-mod dm;
+pub(crate) mod dm;
 mod msgs;
 mod panel;
 pub(crate) mod public;

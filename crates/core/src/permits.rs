@@ -277,6 +277,11 @@ pub const CATALOG: &[PermSection] = &[
                 "Post Tags",
                 "Post a saved message by its tag with /tag",
             ),
+            perm(
+                "giveaways",
+                "Manage Giveaways",
+                "Start, end, cancel, reroll and redraw giveaways",
+            ),
         ],
     },
     PermSection {

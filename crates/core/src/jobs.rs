@@ -58,8 +58,10 @@ pub async fn enqueue_once<'e>(
 /// Jobs that fail this many times are dropped by the scheduler.
 pub const MAX_ATTEMPTS: i32 = 5;
 /// Kinds that can run for minutes; a separate worker takes them so they never delay unbans or unlocks.
-pub const HEAVY: [&str; 6] = [
+pub const HEAVY: [&str; 7] = [
     "backup_load",
+    // A draw checks each picked winner with Discord; 100 winners can take a minute.
+    "giveaway_end",
     "raider_scan",
     // Startup catch-ups that page members or the audit log (D58).
     "requarantine_missed",

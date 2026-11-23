@@ -53,7 +53,7 @@ pub const INVITE_MAX_USES: (i64, i64) = (0, 100);
 
 /// Numbers at a fixed path whose 0 or out-of-range value would quietly switch their feature off:
 /// (section, path, range). `panic.executors` may be 0: that turns panic mode off.
-const FIXED: [(&str, &str, (i64, i64)); 33] = [
+const FIXED: [(&str, &str, (i64, i64)); 37] = [
     ("automod", "strike.cap", STRIKE_CAP),
     ("automod", "strike.multiplier_pct", STRIKE_MULTIPLIER),
     (
@@ -112,6 +112,15 @@ const FIXED: [(&str, &str, (i64, i64)); 33] = [
     ("retention", "appeals_days", (0, 3650)),
     ("retention", "tickets_days", (0, 3650)),
     ("retention", "config_history_days", (0, 3650)),
+    // Defaults for new giveaways; 0 turns an age rule off.
+    (
+        "giveaways",
+        "max_running",
+        (1, crate::giveaways::MAX_RUNNING),
+    ),
+    ("giveaways", "claim_hours", crate::giveaways::CLAIM_HOURS),
+    ("giveaways", "min_account_age_days", (0, 3650)),
+    ("giveaways", "min_member_hours", (0, 87_600)),
 ];
 
 /// The range of the number at `path` (below the section, e.g. `limits.Ban.per_hour`), if it has one.

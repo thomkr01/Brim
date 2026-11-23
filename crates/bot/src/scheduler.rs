@@ -232,6 +232,15 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
         "raider_check" => crate::raiders::check_job(app, gid, &job.payload).await?,
         "raider_scan" => crate::raiders::scan_job(app, gid).await?,
         "raider_lift" => crate::raiders::lift_job(app, gid, &job.payload).await?,
+        brim_core::giveaways::END_JOB => crate::giveaways::end_job(app, gid, &job.payload).await?,
+        brim_core::giveaways::REFRESH_JOB => crate::giveaways::refresh_job(app, gid).await?,
+        brim_core::giveaways::REPOST_JOB => {
+            crate::giveaways::repost_job(app, gid, &job.payload).await?
+        }
+        brim_core::giveaways::ANNOUNCE_JOB => {
+            crate::giveaways::announce_job(app, gid, &job.payload).await?
+        }
+        brim_core::giveaways::DM_JOB => crate::giveaways::dm_job(app, gid, &job.payload).await?,
         "ticket_close_check" => crate::tickets::close_check(app, gid, &job.payload).await?,
         other => tracing::warn!(kind = other, "unknown job kind"),
     }
@@ -470,7 +479,9 @@ async fn round(app: &Arc<App>, lane: jobs::Lane) {
     }
 }
 
-const SPAWNED: [&str; 3] = [
+const SPAWNED: [&str; 4] = [
+    // A DM can wait up to 3 s: 100 winner DMs must not hold back unbans and unlocks.
+    brim_core::giveaways::DM_JOB,
     crate::joingate::MISSED_REJOINS,
     crate::verify::given::CATCH_UP,
     "permit_sync",

@@ -80,6 +80,14 @@ const CMDS: &[Cmd] = &[
         "Invite stats and leaderboard, who invited a member (View Invites permit), and your own invite link",
         "invites create #general 1d 10",
     ),
+    (
+        "giveaway",
+        &["gw", "giveaways"],
+        "giveaways",
+        "giveaway [start [CHANNEL] TIME WINNERS PRIZE | end ID | cancel ID | reroll ID | redraw ID [MEMBERS] [?r REASON] | time ID CHANGE | list]",
+        "Start, end, cancel, reroll and redraw giveaways, change their end time, and list them (Manage Giveaways permit)",
+        "giveaway start #giveaways 2d 1 Nitro",
+    ),
     ("ping", &[], "", "ping", "Latency, uptime and memory", ""),
     (
         "info",
@@ -691,14 +699,17 @@ const ARGS: &[(&str, &str)] = &[
     ("MODERATOR", "A staff member: @mention or user id"),
     ("USERS", "One or more users: @mentions or user ids; inside a ticket, empty means its member"),
     ("IDS", "One or more user ids, also of people who are not in the server"),
-    ("ID", "An id: the user for info, the anti-nuke case for ncases, the backup for backups"),
+    ("ID", "An id: the user for info, the anti-nuke case for ncases, the backup for backups, the giveaway for giveaway"),
+    ("WINNERS", "How many winners a giveaway has: 1 to 100"),
+    ("PRIZE", "What the winners get: free text, up to 200 characters"),
+    ("CHANGE", "giveaway time: + or - then a duration (+1h, -30m): moves the end time"),
     ("TARGET", "What to whitelist: @member, @role, #channel, category id or webhook id"),
     ("ROLE", "A role: @mention, id or name"),
     ("ROLES", "One or more roles: @mentions or ids; empty clears the list"),
     ("@role", "A role mention, to show role info"),
-    ("CHANNEL", "A channel: #mention or id; empty turns the log off. invites create: where the link leads (default: this channel)"),
+    ("CHANNEL", "A channel: #mention or id; empty turns the log off. invites create: where the link leads (default: this channel); giveaway start: where the giveaway is posted (default: this channel)"),
     ("-server", "Show this server instead of a member"),
-    ("TIME", "A duration: a number then s, m, h, d or w (30s, 10m, 2h, 7d, 1w). ban: unban after it (none = permanent); timeout: its length (none = the default from settings); lock: unlock after it; slowmode: the delay between messages; invites create: how long the link works (never = no expiry, default from settings)"),
+    ("TIME", "A duration: a number then s, m, h, d or w (30s, 10m, 2h, 7d, 1w). ban: unban after it (none = permanent); timeout: its length (none = the default from settings); lock: unlock after it; slowmode: the delay between messages; invites create: how long the link works (never = no expiry, default from settings); giveaway start: how long the giveaway runs (1m to 90d)"),
     ("REASON", "Free text, saved in the case and the log"),
     ("?r", "Starts the reason (or note text): every word after it up to the next ?flag"),
     ("?dm", "Tell the member by DM even when punishment DMs are off in the settings"),
@@ -1209,6 +1220,7 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             | "help"
             | "invite"
             | "invites"
+            | "giveaway"
             | "ping"
             | "info"
             | "roleinfo"
@@ -1239,6 +1251,9 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
 pub fn slash_words(name: &str, o: &[CommandDataOption]) -> Option<Vec<String>> {
     if name == "invites" {
         return Some(crate::invite_cmds::slash_words(o));
+    }
+    if name == "giveaway" {
+        return Some(crate::giveaways::slash_words(o));
     }
     if !matches!(
         name,
@@ -1338,6 +1353,7 @@ pub fn definitions() -> Vec<Command> {
         )
         .build(),
     );
+    defs.push(crate::giveaways::definition());
     defs
 }
 
@@ -1542,6 +1558,7 @@ async fn answer(
                 crate::invite_cmds::run(app, gid, invoker, level, here, slash, &words[1..]).await?;
             Ok((t, e, vec![]))
         }
+        "giveaway" => crate::giveaways::command(app, gid, invoker, level, here, &words[1..]).await,
         "raider" => text(&crate::raiders::command(app, gid, invoker, level, &words[1..]).await?),
         "tshoot" if arg == Some("lockdown") => {
             if allowed(level, "owner") {
@@ -1685,7 +1702,7 @@ mod tests {
     #[test]
     fn commands_are_filtered_by_permit() {
         let (e, pages) = commands_page(&Level::None, "t!", 2);
-        assert_eq!(pages, 4);
+        assert_eq!(pages, 5);
         assert!(!e.description.unwrap().contains("`t!ban`"));
         let (e, _) = commands_page(&Level::Owner, "t!", 2);
         let d = e.description.unwrap();

@@ -440,6 +440,26 @@ pub async fn purge_left(app: std::sync::Arc<App>) {
         if let Err(e) = old {
             tracing::warn!(?e, "pruning old join gate records failed");
         }
+        // Giveaway entries keep 30 days after the end, the giveaway 90 days (giveaways plan).
+        // In batches: one giveaway can hold 100,000 entries.
+        let old = prune_batched(
+            &app.pool,
+            "DELETE FROM giveaway_entries WHERE ctid IN (SELECT e.ctid FROM giveaway_entries e
+               JOIN giveaways g ON g.id = e.giveaway_id WHERE g.status <> 'running'
+               AND g.ended_at < now() - interval '30 days' LIMIT 10000)",
+        )
+        .await;
+        if let Err(e) = old {
+            tracing::warn!(?e, "pruning old giveaway entries failed");
+        }
+        let old = sqlx::query(
+            "DELETE FROM giveaways WHERE status <> 'running' AND ended_at < now() - interval '90 days'",
+        )
+        .execute(&app.pool)
+        .await;
+        if let Err(e) = old {
+            tracing::warn!(?e, "pruning old giveaways failed");
+        }
         // Moderator stats keep one year (owner decision 2026-11-11).
         let old = prune_batched(
             &app.pool,

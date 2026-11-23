@@ -20,6 +20,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 - Permits: `permits.rs`. Extra rules per page: `crates/dashboard/src/access.rs` and `sections.rs`.
 - Bot Messages: `botmsgs.rs` (+ `crates/dashboard/src/botmsgs.rs`). Embeds and the message builder: `embeds.rs`, `msgparts.rs`, `msgrules.rs`, `msgsticky.rs`, `msgtags.rs`, `msgtrig.rs`; server side `crates/dashboard/src/embeds.rs`, `msgrules.rs`, `msgsticky.rs`, `msgtags.rs`, `msgtrig.rs`, `msghooks.rs`; the bot runs them in `crates/bot/src/msghooks.rs`, `msgrules.rs`, `sticky.rs`, `tags.rs`.
 - Feeds: `feeds.rs` (+ `crates/dashboard/src/feeds.rs`, `feedhooks.rs`, `feedfollow.rs`; bot `crates/bot/src/feeds.rs`).
+- Giveaways: rows, entry rules and the draw in `crates/core/src/giveaways.rs` (migration `4061_giveaways.sql`); the bot side (Enter button, end job, reroll, redraw, the `giveaway` command) in `crates/bot/src/giveaways.rs`; default texts in `botmsg.rs::giveaways`; settings section `giveaways` in `schema.rs`.
 - Tickets: `tickets.rs` (+ `pages.rs::Tickets`, `crates/dashboard/src/tickets.rs`, `crates/bot/src/tickets/`).
 - Appeals: `appeals.rs` (+ `crates/dashboard/src/appeals.rs`, `crates/dashboard/src/raiders/appeal.rs`, bot `appeals.rs`).
 - Raider List and matches: `raiders.rs` (+ `crates/dashboard/src/raiders/`, `crates/core/src/raiders.rs`, `crates/bot/src/raiders/`).

@@ -1607,6 +1607,7 @@ fn reads(section: &str, v: Value) -> Result<(), serde_json::Error> {
         "whitelist" => serde_json::from_value::<WhitelistCfg>(v).map(drop),
         "catch" => serde_json::from_value::<CatchCfg>(v).map(drop),
         "raider_list" => serde_json::from_value::<RaiderListCfg>(v).map(drop),
+        "giveaways" => serde_json::from_value::<brim_core::sections::GiveawaysCfg>(v).map(drop),
         "retention" => serde_json::from_value::<brim_core::sections::RetentionCfg>(v).map(drop),
         "commands" => serde_json::from_value::<brim_core::cmdcfg::CommandsCfg>(v).map(drop),
         "modules" => serde_json::from_value::<brim_core::sections::ModulesCfg>(v).map(drop),
