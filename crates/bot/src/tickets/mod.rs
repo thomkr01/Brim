@@ -122,13 +122,10 @@ pub(super) async fn live_roles(app: &App, gid: Id<GuildMarker>, roles: Vec<u64>)
 
 /// The message variables `tags` fills in, listed on the dashboard's Commands page.
 pub const TAGS: [(&str, &str); 4] = [
-    ("{username}", "The member's username"),
-    ("{userid}", "The member's user id"),
-    ("{usermention}", "A mention of the member"),
-    (
-        "{ticket_type}",
-        "The ticket's type (empty when it has none)",
-    ),
+    ("{member.username}", "The member's username"),
+    ("{member.id}", "The member's user id"),
+    ("{member}", "A mention of the member"),
+    ("{tk_type}", "The ticket's type (empty when it has none)"),
 ];
 /// Where `tags` runs.
 pub const TAGS_IN: &str = "Ticket greeting and closing messages and snippets";
@@ -1073,7 +1070,7 @@ mod tests {
         .unwrap();
         let all: String = TAGS.iter().map(|(k, _)| *k).collect();
         assert_eq!(tags(&all, &u, "Report"), "tom5<@5>Report");
-        assert_eq!(tags("[{ticket_type}]", &u, ""), "[]");
+        assert_eq!(tags("[{tk_type}]", &u, ""), "[]");
     }
 
     #[test]

@@ -1371,7 +1371,7 @@ pub fn schema() -> Vec<Value> {
         ),
         hp(
             ti(dv(fg("Messages", "greeting", "text"), brim_core::sections::DEFAULT_GREETING), "Greeting message"),
-            "Sent to the member when a ticket opens, also in a panel ticket whose panel has no greeting of its own. Empty sends none. Tags: {username} {userid} {usermention} {ticket_type}",
+            "Sent to the member when a ticket opens, also in a panel ticket whose panel has no greeting of its own. Empty sends none. Tags: {member.username} {member.id} {member} {tk_type}",
         ),
         ti(dv(fg("Messages", "closing", "text"), ""), "Closing message"),
         ti(fg("Replies", "anonymous", "bool"), "Anonymous replies by default"),
@@ -1424,7 +1424,7 @@ pub fn schema() -> Vec<Value> {
                 v["cap"] = json!(brim_core::sections::MAX_SNIPPETS);
                 v
             },
-            "Sent with the snippet command in a ticket. Tags: {username} {userid} {usermention} {ticket_type}",
+            "Sent with the snippet command in a ticket. Tags: {member.username} {member.id} {member} {tk_type}",
         ),
     ];
     let appeals = vec![

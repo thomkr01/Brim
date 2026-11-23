@@ -519,8 +519,8 @@ const CMDS: &[Cmd] = &[
         &[],
         "tickets",
         "snippetadd NAME CONTENT",
-        "Save a reply; {username} {userid} {usermention}",
-        "snippetadd rules Hi {usermention}, please read #rules.",
+        "Save a reply; {member.username} {member.id} {member}",
+        "snippetadd rules Hi {member}, please read #rules.",
     ),
     (
         "snippetremove",
@@ -664,7 +664,7 @@ const CMDS: &[Cmd] = &[
         "immune",
         "greetingmessage [TEXT]",
         "Sent when a ticket opens",
-        "greetingmessage Hi {username}, staff will answer soon.",
+        "greetingmessage Hi {member.username}, staff will answer soon.",
     ),
     (
         "closingmessage",
@@ -672,7 +672,7 @@ const CMDS: &[Cmd] = &[
         "immune",
         "closingmessage [TEXT]",
         "Sent when a ticket closes",
-        "closingmessage Thanks {username}, this ticket is closed.",
+        "closingmessage Thanks {member.username}, this ticket is closed.",
     ),
     (
         "toggle",
@@ -1496,7 +1496,7 @@ async fn answer(
                 .map_or(NO.to_string(), |r| embed::role(r.get()));
             let sign = |on: bool| if on { ON } else { OFF }.to_string();
             let vars = [
-                ("server.name", g.name),
+                ("guild.name", g.name),
                 ("quarantine_role", role),
                 ("anti_nuke_on", sign(cfg.antinuke.enabled)),
                 ("heat_on", sign(cfg.automod.enabled)),

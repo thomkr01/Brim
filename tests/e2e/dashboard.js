@@ -140,7 +140,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' {');
   await page.click('.subpop .vitem:has-text("Server Name")');
-  if (!(await desc.locator('.vchip[data-tok="{server.name}"]').count())) failed.push('embeds: typing { did not add a variable');
+  if (!(await desc.locator('.vchip[data-tok="{guild.name}"]').count())) failed.push('embeds: typing { did not add a variable');
   await desc.click();
   await page.keyboard.press('Control+End');
   await page.locator('.mcard .tools button[aria-label="Time"]').dispatchEvent('mousedown');
@@ -176,7 +176,7 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('.pvwrap .dmenu .dsel');
   await page.click('.pvwrap .dopt');
   if (!(await page.locator('.pvwrap', { hasText: 'Thanks for picking' }).locator('.eph').count())) failed.push('embeds: menu pick shows no private answer');
-  if (!(await page.locator('.pvwrap', { hasText: 'My Server' }).count())) failed.push('embeds: preview shows no example for {server.name}');
+  if (!(await page.locator('.pvwrap', { hasText: 'My Server' }).count())) failed.push('embeds: preview shows no example for {guild.name}');
   if (!(await page.locator('.pvwrap .eph', { hasText: 'Dismiss' }).count()) || !(await page.locator('.pvwrap', { hasText: 'Thanks for picking, @Alex' }).count())) failed.push('embeds: answer has no example member');
   await page.locator('.mside .mcard').screenshot({ path: `${out}/embed_builder.png` });
   await page.click('.tabs button:has-text("Send")');
@@ -371,7 +371,7 @@ fs.mkdirSync(out, { recursive: true });
   if (!hooked || !hooked.body.includes('"username":"News Desk"') || !/"avatar_url":"http[^"]*\/media\/[A-Za-z0-9_-]{43}\.png"/.test(hooked.body)) failed.push(`embeds: webhook send is wrong: ${hooked && hooked.body}`);
   if (!post || !post.body.includes('"allowed_mentions":{"parse":[],"roles":[],"users":[]}') && !post.body.includes('"allowed_mentions":{"parse":[],"users":[],"roles":[]}')) failed.push(`embeds: pings setting not sent: ${post && post.body}`);
   if (!post || !post.body.includes('example.com/rules') || /"timestamp":"now"/.test(post.body)) failed.push(`embeds: posted body is wrong: ${post && post.body}`);
-  if (!post || !post.body.includes('"custom_id":"mb:') || post.body.includes('answer') || post.body.includes('{server.name}') || !/<t:\d+:R>/.test(post.body) || !post.body.includes('<:tb_wave:400000000000000001>')) failed.push(`embeds: menu, variable, time or emoji not sent right: ${post && post.body}`);
+  if (!post || !post.body.includes('"custom_id":"mb:') || post.body.includes('answer') || post.body.includes('{guild.name}') || !/<t:\d+:R>/.test(post.body) || !post.body.includes('<:tb_wave:400000000000000001>')) failed.push(`embeds: menu, variable, time or emoji not sent right: ${post && post.body}`);
   // Notes: an edit keeps the created time and shows up in the note's history.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1notes')}`);
   // The page rebuilds its form when its data arrives; a fill before that is lost and Add note answers 400.

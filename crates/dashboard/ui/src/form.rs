@@ -800,7 +800,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                         {sub("description", "text", "Description", "Shown under the name in the menu and the panel message, up to 100 characters.", json!({"default": ""}))}
                         {sub("category", "category", "Ticket category", "Where this panel's tickets go. None: the ticket category of the General card.", Value::Null)}
                         {sub("per_member", "int", "Open tickets per member", "", json!({"default": 1, "min": 1, "max": 5}))}
-                        {sub("greeting", "text", "Greeting", "Posted in the new ticket, up to 2000 characters. Empty: the server's greeting message is posted. Tags: {username} {userid} {usermention} {ticket_type}", json!({"default": ""}))}
+                        {sub("greeting", "text", "Greeting", "Posted in the new ticket, up to 2000 characters. Empty: the server's greeting message is posted. Tags: {member.username} {member.id} {member} {tk_type}", json!({"default": ""}))}
                         {sub("ping_roles", "roles", "Roles pinged on a new ticket", "At most 10.", Value::Null)}
                         {sub("kind", "text", "Ticket type", "Its tickets start with this type, one from Ticket types. Empty: the member picks one, or staff at claim.", json!({"default": ""}))}
                         {sub("fields", "form", "Form questions", "Asked before the ticket opens, at most 5, with labels of 1-45 characters and a length of at most 1024. The answers go only to the ticket channel.", json!({"limit": "panel_fields", "choices": false}))}

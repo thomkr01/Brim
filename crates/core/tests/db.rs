@@ -1175,3 +1175,167 @@ async fn holders_match_resolve() {
     }
     cleanup(&p, g).await;
 }
+
+/// Migration 4066 rewrites old variable names in saved texts to today's names, whole tokens only,
+/// and a second run changes nothing.
+#[tokio::test]
+async fn variable_names_migration_rewrites_saved_texts() {
+    let Some(p) = pool().await else { return };
+    let g = gid(80);
+    for t in [
+        "bot_messages",
+        "bot_messages_undo",
+        "embeds",
+        "guild_config",
+        "feeds",
+    ] {
+        let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(g)
+            .execute(&p)
+            .await
+            .unwrap();
+    }
+    let old_ban = json!({"content": "", "embeds": [{"description": "You were banned from {server} by {moderator}: {reason}. {reasons} {e:ban} {server.name}"}]});
+    sqlx::query("INSERT INTO bot_messages (guild_id, key, message, updated_by) VALUES ($1, 'dm.punish.ban', $2, 1), ($1, 'giveaway.running', $3, 1), ($1, 'dm.verify_reminder', '{\"content\": \"{server} {time}\", \"embeds\": []}', 1)")
+        .bind(g)
+        .bind(&old_ban)
+        .bind(json!({"embeds": [{"title": "{prize}", "description": "{entries} · {host}", "image": {"url": "{banner}"}}]}))
+        .execute(&p)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO bot_messages_undo (guild_id, key, message) VALUES ($1, 'reply.ticket.shown_type_set', $2)")
+        .bind(g)
+        .bind(json!({"content": "{user} set **{type}**", "embeds": []}))
+        .execute(&p)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO embeds (guild_id, name, message, published, updated_by) VALUES ($1, 'Rules', $2, $2, 1)")
+        .bind(g)
+        .bind(json!({"content": "Welcome to {server.name} ({server.member_count}) {server.names} on {date}", "embeds": []}))
+        .execute(&p)
+        .await
+        .unwrap();
+    let tickets = json!({"tickets": {"greeting": "Hi {usermention} ({username}, {userid}), {ticket_type}", "snippets": [{"name": "r", "text": "Bye {username}"}]}, "other": "{username}"});
+    sqlx::query(
+        "INSERT INTO guild_config (guild_id, version, config) VALUES ($1, 1, $2), ($1, 2, $2)",
+    )
+    .bind(g)
+    .bind(&tickets)
+    .execute(&p)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO feeds (guild_id, channel_id, kind, target, created_by, message) VALUES ($1, 1, 'rss', 'https://a.b', 1, $2), ($1, 1, 'github', 'x', 1, $3)")
+        .bind(g)
+        .bind(json!({"content": "New: {link} {title}", "embeds": []}))
+        .bind(json!({"push": {"embeds": [{"title": "{headline}", "url": "{link}"}]}}))
+        .execute(&p)
+        .await
+        .unwrap();
+
+    sqlx::query("INSERT INTO backups (guild_id, image, messages) VALUES ($1, '{}', $2)")
+        .bind(g)
+        .bind(json!({"embeds": [{"message": {"content": "{time} {server.icon}"}}], "bot_messages": [{"key": "dm.verify_reminder", "message": {"content": "{time}"}}]}))
+        .execute(&p)
+        .await
+        .unwrap();
+    let sql = include_str!("../migrations/4066_variable_names.sql");
+    for _ in 0..2 {
+        let mut tx = p.begin().await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let msg = |key: &'static str, table: &'static str| {
+            let p = p.clone();
+            async move {
+                let sql = format!("SELECT message FROM {table} WHERE guild_id = $1 AND key = $2");
+                sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(g)
+                    .bind(key)
+                    .fetch_one(&p)
+                    .await
+                    .unwrap()
+            }
+        };
+        let ban = msg("dm.punish.ban", "bot_messages").await;
+        assert_eq!(
+            ban["embeds"][0]["description"],
+            "You were banned from {guild.name} by {mod_moderator}: {mod_reason}. {reasons} {e:ban} {guild.name}"
+        );
+        let ga = msg("giveaway.running", "bot_messages").await;
+        assert_eq!(ga["embeds"][0]["title"], "{ga_prize}");
+        assert_eq!(ga["embeds"][0]["description"], "{ga_entries} · {ga_host}");
+        assert_eq!(ga["embeds"][0]["image"]["url"], "{ga_banner}");
+        let remind = msg("dm.verify_reminder", "bot_messages").await;
+        assert_eq!(
+            remind["content"], "{guild.name} {ver_time}",
+            "a bot message is not a Message Builder text"
+        );
+        let undo = msg("reply.ticket.shown_type_set", "bot_messages_undo").await;
+        assert_eq!(undo["content"], "{user} set **{tk_type}**");
+        // The migrated copy is what the bot sends: today's names fill.
+        let sent = brim_logging::botmsg::render(
+            "dm.punish.ban",
+            Some(&ban),
+            &[("server", "S"), ("moderator", "M"), ("reason", "R")],
+        );
+        assert!(
+            sent["embeds"][0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("banned from S by M: R."),
+            "{sent}"
+        );
+
+        let (m, pubd): (Value, Value) =
+            sqlx::query_as("SELECT message, published FROM embeds WHERE guild_id = $1")
+                .bind(g)
+                .fetch_one(&p)
+                .await
+                .unwrap();
+        for v in [m, pubd] {
+            assert_eq!(
+                v["content"],
+                "Welcome to {guild.name} ({guild.member_count}) {server.names} on {msg_date}"
+            );
+        }
+        let cfgs: Vec<Value> = sqlx::query_scalar(
+            "SELECT config FROM guild_config WHERE guild_id = $1 ORDER BY version",
+        )
+        .bind(g)
+        .fetch_all(&p)
+        .await
+        .unwrap();
+        for c in cfgs {
+            assert_eq!(
+                c["tickets"]["greeting"],
+                "Hi {member} ({member.username}, {member.id}), {tk_type}"
+            );
+            assert_eq!(c["tickets"]["snippets"][0]["text"], "Bye {member.username}");
+            assert_eq!(c["other"], "{username}", "only the ticket texts");
+        }
+        let backup: Value = sqlx::query_scalar("SELECT messages FROM backups WHERE guild_id = $1")
+            .bind(g)
+            .fetch_one(&p)
+            .await
+            .unwrap();
+        assert_eq!(
+            backup["embeds"][0]["message"]["content"],
+            "{msg_time} {guild.icon}"
+        );
+        // Bot messages in a backup are renamed when it is loaded (`to_public`).
+        assert_eq!(backup["bot_messages"][0]["message"]["content"], "{time}");
+        let feeds: Vec<(String, Value)> =
+            sqlx::query_as("SELECT kind, message FROM feeds WHERE guild_id = $1 ORDER BY kind")
+                .bind(g)
+                .fetch_all(&p)
+                .await
+                .unwrap();
+        assert_eq!(feeds[0].1["push"]["embeds"][0]["url"], "{feed_link}");
+        assert_eq!(feeds[0].1["push"]["embeds"][0]["title"], "{feed_headline}");
+        assert_eq!(feeds[1].1["content"], "New: {feed_link} {title}");
+    }
+}

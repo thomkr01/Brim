@@ -364,11 +364,11 @@ fn ticket_preview(c: &Value, dc: &Value) -> AnyView {
     let tagged = |k: &str| {
         t[k].as_str()
             .unwrap_or("")
-            .replace("{username}", "member")
-            .replace("{userid}", "1001")
-            .replace("{usermention}", "@member")
+            .replace("{member.username}", "member")
+            .replace("{member.id}", "1001")
+            .replace("{member}", "@member")
             // A DM ticket asks for the type after it opens.
-            .replace("{ticket_type}", "")
+            .replace("{tk_type}", "")
     };
     let (greeting, closing) = (tagged("greeting"), tagged("closing"));
     let mut pings: Vec<String> = strs(&t["ping_roles"])

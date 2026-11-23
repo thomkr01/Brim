@@ -28,15 +28,15 @@ pub const VARS: [(&str, &str, &str, &str); 28] = [
         "Member",
         "3 years ago",
     ),
-    ("server.name", "Server Name", "Server", "My Server"),
-    ("server.id", "Server ID", "Server", "987654321098765432"),
-    ("server.member_count", "Member Count", "Server", "1234"),
-    ("server.boost_count", "Server Boosts", "Server", "7"),
-    ("server.boost_level", "Boost Level", "Server", "Level 1"),
-    ("server.owner", "Server Owner", "Server", "@Owner"),
-    ("server.icon", "Server Icon", "Server", "/logo.svg"),
+    ("guild.name", "Server Name", "Server", "My Server"),
+    ("guild.id", "Server ID", "Server", "987654321098765432"),
+    ("guild.member_count", "Member Count", "Server", "1234"),
+    ("guild.premium_subscription_count", "Server Boosts", "Server", "7"),
+    ("guild.premium_tier", "Boost Level", "Server", "Level 1"),
+    ("guild.owner_id", "Server Owner", "Server", "@Owner"),
+    ("guild.icon", "Server Icon", "Server", "/logo.svg"),
     (
-        "server.created_at",
+        "guild.created_at",
         "Server Created",
         "Server",
         "2 years ago",
@@ -54,10 +54,10 @@ pub const VARS: [(&str, &str, &str, &str); 28] = [
         "Message",
         "https://discord.com/channels/…",
     ),
-    ("trigger", "Matched Trigger", "Message", "hello"),
-    ("date", "Date", "Date and time", ""),
-    ("time", "Time", "Date and time", ""),
-    ("weekday", "Day of the Week", "Date and time", ""),
+    ("msg_trigger", "Matched Trigger", "Message", "hello"),
+    ("msg_date", "Date", "Date and time", ""),
+    ("msg_time", "Time", "Date and time", ""),
+    ("msg_weekday", "Day of the Week", "Date and time", ""),
 ];
 
 /// (group, what its variables show).
@@ -302,9 +302,9 @@ fn example(name: &str, arg: Option<&str>) -> String {
         return var(name).map_or(String::new(), |v| v.3.replace("\\n", "\n"));
     }
     match (name, arg) {
-        ("date", _) => crate::discord::time(0, "D"),
-        ("time", _) => crate::discord::time(0, "t"),
-        ("weekday", _) => crate::discord::time(0, "F")
+        ("msg_date", _) => crate::discord::time(0, "D"),
+        ("msg_time", _) => crate::discord::time(0, "t"),
+        ("msg_weekday", _) => crate::discord::time(0, "F")
             .split(',')
             .next()
             .unwrap_or("")
@@ -643,7 +643,7 @@ fn vars_body(p: Parts, brace: bool) -> AnyView {
             (!items.is_empty()).then(|| view! {
                 <small title=what>{g}</small>
                 {items.into_iter().map(|(tok, name, _, _)| {
-                    let why = if tok == "trigger" { Some("Comes with trigger rules.") } else if member_only(tok) && !answer { Some("Only in a menu answer, where there is a member who picked it.") } else { None };
+                    let why = if tok == "msg_trigger" { Some("Comes with trigger rules.") } else if member_only(tok) && !answer { Some("Only in a menu answer, where there is a member who picked it.") } else { None };
                     let shown = if g == "Role" { format!("{{{tok}:…}}") } else { format!("{{{tok}}}") };
                     view! { <button class="vitem" disabled=why.is_some() title=why on:click=move |_| if g == "Role" { role_for.set(Some(tok)) } else { pick(format!("{{{tok}}}")) }>
                         <b>{name}</b><code>{shown}</code><span>{why.map_or_else(|| example(tok, None), String::from)}</span></button> }
@@ -945,10 +945,11 @@ mod tests {
 
     #[test]
     fn finds_tokens_as_the_bot_does() {
-        assert_eq!(var_at("{server.name} x"), Some(("server.name", None, 13)));
+        assert_eq!(var_at("{guild.name} x"), Some(("guild.name", None, 12)));
         assert_eq!(var_at("{role:12}"), Some(("role", Some("12"), 9)));
         assert_eq!(var_at("{role}"), None);
-        assert_eq!(var_at("{server.name:1}"), None);
+        assert_eq!(var_at("{guild.name:1}"), None);
+        assert_eq!(var_at("{server.name}"), None);
         assert_eq!(var_at("{nope}"), None);
         assert_eq!(time_at("<t:+3600:R> x"), Some((3600, true, 'R', 11)));
         assert_eq!(time_at("<t:17:F>"), Some((17, false, 'F', 8)));
@@ -965,7 +966,7 @@ mod tests {
 
     #[test]
     fn examples_fill_known_variables_only() {
-        let v = examples(&json!({"a": "Hi {channel} {x} {", "b": ["{server.name}"], "c": 1}));
+        let v = examples(&json!({"a": "Hi {channel} {x} {", "b": ["{guild.name}"], "c": 1}));
         assert_eq!(
             v,
             json!({"a": "Hi #general {x} {", "b": ["My Server"], "c": 1})
@@ -979,14 +980,14 @@ mod tests {
             ("time".into(), "Time left".into(), "10 minutes".into()),
         ]);
         assert_eq!(var_at("{reason}"), Some(("reason", None, 8)));
-        assert_eq!(var_at("{server.name}"), None);
+        assert_eq!(var_at("{guild.name}"), None);
         assert_eq!(
             examples(&json!("{reason} {time}")),
             json!("Spam 10 minutes")
         );
         set_bot_vars(&[]);
         assert_eq!(var_at("{reason}"), None);
-        assert!(var_at("{server.name}").is_some());
+        assert!(var_at("{guild.name}").is_some());
     }
 }
 

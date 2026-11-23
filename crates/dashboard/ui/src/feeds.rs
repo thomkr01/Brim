@@ -625,7 +625,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
         move || busy.try_get().unwrap_or(false),
         move || {
             let gone = open.with(|o| cur.with(|c| o.as_ref().is_some_and(|(_, r)| !crate::botmsgs::missing(r, &c["body"]).is_empty())));
-            gone.then(|| "{link} is missing: keep {link} in the message text or the first embed.".to_string())
+            gone.then(|| "{feed_link} is missing: keep {feed_link} in the message text or the first embed.".to_string())
         },
         move || if let Some((f, _)) = open.get_untracked() { save_message(f["id"].to_string(), cur.with_untracked(|c| c["body"].clone()), "Saved!") },
     );
@@ -658,7 +658,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
                     <Tip text="Each event has its own message. Save or cancel your changes before you pick another event." icon="info" /></div>
             } })}
             <p class="muted small">"Only this feed sends this version. The entry on the Bot messages page is the version for every other feed of this kind. Edits apply to posts sent after the save."</p>
-            {move || gone().then(|| view! { <p class="err">"{link} is missing: keep {link} in the message text or the first embed, or this cannot be saved."</p> })}
+            {move || gone().then(|| view! { <p class="err">"{feed_link} is missing: keep {feed_link} in the message text or the first embed, or this cannot be saved."</p> })}
             {crate::embeds::split(ed.edit, message_tab, preview_tab)}
             {pop_view}
             {crate::msgparts::sub_view(ed.parts)}

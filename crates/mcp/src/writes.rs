@@ -25,7 +25,7 @@ pub fn list() -> Vec<Value> {
         lockdown_lock (body {\"kind\": server|channel|blind|roles|all|kick|ban, \"channel\"?: id, \"duration_s\"?}); lockdown_unlock (body {\"kind\"?}); \
         note_add (body {\"user_id\", \"text\"}); note_edit (target = note short id; body {\"text\"}); \
         case_edit (target = case number; body {\"reason\", \"active\"}; proofs are added and removed on the dashboard or with the proof command); \
-        embed_save (Message Builder; body {\"id\"?, \"name\", \"body\": {\"content\", \"embeds\": [up to 10], \"components\": [up to 5 rows: link buttons, or one select menu {\"type\": 3, \"placeholder\"?, \"options\": [{\"label\", \"description\"?, \"emoji\"?, \"answer\"}]}]}; variables such as {server.name} and time tags <t:+3600:R> are filled in when sent, \"channel\"?}, or one \"embed\" instead of \"body\"); embed_post (target = message id; body {}: posts a new copy in the saved channel each time, kept in the Sent log). \
+        embed_save (Message Builder; body {\"id\"?, \"name\", \"body\": {\"content\", \"embeds\": [up to 10], \"components\": [up to 5 rows: link buttons, or one select menu {\"type\": 3, \"placeholder\"?, \"options\": [{\"label\", \"description\"?, \"emoji\"?, \"answer\"}]}]}; variables such as {guild.name} and time tags <t:+3600:R> are filled in when sent, \"channel\"?}, or one \"embed\" instead of \"body\"); embed_post (target = message id; body {}: posts a new copy in the saved channel each time, kept in the Sent log). \
         Update, purge, backups and antinuke revert cannot be done here.",
             "inputSchema": {"type": "object", "properties": {
                 "guild_id": guild,

@@ -1240,10 +1240,10 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "The role's settings (managed, mentionable, hoisted, main role)",
         "❌ Managed\n✅ Mentionable\n✅ Hoisted\n❌ Main Role",
     ),
-    ("server.name", "Server name", "My Server"),
+    ("guild.name", "Server name", "My Server"),
     ("owner", "The server owner (mention with ID)", "@sam *`123456789012345679`*"),
     (
-        "server.created_at",
+        "guild.created_at",
         "When the server was made (Discord time stamp)",
         "<t:1600000000:R>",
     ),
@@ -4158,11 +4158,11 @@ fn answer_entries(out: &mut Vec<Def>) {
         D6 {
             key: "reply.info.server",
             name: "Answer: server info",
-            title: "{server.name}'s Info:".into(),
+            title: "{guild.name}'s Info:".into(),
             color: BLUE,
             lines: vec![
                 l("Owner", "{owner}"),
-                l("Created", "{server.created_at}"),
+                l("Created", "{guild.created_at}"),
                 l("Members", "`{members}`"),
                 l("Roles", "`{role_count}`"),
                 l("Channels", "`{channel_count}`"),
@@ -4170,7 +4170,7 @@ fn answer_entries(out: &mut Vec<Def>) {
             ],
             fields: none(),
             footer: "Page: 1/{pages}".into(),
-            required: &["server.name"],
+            required: &["guild.name"],
             what: "the server's details",
         },
     );
@@ -4179,7 +4179,7 @@ fn answer_entries(out: &mut Vec<Def>) {
         D6 {
             key: "reply.info.server_roles",
             name: "Answer: server roles",
-            title: "{server.name}'s Roles:".into(),
+            title: "{guild.name}'s Roles:".into(),
             color: BLUE,
             lines: vec!["{role_list}".into()],
             fields: none(),
@@ -4420,7 +4420,7 @@ fn general_answers(out: &mut Vec<Def>) {
         simple(
             "reply.config.overview",
             "Answer: config overview",
-            "{server.name}'s Config Overview",
+            "{guild.name}'s Config Overview",
             vec![
                 "**Essential Roles**".into(),
                 format!("{QUARANTINED} **Quarantine Role:** {{quarantine_role}}"),
@@ -6617,6 +6617,214 @@ const FEED_VARS: &[(&str, &str, &str)] = &[
     ("number", "Issue or pull request number", "2"),
 ];
 
+/// Variables for a Discord thing, named the way Discord names it: the object and its field, as
+/// the Message Builder does (`{member.id}`, `{channel.name}`, `{guild.name}`). The code name is
+/// on the left. `{member}`, `{user}`, `{channel}`, `{role}`, `{roles}` and a field of a Discord
+/// object (`{member.username}`) already are Discord's names.
+const DISCORD_NAMES: &[(&str, &str)] = &[
+    ("server", "guild.name"),
+    ("name", "guild.name"),
+    ("server_id", "guild.id"),
+    ("members", "guild.member_count"),
+    ("boosts", "guild.premium_subscription_count"),
+    ("boost_tier", "guild.premium_tier"),
+    ("owner", "guild.owner_id"),
+    ("channel_name", "channel.name"),
+    ("thread_name", "thread.name"),
+    ("member_roles", "member.roles"),
+    ("created", "member.created_at"),
+];
+
+/// Names that stay as they are: the Discord things above and the two parts of every frame, the
+/// bot's text and the log's title.
+const KEPT_NAMES: &[&str] = &[
+    "text", "title", "member", "user", "channel", "role", "roles",
+];
+
+/// The function of an entry's own variables, by the start of its key (the longest match wins):
+/// (key start, prefix, words the prefix already says). Every other variable is named
+/// `<prefix>_<name>` (`{ga_prize}`, `{tk_type}`).
+const FUNCTIONS: &[(&str, &str, &[&str])] = &[
+    ("giveaway.", "ga", &["giveaway"]),
+    ("reply.giveaway.", "ga", &["giveaway"]),
+    ("ticket.", "tk", &["ticket"]),
+    ("reply.ticket.", "tk", &["ticket"]),
+    ("log.ticket.", "tk", &["ticket"]),
+    ("reply.closeall.", "tk", &["ticket"]),
+    ("log.mod_command.", "mod", &[]),
+    ("reply.mod.", "mod", &[]),
+    ("reply.case.", "mod", &[]),
+    ("reply.note.", "mod", &[]),
+    ("reply.undo.", "mod", &[]),
+    ("reply.revert.", "mod", &[]),
+    ("reply.catch.", "mod", &[]),
+    ("dm.punish.", "mod", &[]),
+    ("dm.quarantine_notice", "mod", &[]),
+    ("log.anti_nuke.", "an", &[]),
+    ("log.panic.", "panic", &["panic"]),
+    ("log.auto_mod.", "am", &[]),
+    ("dm.automod_timeout", "am", &[]),
+    ("log.verification.", "ver", &["verify", "verification"]),
+    ("verify.", "ver", &["verify", "verification"]),
+    ("reply.verify.", "ver", &["verify", "verification"]),
+    ("dm.verify_reminder", "ver", &["verify", "verification"]),
+    ("log.join_gate.", "jg", &["join_gate"]),
+    ("dm.join_gate", "jg", &["join_gate"]),
+    ("log.join_raid.", "jr", &["join_raid", "raid"]),
+    ("reply.raider.", "raid", &["raider", "raid"]),
+    ("dm.raider_notify", "raid", &["raider", "raid"]),
+    ("log.report.", "rep", &["report"]),
+    ("reply.report.", "rep", &["report"]),
+    ("log.appeal.", "ap", &["appeal"]),
+    ("dm.appeal_", "ap", &["appeal"]),
+    ("reply.lock.", "lock", &["lock"]),
+    ("reply.settings.", "set", &["setting"]),
+    ("reply.config.", "set", &["setting"]),
+    ("reply.panel.", "set", &["setting"]),
+    ("log.config_changes", "set", &["setting"]),
+    ("reply.invite.", "inv", &["invite"]),
+    ("dm.invite_", "inv", &["invite"]),
+    ("reply.whitelist.", "wl", &["whitelist"]),
+    ("reply.backups.", "bk", &["backup"]),
+    ("dm.dashboard_2fa", "dash", &["dashboard"]),
+    ("dm.rescue_expired", "dash", &["dashboard"]),
+    ("dm.mcp_decision", "dash", &["dashboard"]),
+    ("feed.", "feed", &["feed"]),
+    ("tag.", "tag", &["tag"]),
+    ("reply.tag.", "tag", &["tag"]),
+    ("welcome.", "wel", &["welcome"]),
+    ("log.", "log", &["log"]),
+    ("reply.", "cmd", &["command"]),
+    ("cmd.", "cmd", &["command"]),
+    ("dm.", "cmd", &[]),
+];
+
+/// The name members type for variable `var` of entry `key` (owner rule, 2026-11-23): a Discord
+/// thing as Discord names it, else Brim's own as `function_name`. The code passes values by the
+/// code name; the editor, saved copies and backups hold this name.
+pub fn public_name(key: &str, var: &str) -> String {
+    let discord = |o: &str| {
+        [
+            "member", "user", "guild", "channel", "role", "message", "thread",
+        ]
+        .contains(&o)
+    };
+    if KEPT_NAMES.contains(&var) || var.split_once('.').is_some_and(|(o, _)| discord(o)) {
+        return var.into();
+    }
+    // A settings path (`bans.heat`) is Brim's own: its dots become underscores.
+    let flat = var.trim_start_matches('.').replace('.', "_");
+    let var = flat.as_str();
+    if let Some((_, to)) = DISCORD_NAMES.iter().find(|(from, _)| *from == var) {
+        return (*to).into();
+    }
+    let Some((_, pre, words)) = FUNCTIONS
+        .iter()
+        .filter(|(start, ..)| key.starts_with(start))
+        .max_by_key(|(start, ..)| start.len())
+    else {
+        return var.into();
+    };
+    if var.starts_with(&format!("{pre}_")) {
+        return var.into();
+    }
+    // A name that is only the function's word says what it holds instead.
+    let base = match (*pre, var) {
+        ("ap", "appeal") | ("tk", "ticket") => "number",
+        ("jr", "raid") => "kind",
+        ("lock", "lock" | "locks") => {
+            if var == "lock" {
+                "type"
+            } else {
+                "active"
+            }
+        }
+        _ => words
+            .iter()
+            .find_map(|w| {
+                if var == *w {
+                    Some("name")
+                } else {
+                    var.strip_prefix(&format!("{w}_"))
+                }
+            })
+            .unwrap_or(var),
+    };
+    format!("{pre}_{base}")
+}
+
+/// Renames every `{name}` in the strings of `v` for which `to` gives a new name. Emoji tags
+/// (`{e:..}`) and other text stay as they are.
+fn rename_vars(v: &mut Value, to: &dyn Fn(&str) -> Option<String>) {
+    match v {
+        Value::String(s) if s.contains('{') => {
+            let mut out = String::with_capacity(s.len());
+            let mut rest = s.as_str();
+            while let Some(i) = rest.find('{') {
+                out.push_str(&rest[..=i]);
+                rest = &rest[i + 1..];
+                let Some(j) = rest.find(['}', '{']) else {
+                    continue;
+                };
+                if rest.as_bytes()[j] == b'}' {
+                    if let Some(n) = to(&rest[..j]) {
+                        out.push_str(&n);
+                        rest = &rest[j..];
+                    }
+                }
+            }
+            out.push_str(rest);
+            *s = out;
+        }
+        Value::Array(a) => a.iter_mut().for_each(|x| rename_vars(x, to)),
+        Value::Object(o) => o.values_mut().for_each(|x| rename_vars(x, to)),
+        _ => {}
+    }
+}
+
+/// `msg` with the code names of `key`'s variables written as members see them: for the default
+/// on the editor and for a copy saved before the names changed (a message backup).
+pub fn to_public(key: &str, msg: &Value) -> Value {
+    let mut m = msg.clone();
+    if let Some(d) = find(key) {
+        rename_vars(&mut m, &|n| {
+            let n = OLD_FIELDS
+                .iter()
+                .find(|(o, _)| *o == n)
+                .map_or(n, |(_, to)| to);
+            d.vars
+                .iter()
+                .find(|v| **v == n)
+                .map(|v| public_name(key, v))
+        });
+    }
+    m
+}
+
+/// Message Builder fields named `server.*` before they took Discord's names (migration 4066).
+pub const OLD_FIELDS: &[(&str, &str)] = &[
+    ("server.name", "guild.name"),
+    ("server.id", "guild.id"),
+    ("server.member_count", "guild.member_count"),
+    ("server.boost_count", "guild.premium_subscription_count"),
+    ("server.boost_level", "guild.premium_tier"),
+    ("server.owner", "guild.owner_id"),
+    ("server.icon", "guild.icon"),
+    ("server.created_at", "guild.created_at"),
+];
+
+/// `msg` (as members write it) with the code names, which the checks and the filling read.
+fn to_code(d: &Def, msg: &Value) -> Value {
+    let mut m = msg.clone();
+    rename_vars(&mut m, &|n| {
+        d.vars
+            .iter()
+            .find(|v| public_name(&d.key, v) == n)
+            .map(|v| (*v).to_string())
+    });
+    m
+}
+
 /// The editor name and example of a template variable of entry `key`.
 pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
     // `{text}` is a different thing in each message: give each the example that fits it.
@@ -6777,15 +6985,19 @@ fn fill_links(v: &mut Value, vars: &[(&str, &str)]) {
 /// Whether [`render`] sends the edited version `stored` of `key` (not locked, a message, with
 /// every required placeholder) and not the default.
 pub fn uses_stored(key: &str, stored: &Value) -> bool {
-    find(key)
-        .is_some_and(|d| !d.locked && stored.is_object() && missing_text(key, stored).is_none())
+    find(key).is_some_and(|d| stored_ok(d, &to_code(d, stored)))
+}
+
+fn stored_ok(d: &Def, code: &Value) -> bool {
+    !d.locked && code.is_object() && missing_code(d, code).is_none()
 }
 
 /// The message to send: the stored copy (unless locked, not a message, or without a required
 /// placeholder: the bot's own text must never be dropped) else the default, filled.
 pub fn render(key: &str, stored: Option<&Value>, vars: &[(&str, &str)]) -> Value {
     let d = find(key).expect("known bot message key");
-    let used = stored.filter(|s| uses_stored(key, s));
+    let stored = stored.map(|s| to_code(d, s));
+    let used = stored.as_ref().filter(|s| stored_ok(d, s));
     let mut m = used.unwrap_or(&d.template).clone();
     // A copy made before the facts had placeholders: `{text}` holds them all.
     let framed = used.is_some_and(|u| is_frame(d, u));
@@ -7017,7 +7229,7 @@ pub fn unknown_vars(key: &str, msg: &Value) -> Vec<String> {
     collect(msg, &mut found);
     // The ticket panel and the giveaway messages fill Brim emoji tags themselves.
     found.retain(|n| {
-        !d.vars.contains(&n.as_str())
+        !d.vars.iter().any(|v| public_name(key, v) == *n)
             && !((key == "ticket.panel" || key.starts_with("giveaway.")) && n.starts_with("e:"))
     });
     found.sort();
@@ -7047,6 +7259,11 @@ fn shown(msg: &Value) -> Vec<String> {
 /// first embed. `None` when it has all of them (or `key` is unknown).
 pub fn missing_text(key: &str, msg: &Value) -> Option<String> {
     let d = find(key)?;
+    missing_code(d, &to_code(d, msg))
+}
+
+fn missing_code(d: &Def, msg: &Value) -> Option<String> {
+    let key = d.key.as_str();
     let frame = is_frame(d, msg);
     if d.strict() && !frame {
         if let Some(why) = hides_facts(d, msg) {
@@ -7074,7 +7291,7 @@ pub fn missing_text(key: &str, msg: &Value) -> Option<String> {
         .required
         .iter()
         .filter(|v| !framed && !found.iter().any(|f| f == *v))
-        .map(|v| format!("{{{v}}}"))
+        .map(|v| format!("{{{}}}", public_name(key, v)))
         .collect();
     (!gone.is_empty()).then(|| {
         let (place, insert) = if in_text {
@@ -7194,13 +7411,13 @@ pub fn in_text(d: &Def) -> bool {
 }
 
 /// Important variables an edited copy dropped (red warning, not a block).
-pub fn dropped(key: &str, msg: &Value) -> Vec<&'static str> {
+pub fn dropped(key: &str, msg: &Value) -> Vec<String> {
     let Some(d) = find(key) else { return vec![] };
     let mut found = Vec::new();
     collect(msg, &mut found);
     d.important
         .iter()
-        .copied()
+        .map(|v| public_name(key, v))
         .filter(|v| !found.iter().any(|f| f == v))
         .collect()
 }
@@ -7213,7 +7430,7 @@ fn collect(v: &Value, out: &mut Vec<String>) {
                 rest = &rest[i + 1..];
                 if let Some(j) = rest.find('}') {
                     let n = &rest[..j];
-                    // Message Builder variables (`{server.name}`, `{role:1}`) count too: a template
+                    // Message Builder variables (`{guild.name}`, `{role:1}`) count too: a template
                     // does not fill them, so a saved copy must not hold them.
                     let ok =
                         |b: u8| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.:".contains(&b);
@@ -7232,6 +7449,85 @@ fn collect(v: &Value, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each entry's names are one to one, and no name members type is the code name of another
+    /// variable of the entry, so a text converts the same way once or twice.
+    #[test]
+    fn variable_names_are_one_to_one() {
+        for d in defs() {
+            let names: Vec<String> = d.vars.iter().map(|v| public_name(&d.key, v)).collect();
+            for (i, n) in names.iter().enumerate() {
+                assert!(
+                    n.bytes().all(|b| b.is_ascii_lowercase()
+                        || b.is_ascii_digit()
+                        || b"_.".contains(&b)),
+                    "{} {n}",
+                    d.key
+                );
+                assert!(!names[..i].contains(n), "{}: {n} twice", d.key);
+                assert!(
+                    d.vars.iter().all(|v| *v == d.vars[i] || v != n),
+                    "{}: {n} is the code name of another variable",
+                    d.key
+                );
+            }
+        }
+    }
+
+    /// Migration 4066 renamed saved texts with the names of that day: each of its pairs is still
+    /// the name members see (a later change of a name needs a migration of its own).
+    #[test]
+    fn migration_4066_matches_the_names() {
+        let sql = include_str!("../../core/migrations/4066_variable_names.sql");
+        let pairs: Vec<(&str, &str, &str)> = sql
+            .lines()
+            .filter_map(|l| {
+                let l = l
+                    .strip_prefix("('")?
+                    .trim_end_matches([',', ';'])
+                    .strip_suffix("')")?;
+                let mut p = l.split("', '");
+                Some((p.next()?, p.next()?, p.next()?))
+            })
+            .collect();
+        assert!(pairs.len() > 1500);
+        for (k, old, new) in &pairs {
+            if find(k).is_some_and(|d| d.vars.contains(old)) {
+                assert_eq!(public_name(k, old), *new, "{k} {old}");
+            }
+        }
+    }
+
+    #[test]
+    fn names_follow_the_owner_rule() {
+        assert_eq!(public_name("giveaway.running", "prize"), "ga_prize");
+        assert_eq!(
+            public_name("giveaway.running", "sponsor_picture"),
+            "ga_sponsor_picture"
+        );
+        assert_eq!(
+            public_name("reply.ticket.shown_type_set", "type"),
+            "tk_type"
+        );
+        assert_eq!(
+            public_name("log.ticket.ticket_closed", "ticket_type"),
+            "tk_type"
+        );
+        assert_eq!(public_name("dm.punish.ban", "server"), "guild.name");
+        assert_eq!(public_name("dm.punish.ban", "reason"), "mod_reason");
+        assert_eq!(public_name("log.member.member_join", "member"), "member");
+        assert_eq!(public_name("reply.info.server", "guild.name"), "guild.name");
+        assert_eq!(public_name("log.panic.x", "text"), "text");
+        assert_eq!(public_name("feed.rss", "feed"), "feed_name");
+        let old = json!({"embeds": [{"description": "{prize} {e:gift} {sponsor_picture} {x} {", "url": "{banner}"}]});
+        let new = to_public("giveaway.running", &old);
+        assert_eq!(
+            new["embeds"][0]["description"],
+            "{ga_prize} {e:gift} {ga_sponsor_picture} {x} {"
+        );
+        assert_eq!(new["embeds"][0]["url"], "{ga_banner}");
+        assert_eq!(to_code(find("giveaway.running").unwrap(), &new), old);
+    }
 
     #[test]
     fn recovery_texts_are_locked() {
@@ -7615,16 +7911,18 @@ mod tests {
             render("feed.rss", None, &pinged)["content"],
             "<@&5>\nhttps://a.example/1"
         );
-        let own = json!({"content": "New: {title} {link}", "embeds": []});
+        let own = json!({"content": "New: {title} {feed_link}", "embeds": []});
         assert!(missing_text("feed.youtube", &own).is_none());
         assert_eq!(
             render("feed.rss", Some(&own), &vars)["content"],
             "New: T https://a.example/1"
         );
-        let in_embed = json!({"content": "", "embeds": [{"description": "{link}"}]});
+        let in_embed = json!({"content": "", "embeds": [{"description": "{feed_link}"}]});
         assert!(missing_text("feed.rss", &in_embed).is_none());
         let lost = json!({"content": "New: {title}", "embeds": []});
-        assert!(missing_text("feed.rss", &lost).unwrap().contains("{link}"));
+        assert!(missing_text("feed.rss", &lost)
+            .unwrap()
+            .contains("{feed_link}"));
         assert_eq!(
             render("feed.rss", Some(&lost), &vars)["content"],
             "https://a.example/1"
@@ -7680,7 +7978,8 @@ mod tests {
         let e = render("feed.github.public", None, &half)["embeds"][0].clone();
         assert_eq!(e["author"], json!({"name": "octo"}));
         // An edited version may keep {link} as the title's link.
-        let own = json!({"content": "", "embeds": [{"title": "New: {title}", "url": "{link}"}]});
+        let own =
+            json!({"content": "", "embeds": [{"title": "New: {title}", "url": "{feed_link}"}]});
         assert!(missing_text("feed.github.push", &own).is_none());
         let lost = json!({"content": "", "embeds": [{"title": "New: {title}"}]});
         assert!(missing_text("feed.github.push", &lost).is_some());
@@ -7737,7 +8036,7 @@ mod tests {
     fn stored_copy_wins_and_checks_work() {
         let stored = json!({"content": "", "embeds": [{"description": "Hi {nope}"}]});
         assert_eq!(unknown_vars("dm.punish.ban", &stored), vec!["nope"]);
-        assert_eq!(dropped("dm.punish.ban", &stored), vec!["reason"]);
+        assert_eq!(dropped("dm.punish.ban", &stored), vec!["mod_reason"]);
         let m = render("dm.punish.ban", Some(&stored), &[("reason", "r")]);
         assert_eq!(m["embeds"][0]["description"], "Hi {nope}");
     }
@@ -8030,7 +8329,11 @@ mod tests {
     #[test]
     fn every_default_uses_only_its_variables() {
         for d in defs() {
-            assert!(unknown_vars(&d.key, &d.template).is_empty(), "{}", d.key);
+            assert!(
+                unknown_vars(&d.key, &to_public(&d.key, &d.template)).is_empty(),
+                "{}",
+                d.key
+            );
         }
     }
 
@@ -8051,10 +8354,10 @@ mod tests {
                 assert!(!var_info(&d.key, v).0.is_empty(), "{} {v}", d.key);
             }
         }
-        let m = json!({"embeds": [{"description": "{server.name} {role:12}"}]});
+        let m = json!({"embeds": [{"description": "{guild.icon} {role:12} {reason}"}]});
         assert_eq!(
             unknown_vars("dm.punish.ban", &m),
-            ["role:12", "server.name"]
+            ["guild.icon", "reason", "role:12"]
         );
     }
 

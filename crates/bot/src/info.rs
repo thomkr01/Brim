@@ -287,7 +287,7 @@ pub async fn server_page(app: &App, gid: Id<GuildMarker>, page: usize) -> Result
             .map(|r| format!("{ARROW} {}", embed::role(r.id.get())))
             .collect();
         let vars = [
-            ("server.name", g.name.clone()),
+            ("guild.name", g.name.clone()),
             ("role_list", list.join("\n")),
             ("page_no", (page + 1).to_string()),
             ("pages", pages.to_string()),
@@ -297,10 +297,10 @@ pub async fn server_page(app: &App, gid: Id<GuildMarker>, page: usize) -> Result
     }
     let channels = app.http.guild_channels(gid).await?.models().await?.len();
     let vars = [
-        ("server.name", g.name.clone()),
+        ("guild.name", g.name.clone()),
         ("owner", embed::user(g.owner_id.get())),
         (
-            "server.created_at",
+            "guild.created_at",
             format!("<t:{}:R>", created_secs(gid.get())),
         ),
         (

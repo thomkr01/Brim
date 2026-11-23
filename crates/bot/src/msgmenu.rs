@@ -169,34 +169,34 @@ async fn vars(app: &App, i: &Interaction, text: &str) -> Result<Ctx> {
             format!("https://discord.com/channels/{gid}/{}/{}", ch.id, msg.id),
         );
     }
-    if used.iter().any(|v| v.starts_with("server.")) {
+    if brim_core::msgvars::needs_guild(&used) {
         let g = app.http.guild(gid).with_counts(true).await?.model().await?;
-        c.text.insert("server.name", g.name);
-        c.text.insert("server.id", gid.to_string());
+        c.text.insert("guild.name", g.name);
+        c.text.insert("guild.id", gid.to_string());
         c.text.insert(
-            "server.member_count",
+            "guild.member_count",
             g.approximate_member_count.unwrap_or(0).to_string(),
         );
         c.text.insert(
-            "server.boost_count",
+            "guild.premium_subscription_count",
             g.premium_subscription_count.unwrap_or(0).to_string(),
         );
         c.text.insert(
-            "server.boost_level",
+            "guild.premium_tier",
             match u8::from(g.premium_tier) {
                 0 => "No level".into(),
                 n => format!("Level {n}"),
             },
         );
-        c.raw.insert("server.owner", format!("<@{}>", g.owner_id));
+        c.raw.insert("guild.owner_id", format!("<@{}>", g.owner_id));
         if let Some(h) = g.icon {
             c.raw.insert(
-                "server.icon",
+                "guild.icon",
                 format!("https://cdn.discordapp.com/icons/{gid}/{h}.png"),
             );
         }
         c.raw.insert(
-            "server.created_at",
+            "guild.created_at",
             format!("<t:{}:R>", msgvars::snowflake_secs(gid.get())),
         );
     }

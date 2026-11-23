@@ -827,7 +827,10 @@ fn every_security_log_entry_guards_its_facts() {
         assert!(d.security && d.strict() && d.details(), "{key}");
         assert_eq!(d.required[0], "title", "{key}");
         assert!(botmsg::missing_text(key, &d.template).is_none(), "{key}");
-        assert!(botmsg::unknown_vars(key, &d.template).is_empty(), "{key}");
+        assert!(
+            botmsg::unknown_vars(key, &botmsg::to_public(key, &d.template)).is_empty(),
+            "{key}"
+        );
         let with = |r: &str, to: &str| -> Value {
             serde_json::from_str(&d.template.to_string().replace(&format!("{{{r}}}"), to)).unwrap()
         };

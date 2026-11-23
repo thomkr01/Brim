@@ -228,7 +228,10 @@ fn every_settings_answer_guards_its_facts() {
         assert!(d.strict() && d.details() && !d.locked, "{key}");
         assert!(!d.vars.contains(&"text"), "{key}");
         assert!(botmsg::missing_text(key, &d.template).is_none(), "{key}");
-        assert!(botmsg::unknown_vars(key, &d.template).is_empty(), "{key}");
+        assert!(
+            botmsg::unknown_vars(key, &botmsg::to_public(key, &d.template)).is_empty(),
+            "{key}"
+        );
         let with = |r: &str, to: &str| -> Value {
             serde_json::from_str(&d.template.to_string().replace(&format!("{{{r}}}"), to)).unwrap()
         };

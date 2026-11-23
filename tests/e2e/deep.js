@@ -139,7 +139,7 @@ async function matrix(browser) {
     ['GET', `${g}/embeds/channels`, () => undefined, 'viewer', false],
     // bot messages: anyone may look; Owner, Extra Owners and Trusted Admins change them
     ['GET', `${g}/bot-messages`, () => undefined, 'viewer', false],
-    ['POST', `${g}/bot-messages/dm.punish.ban`, () => ({ message: { content: 'e2e {reason}', embeds: [] } }), 'admin', false],
+    ['POST', `${g}/bot-messages/dm.punish.ban`, () => ({ message: { content: 'e2e {mod_reason}', embeds: [] } }), 'admin', false],
     ['POST', `${g}/bot-messages/dm.punish.ban/revert`, () => ({}), 'admin', false],
     ['POST', `${g}/bot-messages/dm.punish.ban/undo`, () => ({}), 'admin', false],
     ['POST', `${g}/bot-messages/revert-all`, () => ({}), 'admin', false],

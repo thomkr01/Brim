@@ -485,7 +485,7 @@ pub(crate) fn missing_in(m: &Value, answer: bool) -> Option<String> {
         }
         let bad_link = LINKS.iter().any(|k| {
             e.pointer(k).and_then(Value::as_str).is_some_and(|u| {
-                // An image may be a link variable as a whole: `{server.icon}`.
+                // An image may be a link variable as a whole: `{guild.icon}`.
                 let var = k.ends_with("icon_url")
                     || k.starts_with("/image")
                     || k.starts_with("/thumbnail");
@@ -811,7 +811,7 @@ async fn vars(
             }
         }
     }
-    if used.iter().any(|v| v.starts_with("server.")) {
+    if brim_core::msgvars::needs_guild(&used) {
         if let Some(g) = discord(
             st,
             Method::GET,
@@ -821,37 +821,37 @@ async fn vars(
         .await?
         {
             c.text
-                .insert("server.name", g["name"].as_str().unwrap_or("").into());
-            c.text.insert("server.id", guild.to_string());
+                .insert("guild.name", g["name"].as_str().unwrap_or("").into());
+            c.text.insert("guild.id", guild.to_string());
             c.text.insert(
-                "server.member_count",
+                "guild.member_count",
                 g["approximate_member_count"].to_string(),
             );
             c.text.insert(
-                "server.boost_count",
+                "guild.premium_subscription_count",
                 g["premium_subscription_count"]
                     .as_u64()
                     .unwrap_or(0)
                     .to_string(),
             );
             c.text.insert(
-                "server.boost_level",
+                "guild.premium_tier",
                 match g["premium_tier"].as_u64().unwrap_or(0) {
                     0 => "No level".into(),
                     n => format!("Level {n}"),
                 },
             );
             if let Some(o) = g["owner_id"].as_str() {
-                c.raw.insert("server.owner", format!("<@{o}>"));
+                c.raw.insert("guild.owner_id", format!("<@{o}>"));
             }
             if let Some(h) = g["icon"].as_str() {
                 c.raw.insert(
-                    "server.icon",
+                    "guild.icon",
                     format!("https://cdn.discordapp.com/icons/{guild}/{h}.png"),
                 );
             }
             c.raw.insert(
-                "server.created_at",
+                "guild.created_at",
                 format!("<t:{}:R>", msgvars::snowflake_secs(guild as u64)),
             );
         }
@@ -1640,7 +1640,7 @@ async fn member_vars(
             a.channel, a.message
         ),
     );
-    c.text.insert("trigger", a.matched.clone());
+    c.text.insert("msg_trigger", a.matched.clone());
     if used.contains(&"member.top_role") {
         let roles = discord(st, Method::GET, &format!("/guilds/{guild}/roles"), None)
             .await?
@@ -2480,7 +2480,7 @@ mod tests {
         );
         assert_eq!(super::mentions(&m, "all")["parse"], json!(["everyone"]));
         // @everyone only when the author wrote it, never from a filled-in value; real ids only.
-        let v = json!({"content": "Hi {server.name} <@0> <@99999999999999999999999>"});
+        let v = json!({"content": "Hi {guild.name} <@0> <@99999999999999999999999>"});
         assert_eq!(
             super::mentions(&v, "all"),
             json!({"parse": [], "users": [], "roles": []})
@@ -2607,22 +2607,22 @@ mod tests {
         assert!(missing(&json!({"content": "Hi {member}"}))
             .unwrap()
             .contains("{member}"));
-        assert_eq!(missing(&json!({"content": "Hi {server.name}"})), None);
+        assert_eq!(missing(&json!({"content": "Hi {guild.name}"})), None);
         assert_eq!(
             missing(&one(
-                json!({"title": "a", "thumbnail": {"url": "{server.icon}"}})
+                json!({"title": "a", "thumbnail": {"url": "{guild.icon}"}})
             )),
             None
         );
-        assert!(missing(&one(json!({"title": "a", "url": "{server.icon}"}))).is_some());
+        assert!(missing(&one(json!({"title": "a", "url": "{guild.icon}"}))).is_some());
         // Times counted from sending, and variables, are filled in everywhere.
         let mut ctx = Ctx {
             now: 100,
             ..Default::default()
         };
-        ctx.text.insert("server.name", "*S*".into());
+        ctx.text.insert("guild.name", "*S*".into());
         let b = discord_body(
-            &json!({"content": "{server.name} <t:+60:R>", "embeds": [{"title": "{server.name}", "fields": [{"name": "n", "value": "<t:+1:t>"}]}]}),
+            &json!({"content": "{guild.name} <t:+60:R>", "embeds": [{"title": "{guild.name}", "fields": [{"name": "n", "value": "<t:+1:t>"}]}]}),
             "1",
             &ctx,
         );
@@ -2631,21 +2631,21 @@ mod tests {
         assert_eq!(b["embeds"][0]["fields"][0]["value"], "<t:101:t>");
         // Footers show no markdown: no escaping backslash there. A variable inside a link stays as typed.
         let b = discord_body(
-            &json!({"embeds": [{"title": "t", "url": "https://a.b/{server.name}", "footer": {"text": "{server.name}"}}]}),
+            &json!({"embeds": [{"title": "t", "url": "https://a.b/{guild.name}", "footer": {"text": "{guild.name}"}}]}),
             "1",
             &ctx,
         );
         assert_eq!(b["embeds"][0]["footer"]["text"], "*S*");
-        assert_eq!(b["embeds"][0]["url"], "https://a.b/{server.name}");
+        assert_eq!(b["embeds"][0]["url"], "https://a.b/{guild.name}");
         let mut big = one(
             json!({"description": "x".repeat(4000), "fields": [{"name": "n", "value": "x".repeat(900)}, {"name": "n", "value": "x".repeat(900)}], "footer": {"text": "{channel.topic}"}}),
         );
         assert!(limits(&big).is_err(), "a variable counts at its longest");
         big["embeds"][0]["footer"]["text"] = json!("plain text here");
         assert!(limits(&big).is_ok());
-        // No server icon: the image slot is left out, never sent as "{server.icon}".
+        // No server icon: the image slot is left out, never sent as "{guild.icon}".
         let b = discord_body(
-            &json!({"embeds": [{"title": "t", "thumbnail": {"url": "{server.icon}"}, "footer": {"text": "f", "icon_url": "{server.icon}"}}]}),
+            &json!({"embeds": [{"title": "t", "thumbnail": {"url": "{guild.icon}"}, "footer": {"text": "f", "icon_url": "{guild.icon}"}}]}),
             "1",
             &ctx,
         );

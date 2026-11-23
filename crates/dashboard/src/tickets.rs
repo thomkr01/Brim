@@ -203,10 +203,10 @@ pub(crate) async fn preview(
     );
     let kind = types.first().map_or("", String::as_str);
     let text = greeting
-        .replace("{username}", "member")
-        .replace("{userid}", "1001")
-        .replace("{usermention}", "@member")
-        .replace("{ticket_type}", kind);
+        .replace("{member.username}", "member")
+        .replace("{member.id}", "1001")
+        .replace("{member}", "@member")
+        .replace("{tk_type}", kind);
     let stored = look("ticket.greeting").await?;
     let greeting = (!greeting.is_empty()).then(|| {
         brim_logging::overlay::bot_embed("ticket.greeting", stored.as_ref(), &[("text", &text)])
@@ -511,7 +511,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let ask = json!({"panels": panels, "types": types, "button_per_type": true,
-            "greeting": "Hi {usermention}, a {ticket_type} ticket"});
+            "greeting": "Hi {member}, a {tk_type} ticket"});
         let Json(shown) = preview(
             State(plain.clone()),
             s.clone(),

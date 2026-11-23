@@ -44,10 +44,20 @@ pub fn count(copy: &Value) -> usize {
     copy["embeds"].as_array().map_or(0, Vec::len)
 }
 
-/// The bot message rows of a backup that may come back: one without a required placeholder (saved
-/// before the save check) is left out, the same check as a manual save and a kit import.
+/// The bot message rows of a backup that may come back, with today's variable names: one without a
+/// required placeholder (saved before the save check) is left out, the same check as a manual save
+/// and a kit import.
 fn bot_messages_to_load(rows: &Value) -> Value {
-    let ok = |r: &&Value| {
+    // A backup made before the variable names changed holds the old names (`{prize}`): rename
+    // first, then check, so the check reads today's names.
+    let renamed = |r: &Value| {
+        let mut r = r.clone();
+        if let Some(k) = r["key"].as_str().map(str::to_owned) {
+            r["message"] = botmsg::to_public(&k, &r["message"]);
+        }
+        r
+    };
+    let ok = |r: &Value| {
         r["key"]
             .as_str()
             .is_some_and(|k| botmsg::missing_text(k, &r["message"]).is_none())
@@ -56,8 +66,8 @@ fn bot_messages_to_load(rows: &Value) -> Value {
         rows.as_array()
             .into_iter()
             .flatten()
+            .map(renamed)
             .filter(ok)
-            .cloned()
             .collect(),
     )
 }

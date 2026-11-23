@@ -613,7 +613,7 @@ pub struct TicketsCfg {
     pub ping_here: bool,
     /// A new panel ticket pings the permit roles of Moderators and higher permits with Manage Tickets.
     pub ping_staff: bool,
-    /// Sent to the member when a ticket opens / closes; `{username}` `{userid}` `{usermention}`.
+    /// Sent to the member when a ticket opens / closes; `{member.username}` `{member.id}` `{member}`.
     /// A panel ticket whose panel has no greeting gets `greeting` too; empty sends none.
     pub greeting: String,
     pub closing: String,
@@ -669,7 +669,7 @@ pub struct TicketPanel {
     pub per_member: u8,
     /// Asked in a form before the ticket opens; the answers go only to the ticket channel.
     pub fields: Vec<AppealField>,
-    /// Posted in the new ticket; `{username}` `{userid}` `{usermention}`.
+    /// Posted in the new ticket; `{member.username}` `{member.id}` `{member}`.
     pub greeting: String,
     /// Roles pinged in a new ticket; the bot skips @everyone (the server id).
     pub ping_roles: Vec<Id<RoleMarker>>,
@@ -833,7 +833,7 @@ pub const DEFAULT_PANEL_TEXT: &str = "{e:ticket} Need help from staff? Press a b
 
 /// The greeting a new ticket sends the member until the server writes its own (owner decision
 /// 2026-11-21). Migration 4055 wrote it where the greeting was empty.
-pub const DEFAULT_GREETING: &str = "Hi {usermention}, thanks for reaching out. Tell us what you need, with as much detail as you can, and staff will answer here soon.";
+pub const DEFAULT_GREETING: &str = "Hi {member}, thanks for reaching out. Tell us what you need, with as much detail as you can, and staff will answer here soon.";
 
 /// The panel message: the `ticket.panel` entry (`look`, the server's edited version, else the
 /// default) with a line per panel that has a description as `{text}`, and a button per panel or
@@ -2142,7 +2142,11 @@ mod tests {
             moved.contains(&format!("'{DEFAULT_PANEL_TEXT}'"))
                 && moved.contains(&format!("'{old}'"))
         );
-        assert!(moved.contains(&format!("to_jsonb('{DEFAULT_GREETING}'::text)")));
+        // It wrote the old variable name, which 4066 renames.
+        let old_greeting = DEFAULT_GREETING.replace("{member}", "{usermention}");
+        assert!(moved.contains(&format!("to_jsonb('{old_greeting}'::text)")));
+        let renamed = include_str!("../migrations/4066_variable_names.sql");
+        assert!(renamed.contains("'{usermention}', '{member}'"));
         assert!(moved.contains(&format!("'color', {}", brim_logging::embed::BLUE)));
     }
 

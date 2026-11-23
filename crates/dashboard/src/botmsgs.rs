@@ -116,7 +116,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                     let banner = banner_example(&cfg, &site, &d.key);
                     let example = if *v == "banner" { banner.as_str() } else { example };
                     let example = if *v == "sponsor_picture" && cfg["giveaways"]["sponsor_picture"] != true { "" } else { example };
-                    json!({"name": v, "label": label, "example": example})
+                    json!({"name": botmsg::public_name(&d.key, v), "label": label, "example": example})
                 })
                 .collect();
             let area = botmsg::area(d).unwrap_or(("Members and server", d.group));
@@ -124,9 +124,9 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                 "key": d.key, "name": d.name, "group": d.group, "locked": d.locked,
                 "area": area.0, "sub": area.1,
                 "security": d.security, "plain_facts": d.strict(), "details": d.details() && d.vars.contains(&"text"),
-                "vars": vars, "important": d.important, "default": d.template,
+                "vars": vars, "important": names(d, &d.important), "default": botmsg::to_public(&d.key, &d.template),
                 "buttons": added.get(d.key.as_str()),
-                "required": d.required, "what": d.what, "in_text": botmsg::in_text(d),
+                "required": names(d, &d.required), "what": d.what, "in_text": botmsg::in_text(d),
                 "message": mine.map(|r| &r.1),
                 "updated_by": mine.map(|r| r.2.to_string()),
                 "updated_at": mine.map(|r| r.3 as i64),
@@ -539,8 +539,30 @@ async fn kit_export(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>)
         .filter(|(k, _)| botmsg::find(k).is_some_and(|d| !d.locked))
         .collect();
     Ok(Json(
-        json!({"kit": "brim-messages", "version": 1, "messages": messages}),
+        json!({"kit": "brim-messages", "version": 2, "messages": messages}),
     ))
+}
+
+/// The names members type for `vars` of `d`.
+fn names(d: &botmsg::Def, vars: &[&str]) -> Vec<String> {
+    vars.iter()
+        .map(|v| botmsg::public_name(&d.key, v))
+        .collect()
+}
+
+/// `kit` with today's variable names: a version 1 kit was exported before the names changed
+/// (`{prize}` is `{ga_prize}` now), so its messages are renamed; version 2 is as it is.
+fn current_names(kit: &Value) -> Value {
+    let mut k = kit.clone();
+    if k["version"] == 1 {
+        if let Some(m) = k["messages"].as_object_mut() {
+            for (key, msg) in m.iter_mut() {
+                *msg = botmsg::to_public(key, msg);
+            }
+        }
+        k["version"] = 2.into();
+    }
+    k
 }
 
 /// What an import does with each message of a kit: `apply` (new edit), `replace` (over an existing
@@ -552,7 +574,7 @@ fn kit_plan(kit: &Value, existing: &[String]) -> Result<Vec<Value>, String> {
         kit["kit"].as_str(),
         Some("brim-messages" | "tommybot-messages")
     );
-    if !ours || kit["version"] != 1 {
+    if !ours || !matches!(kit["version"].as_u64(), Some(1 | 2)) {
         return Err("this is not a Brim message kit".into());
     }
     let Some(messages) = kit["messages"].as_object() else {
@@ -609,7 +631,8 @@ async fn kit_import(
             .fetch_all(&mut *tx)
             .await?;
     let existing: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
-    let plan = kit_plan(&b.kit, &existing).map_err(ApiError::BadRequest)?;
+    let kit = current_names(&b.kit);
+    let plan = kit_plan(&kit, &existing).map_err(ApiError::BadRequest)?;
     let keys: Vec<&str> = plan
         .iter()
         .filter(|p| p["action"] != "skip")
@@ -637,7 +660,7 @@ async fn kit_import(
         .execute(&mut *tx)
         .await?;
         for k in &keys {
-            let m = &b.kit["messages"][k];
+            let m = &kit["messages"][k];
             let m = json!({"content": m["content"].as_str().unwrap_or(""), "embeds": m["embeds"].as_array().cloned().unwrap_or_default()});
             sqlx::query(
                 "insert into bot_messages (guild_id, key, message, updated_by) values ($1, $2, $3, $4)
@@ -700,7 +723,7 @@ fn banner_example(cfg: &Value, site: &str, key: &str) -> String {
     }
 }
 
-/// The examples for `key`'s variables; `{server}` and `{name}` get the real server name.
+/// The examples for `key`'s variables; `server` and `name` (`{guild.name}`) get the real server name.
 fn examples(d: &botmsg::Def, server: &str) -> Vec<(&'static str, String)> {
     d.vars
         .iter()
@@ -954,7 +977,8 @@ mod tests {
         let step_up = (403, Some("step_up_required"));
         let d = botmsg::find("dm.security").unwrap();
         let sec = d.template.clone();
-        let plain = json!({"content": "", "embeds": [{"description": "Hi {server}, {reason}"}]});
+        let plain =
+            json!({"content": "", "embeds": [{"description": "Hi {guild.name}, {mod_reason}"}]});
         let kit = |key: &str, m: &Value| json!({"kit": "brim-messages", "version": 1, "messages": {key: m}});
 
         // An ordinary entry saves without a code.
@@ -1081,7 +1105,8 @@ mod tests {
 
     #[test]
     fn problem_refuses_what_a_built_in_message_cannot_hold() {
-        let ok = json!({"content": "", "embeds": [{"description": "Hi {server}, {reason}"}]});
+        let ok =
+            json!({"content": "", "embeds": [{"description": "Hi {guild.name}, {mod_reason}"}]});
         assert_eq!(problem("dm.punish.ban", &ok), None);
         let cases = [
             json!({"content": "", "embeds": [{"description": "Hi {member}"}]}),
@@ -1133,6 +1158,13 @@ mod tests {
             "log.anti_nuke": {"embeds": [{"description": "{text}"}]},
             "dm.punish.softban": {"content": "", "embeds": [{"description": "Hi {member}"}]},
         }});
+        // A version 1 kit holds the old names: the import renames them first.
+        let kit = current_names(&kit);
+        assert_eq!(kit["version"], 2);
+        assert_eq!(
+            kit["messages"]["dm.punish.ban"]["embeds"][0]["description"],
+            "Hi {guild.name}, {mod_reason}"
+        );
         let plan = kit_plan(&kit, &["dm.punish.kick".to_string()]).unwrap();
         let act = |k: &str| plan.iter().find(|p| p["key"] == k).unwrap()["action"].clone();
         assert_eq!(act("dm.punish.ban"), "apply");
@@ -1152,7 +1184,7 @@ mod tests {
         assert_eq!(act("dm.punish.softban"), "skip");
         assert!(kit_plan(&json!({"kit": "x", "version": 1, "messages": {}}), &[]).is_err());
         assert!(kit_plan(
-            &json!({"kit": "brim-messages", "version": 2, "messages": {}}),
+            &json!({"kit": "brim-messages", "version": 3, "messages": {}}),
             &[]
         )
         .is_err());

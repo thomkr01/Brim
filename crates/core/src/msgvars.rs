@@ -1,4 +1,4 @@
-//! Message Builder variables (`{server.name}`, `{role:<id>}`, ...) and time tags counted from the
+//! Message Builder variables (`{guild.name}`, `{role:<id>}`, ...) and time tags counted from the
 //! moment of sending (`<t:+3600:R>`), filled in when Brim sends a saved message or a menu answer.
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ pub const MEMBER_ONLY: [&str; 10] = [
     "member.joined_at",
     "member.created_at",
     "message.link",
-    "trigger",
+    "msg_trigger",
 ];
 
 /// Every variable that takes no argument; `role` and `role.member_count` take a role id.
@@ -27,28 +27,33 @@ pub const PLAIN: [&str; 26] = [
     "member.top_role",
     "member.joined_at",
     "member.created_at",
-    "server.name",
-    "server.id",
-    "server.member_count",
-    "server.boost_count",
-    "server.boost_level",
-    "server.owner",
-    "server.icon",
-    "server.created_at",
+    "guild.name",
+    "guild.id",
+    "guild.member_count",
+    "guild.premium_subscription_count",
+    "guild.premium_tier",
+    "guild.owner_id",
+    "guild.icon",
+    "guild.created_at",
     "channel",
     "channel.name",
     "channel.id",
     "channel.topic",
     "channel.category",
     "message.link",
-    "trigger",
-    "date",
-    "time",
-    "weekday",
+    "msg_trigger",
+    "msg_date",
+    "msg_time",
+    "msg_weekday",
 ];
 
 /// Variables whose value is a link, the only ones allowed as a whole image link.
-pub const LINKS: [&str; 2] = ["server.icon", "member.avatar"];
+pub const LINKS: [&str; 2] = ["guild.icon", "member.avatar"];
+
+/// Whether the variables in `used` need the server read from Discord (`{guild.name}` ...).
+pub fn needs_guild(used: &[&str]) -> bool {
+    used.iter().any(|v| v.starts_with("guild."))
+}
 
 /// What a variable is filled with. Names and other text members choose are cut to 100 characters
 /// and escaped, so they never format, link or ping; Discord syntax (a mention, a time tag) is kept.
@@ -194,8 +199,8 @@ impl Ctx {
             now,
             ..Default::default()
         };
-        c.raw.insert("date", format!("<t:{now}:D>"));
-        c.raw.insert("time", format!("<t:{now}:t>"));
+        c.raw.insert("msg_date", format!("<t:{now}:D>"));
+        c.raw.insert("msg_time", format!("<t:{now}:t>"));
         const DAYS: [&str; 7] = [
             "Thursday",
             "Friday",
@@ -206,7 +211,7 @@ impl Ctx {
             "Wednesday",
         ];
         c.text.insert(
-            "weekday",
+            "msg_weekday",
             DAYS[now.div_euclid(86_400).rem_euclid(7) as usize].into(),
         );
         c
@@ -235,12 +240,12 @@ mod tests {
             now: 1000,
             ..Default::default()
         };
-        ctx.text.insert("server.name", "**Big** @everyone".into());
+        ctx.text.insert("guild.name", "**Big** @everyone".into());
         ctx.text.insert("channel.topic", "x".repeat(150));
         ctx.raw.insert("channel", "<#5>".into());
         ctx.role_counts.insert(7, 12);
         assert_eq!(
-            fill("Hi {server.name} in {channel}", &ctx),
+            fill("Hi {guild.name} in {channel}", &ctx),
             "Hi \\*\\*Big\\*\\* \\@everyone in <#5>"
         );
         assert_eq!(
@@ -253,15 +258,16 @@ mod tests {
             "{member} <t:1060:R> <t:5:R> <t:+x:R>"
         );
         assert_eq!(fill("{channel.topic}", &ctx).len(), 100);
-        assert_eq!(fill_plain("{server.name}", &ctx), "**Big** @everyone");
+        assert_eq!(fill_plain("{guild.name}", &ctx), "**Big** @everyone");
         assert_eq!(
             fill("<t:+99999999999999999999:R>", &ctx),
             "<t:+99999999999999999999:R>"
         );
         assert_eq!(used("{member.id} {x} {role:1}"), vec!["member.id", "role"]);
+        assert!(needs_guild(&used("{guild.premium_tier}")) && !needs_guild(&used("{server.name}")));
         assert_eq!(escape("https://a.b"), "https\\:\\/\\/a.b");
         assert_eq!(snowflake_secs(175928847299117063), 1_462_015_105);
         // 16 November 2026 is a Monday.
-        assert_eq!(Ctx::at(1_794_830_400).text["weekday"], "Monday");
+        assert_eq!(Ctx::at(1_794_830_400).text["msg_weekday"], "Monday");
     }
 }

@@ -126,9 +126,9 @@ fn every_info_answer_default_reads_as_the_code_built_it() {
     );
 
     let server = v(&[
-        ("server.name", "My Server"),
+        ("guild.name", "My Server"),
         ("owner", &embed::user(9)),
-        ("server.created_at", "<t:1500000000:R>"),
+        ("guild.created_at", "<t:1500000000:R>"),
         ("members", "120"),
         ("role_count", "14"),
         ("channel_count", "30"),
@@ -152,7 +152,7 @@ fn every_info_answer_default_reads_as_the_code_built_it() {
     same(
         "reply.info.server_roles",
         &v(&[
-            ("server.name", "My Server"),
+            ("guild.name", "My Server"),
             ("role_list", &list),
             ("page_no", "2"),
             ("pages", "2"),
@@ -447,7 +447,7 @@ fn general_and_report_answers_default_read_as_the_code_built_them() {
         config = config.text(&format!("{icon} **{name}:** {sign}"));
     }
     let vars = v(&[
-        ("server.name", "S"),
+        ("guild.name", "S"),
         ("quarantine_role", "<@&5>"),
         ("anti_nuke_on", &on),
         ("heat_on", &off),

@@ -66,7 +66,7 @@ Built: Add button (`AddButton` in `common.rs`, also inside `Empty`; `tools/ui-si
 - Add and Change open one dialog: source (RSS / YouTube / GitHub / GitLab), address, channel, ping role, and a folded "Name, picture and sender" part with the "Send as Brim" switch (off by default).
 - Edit message opens the message editor on the feed's own version, with "Own version" or "Server's version" and a "Use the server's version" button.
 - GitHub and GitLab feeds: the dialog has no address; it shows one switch per event type in a framed group ("Post these events"). After Add, a setup window shows the steps, the address and the secret (blurred until Show) with Copy buttons; the secret is shown only then. Their ⋮ menu holds Turn on again (only when stopped), Show setup, Make new secret, Send latest (it says that a webhook feed cannot fetch), Edit message and Delete. Edit message has an Event picker above the editor: each event has its own message.
-- The required placeholder notice of the Bot messages editor names the entry's placeholder: `{link}` for feed entries, which may sit in the message text (their default is the plain link), `{text}` for the others.
+- The required placeholder notice of the Bot messages editor names the entry's placeholder: `{feed_link}` for feed entries, which may sit in the message text (their default is the plain link), `{text}` for the others.
 
 ## Bot Profile page (owner decision, 2026-11-20)
 
