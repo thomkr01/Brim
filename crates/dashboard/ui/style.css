@@ -75,6 +75,9 @@ button.ghost { background:none; color:var(--fg); border-color:var(--line); }
 .row label:has(> input), .io a { flex:none; font-weight:400; text-transform:none; }
 a.ghost, label.ghost { color:var(--fg); border:1px solid var(--line); border-radius:var(--radius-button); padding:var(--space-8) var(--space-12); text-decoration:none; cursor:pointer; }
 button.go { background:var(--ok); border-color:var(--ok); color:#000; } button.danger { background:var(--bad); border-color:var(--bad); }
+/* An icon on a filled button takes the button's text colour, not its own orange gradient (design README, Emojis and icons): orange on green, red or orange does not read. */
+:is(button.go, button.danger, a.btn:not(.ghost), .wiz .nav) .i svg [fill^="url("] { fill:currentColor; }
+:is(button.go, button.danger, a.btn:not(.ghost), .wiz .nav) .i svg [stroke^="url("] { stroke:currentColor; }
 :focus-visible { outline:2px solid var(--info); outline-offset:2px; }
 textarea { width:100%; min-height:320px; font-family:ui-monospace, monospace; font-size:var(--fs-caption); }
 /* Settings cards grid (universal layout PR 4, owner decision 2026-11-20 "no empty spaces"): two fixed columns from 900 px, one below.

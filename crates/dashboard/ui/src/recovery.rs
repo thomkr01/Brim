@@ -376,6 +376,7 @@ fn BackupView(
                     <h3 class="ttl">{crate::icons::icon("info")}" General Settings"</h3>
                     {settings}
                     <h3 class="ttl mt">{crate::icons::icon("webhook")}" Webhooks"</h3>
+                    <p class="muted">"Saved: the name and channel of each webhook. Not saved: its secret link (token) and its picture. Load does not make webhooks again and does not delete them. A panic restore deletes webhooks made after the backup, but not Brim's own."</p>
                     {hooks.iter().map(|w| view! { <div class="set"><b>{crate::icons::icon("webhook")}" "{w["name"].as_str().unwrap_or("").to_string()}</b><div>{w["channel"].as_str().map_or_else(|| "Channel not in the backup".to_string(), |c| format!("#{c}"))}<small>{hook_text(w)}</small></div></div> }).collect_view()}
                     <Show when={let n = hooks.is_empty(); move || n}><p class="muted">"No webhooks."</p></Show>
                 </div>

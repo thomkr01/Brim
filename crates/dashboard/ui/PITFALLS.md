@@ -720,3 +720,9 @@ Each scene set the stage height (`--sh`) when it was the active one, so a taller
 Stars placed against the group of the scene that was open covered text in other scenes of the block, because scenes of different size sat at different places in the shared box.
 
 **Rule:** the stars are fixed in the block's box. All scenes of a block start at the same corner, and the star places come from the sizes of the first pieces of all scenes (`fit` in `landing.rs`). After a change to the scene layout, open every scene of every block on a desktop and a phone width and check that no star covers text and no scene leaves the box.
+
+## Icons on coloured buttons lost their contrast
+
+The emoji pictures got an orange gradient (`fill="url(#name-grad)"`, `stroke` the same). The dashboard draws the same SVG through `icon`, so the backup page's green Load and red Delete buttons, and the green and red arrows of the setup wizard, showed orange on green and on red. The icon was hard to see.
+
+**Rule:** on a filled button an icon takes the button's text colour. `style.css` sets `fill` and `stroke` to `currentColor` for the gradient parts under `button.go`, `button.danger`, `a.btn` (not ghost) and `.wiz .nav`, as the active menu link already did. A new filled button style with an icon joins that list. Check: a browser sweep of every page found no other filled button that still shows the gradient.
