@@ -1302,6 +1302,8 @@ pub struct RetentionCfg {
     pub tickets_days: u32,
     /// Older versions go; the current one and the newest 200 cap stay as they are.
     pub config_history_days: u32,
+    /// Decided and collected form responses, from the decision (or the send); open ones stay.
+    pub forms_days: u32,
 }
 
 impl Default for RetentionCfg {
@@ -1315,6 +1317,7 @@ impl Default for RetentionCfg {
             appeals_days: 365,
             tickets_days: 365,
             config_history_days: 0,
+            forms_days: 365,
         }
     }
 }
@@ -1324,7 +1327,7 @@ pub const RETENTION_MIN_DAYS: u32 = 30;
 
 impl RetentionCfg {
     /// (field, days) of every limit, for the range check and the sweep.
-    pub fn days(&self) -> [(&'static str, u32); 7] {
+    pub fn days(&self) -> [(&'static str, u32); 8] {
         [
             ("cases_days", self.cases_days),
             ("proofs_days", self.proofs_days),
@@ -1333,6 +1336,7 @@ impl RetentionCfg {
             ("appeals_days", self.appeals_days),
             ("tickets_days", self.tickets_days),
             ("config_history_days", self.config_history_days),
+            ("forms_days", self.forms_days),
         ]
     }
 

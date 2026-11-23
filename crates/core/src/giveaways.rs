@@ -162,6 +162,8 @@ pub struct Extra {
 pub struct Req {
     /// The member needs one of these roles (empty: no role needed).
     pub required: Vec<Id<RoleMarker>>,
+    /// The member needs all of the required roles, not one of them.
+    pub required_all: bool,
     /// Any of these roles: no entry, also with a bypass role.
     pub blocked: Vec<Id<RoleMarker>>,
     /// Skips the account age, the time in the server and the required roles. Never moderation.
@@ -227,11 +229,16 @@ pub enum Refusal {
 impl Refusal {
     /// The reason a member reads in the private answer and in the removal DM.
     pub fn text(&self) -> String {
+        self.text_for("giveaway")
+    }
+
+    /// [`Self::text`] for another thing members join, such as a "form".
+    pub fn text_for(&self, thing: &str) -> String {
         match self {
             Self::Bot => "bots cannot enter.".into(),
             Self::Host => "the host cannot enter their own giveaway.".into(),
             Self::Sponsor => "the sponsor cannot enter their own giveaway.".into(),
-            Self::BlockedRole => "you have a role that cannot enter this giveaway.".into(),
+            Self::BlockedRole => format!("you have a role that cannot enter this {thing}."),
             Self::Quarantined => "you are in quarantine.".into(),
             Self::Flagged => "Brim's raid protection flagged your account.".into(),
             Self::TimedOut => "you are timed out.".into(),
@@ -239,7 +246,7 @@ impl Refusal {
             Self::Unverified => "you are not verified yet.".into(),
             Self::AccountAge(d) => format!("your Discord account must be at least {d} days old."),
             Self::MemberTime(h) => format!("you must be in this server for at least {h} hours."),
-            Self::MissingRole => "you do not have a role this giveaway needs.".into(),
+            Self::MissingRole => format!("you do not have a role this {thing} needs."),
         }
     }
 }
@@ -293,7 +300,12 @@ pub fn refusal(req: &Req, host: Option<i64>, sponsor: Option<i64>, f: &Facts) ->
     if req.min_member_hours > 0 && f.joined_ms.is_none_or(|j| f.now_ms - j < hours) {
         return Some(Refusal::MemberTime(req.min_member_hours));
     }
-    if !req.required.is_empty() && !has(&req.required) {
+    let missing = if req.required_all {
+        !req.required.iter().all(|r| f.roles.contains(r))
+    } else {
+        !has(&req.required)
+    };
+    if !req.required.is_empty() && missing {
         return Some(Refusal::MissingRole);
     }
     None

@@ -85,6 +85,10 @@ pub const PLACES: &[Place] = &[
     p("giveaway_entries", "user_id", &[]),
     p("giveaway_claims", "user_id", &[]),
     p("giveaway_code_tries", "user_id", &[]),
+    // All of them, also an application staff did not decide yet (forms plan). Anonymous ones
+    // have no user ID, so Brim cannot find them.
+    p("form_responses", "user_id", &["user_key", "decided_by", "review_msg"]),
+    p("form_drafts", "user_id", &[]),
     p("verify_ips", "user_id", &["ip_hash"]),
     p("verify_timeouts", "user_id", &[]),
     Place {
