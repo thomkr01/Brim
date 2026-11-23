@@ -732,3 +732,15 @@ The emoji pictures got an orange gradient (`fill="url(#name-grad)"`, `stroke` th
 The screen scale was a `zoom` on the page root. A password manager adds its own button to the page and places it from the field's `getBoundingClientRect`. That rectangle is already scaled, and the button sits under the zoomed root too, so the browser scaled its place a second time: at scale 1.25 the button landed about 25% too far right and down (seen in Firefox, measured the same in Chromium).
 
 **Rule:** the zoom sits on the app's own box, `#app` in `index.html` (the app mounts there, last in body), never on `html` or `body`. Anything a browser extension adds to the page then keeps real pixels. Check: a browser sweep of every page at three widths in Chromium and Firefox showed no change; a button placed from a dialog field's rectangle lands on it.
+
+## A question box opened behind the dialog that asked it
+
+`ask()` (common.rs) drew its box with the same z-index as page dialogs, and it comes earlier in the page, so a dialog that opened it covered it: "Save as template" showed no name box, and the page looked frozen.
+
+**Rule:** the box of `ask()` has the class `modal top` (z-index 55, above dialogs, under the toast). A new overlay that can open from inside a dialog uses `top` too. Run the flow in a browser to the end: a click that works in a test with force can hide a box nobody can see.
+
+## A call to the list URL ended with a slash
+
+`act(String::new(), ..)` built `{base}/`. The server routes the list and start on `{base}` and answered 405, so Start from a form did nothing. One helper now leaves the slash out when the path is empty.
+
+**Rule:** build an API URL from parts with one helper that never leaves a trailing slash, and let the browser test press the button that starts the thing.

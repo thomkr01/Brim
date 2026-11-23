@@ -647,6 +647,32 @@ fs.mkdirSync(out, { recursive: true });
   if (other !== undefined) await page.locator('.lpl li', { hasText: other }).first().dispatchEvent('mousedown');
   await page.click('.bar >> text=Cancel', { timeout: 5000 }).catch(() => failed.push('cancel: no Changes detected bar'));
   if ((await drop.inputValue()) !== was) failed.push(`cancel: dropdown kept ${other}, saved is ${was}`);
+  // Giveaways: a template is saved from the Start form (its name box opens above the form), used
+  // to start a giveaway, and the giveaway is duplicated; a plan with a schedule is saved.
+  psql(`update guild_config set config = config || jsonb_build_object('giveaways', jsonb_build_object('enabled', true)) where guild_id = ${gid} and version = (select max(version) from guild_config where guild_id = ${gid})`);
+  await page.goto(`${base}/#/${gid}/giveaways`);
+  await page.reload();
+  const pickGeneral = async () => { await page.getByPlaceholder('choose a channel').first().click(); await page.locator('[role=option]', { hasText: '#general' }).first().dispatchEvent('mousedown'); };
+  await page.locator('button.add:has-text("Start a giveaway"):not([disabled])').first().click({ timeout: 10000 }).catch(async () => { failed.push('giveaways: Start a giveaway is off'); await page.screenshot({ path: `${out}/giveaway_off.png` }); });
+  await pickGeneral();
+  await page.fill('#gw-prize', 'Steam key');
+  await page.fill('#gw-length', '2h');
+  await page.click('button:text-is("Save as template")');
+  await page.locator('.card.ask input').fill('Steam night', { timeout: 3000 }).catch(() => failed.push('giveaways: no name box for the template'));
+  // The box must be on top: a click on its Save reaches it (a box under the form would not).
+  await page.locator('.card.ask button:text-is("Save")').click({ timeout: 3000 }).catch(() => failed.push('giveaways: the template name box is under the form'));
+  await page.waitForSelector('.rcard:has-text("Steam night"), li:has-text("Steam night")', { timeout: 5000 }).catch(() => failed.push('giveaways: saved template not listed'));
+  await page.locator('button:text-is("Use")').first().click();
+  if ((await page.inputValue('#gw-prize')) !== 'Steam key') failed.push('giveaways: Use did not fill the prize');
+  await pickGeneral();
+  await page.click('button:text-is("Start")');
+  await page.waitForSelector('text=Giveaway saved', { timeout: 5000 }).catch(() => failed.push('giveaways: the start was refused'));
+  await page.locator('button:text-is("Duplicate")').first().click({ timeout: 5000 }).catch(() => failed.push('giveaways: no Duplicate button'));
+  if ((await page.inputValue('#gw-length').catch(() => '')) !== '2h') failed.push('giveaways: Duplicate did not copy the length');
+  await page.screenshot({ path: `${out}/giveaway_duplicate.png` });
+  await page.click('.modal button:text-is("Cancel")');
+  psql(`delete from giveaway_plans where guild_id = ${gid}`);
+  psql(`delete from giveaways where guild_id = ${gid}`);
   // Leaving a page while its requests run (or fail, as while the dashboard restarts) must not read disposed signals.
   for (const mode of ['slow', 'fail']) {
     errors.length = 0;

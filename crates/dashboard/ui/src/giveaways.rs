@@ -144,7 +144,8 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         })
     };
     let act = move |path: String, body: Value, done: &'static str| {
-        send(format!("{}/{path}", base()), body, done)
+        let url = if path.is_empty() { base() } else { format!("{}/{path}", base()) };
+        send(url, body, done)
     };
     // A saved template or plan with no claim time follows the server's default.
     let claim_default = move || {

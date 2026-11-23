@@ -1299,6 +1299,11 @@ pub(crate) async fn sync_pauses(app: &App) -> Result<()> {
         }
     }
     let _done = Done;
+    pause_round(app).await
+}
+
+/// The work of [`sync_pauses`], without the one-round guard (the tests call it side by side).
+async fn pause_round(app: &App) -> Result<()> {
     for (guild, all, any) in store::pause_states(&app.pool).await? {
         let gid = Id::new(guild as u64);
         let r = async {
@@ -1316,6 +1321,12 @@ pub(crate) async fn sync_pauses(app: &App) -> Result<()> {
         };
         if let Err(e) = r.await {
             tracing::warn!(?e, guild, "the giveaway pause check of a server failed");
+        }
+    }
+    // A plan starts no giveaway in a server under attack: the plans due soon move a minute on.
+    for guild in plans::soon_guilds(&app.pool).await? {
+        if attacked(app, Id::new(guild as u64)).await {
+            plans::postpone(&app.pool, guild).await?;
         }
     }
     Ok(())
@@ -2968,6 +2979,73 @@ mod tests {
         assert_eq!(winners_text(&many), "26 winners");
     }
 
+    /// A plan due while the server is under attack starts nothing: the pause round moves it on,
+    /// and it is due again once the attack is over.
+    #[tokio::test]
+    async fn a_plan_waits_while_the_server_is_under_attack() {
+        let Some(t) = crate::test_support::T::new(310).await else {
+            return;
+        };
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let s = plans::Save {
+            name: "Hourly".into(),
+            channel_id: Some(2),
+            prize: "Nitro".into(),
+            host_id: None,
+            sponsor_id: None,
+            winners: 1,
+            duration_secs: 3600,
+            claim_hours: None,
+            req: Req::default(),
+            extras: Default::default(),
+            spec: Some(json!({"tz": "UTC", "lines": [{"kind": "every", "minutes": 60}]})),
+            enabled: true,
+            wait_for_end: false,
+        };
+        let p = plans::save(&t.app.pool, g, None, &s, 9, sqlx::types::chrono::Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        let due_now = || async {
+            sqlx::query("UPDATE giveaway_plans SET next_at = now() WHERE id = $1")
+                .bind(p.id)
+                .execute(&t.app.pool)
+                .await
+                .unwrap();
+        };
+        let is_due = || async {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT next_at <= now() FROM giveaway_plans WHERE id = $1",
+            )
+            .bind(p.id)
+            .fetch_one(&t.app.pool)
+            .await
+            .unwrap()
+        };
+        t.app.panic_runs.lock().unwrap().insert(
+            gid.get(),
+            crate::app::PanicRun {
+                lock_mod_commands: false,
+                starting: 0,
+            },
+        );
+        due_now().await;
+        pause_round(&t.app).await.unwrap();
+        assert!(!is_due().await, "moved on during panic mode");
+        let held = plans::list(&t.app.pool, g).await.unwrap().remove(0);
+        assert!(held.enabled && held.issue.unwrap().starts_with("Waits while"));
+        t.app.panic_runs.lock().unwrap().remove(&gid.get());
+        due_now().await;
+        pause_round(&t.app).await.unwrap();
+        assert!(is_due().await, "due again when the attack is over");
+        sqlx::query("DELETE FROM giveaway_plans WHERE guild_id = $1")
+            .bind(g)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        t.cleanup().await;
+    }
+
     /// Panic mode pauses the server's giveaways within one round: no entry and no draw, and the
     /// end job waits. When panic ends, the next round resumes them and moves the end later.
     #[tokio::test]
@@ -3005,7 +3083,7 @@ mod tests {
             },
         );
         assert!(attacked(&t.app, gid).await);
-        sync_pauses(&t.app).await.unwrap();
+        pause_round(&t.app).await.unwrap();
         let paused = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
         assert!(paused.paused_at.is_some());
         let job: i64 =
@@ -3027,7 +3105,7 @@ mod tests {
             .execute(&t.app.pool)
             .await
             .unwrap();
-        sync_pauses(&t.app).await.unwrap();
+        pause_round(&t.app).await.unwrap();
         let after = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
         assert!(after.paused_at.is_none());
         assert!((after.ends_at - gw.ends_at).num_seconds() >= 295);

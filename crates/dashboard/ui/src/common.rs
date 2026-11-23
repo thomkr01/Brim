@@ -258,7 +258,7 @@ pub fn Dialog() -> impl IntoView {
                 let r = NodeRef::new();
                 focus_on_open(r);
                 let yes = move || close_dialog(Some(text.get_untracked()));
-                view! { <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label=a.title.clone() on:keydown=move |e| dialog_keys(&e, || close_dialog(None))>
+                view! { <div class="modal top" node_ref=r role="dialog" aria-modal="true" aria-label=a.title.clone() on:keydown=move |e| dialog_keys(&e, || close_dialog(None))>
                     <div class="card ask">
                         {crate::icons::icon(if a.input.is_some() { "edit" } else { "warning" })}
                         <h2>{a.title.clone()}</h2>

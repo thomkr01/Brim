@@ -164,30 +164,55 @@ async fn delete(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i6
     Ok(Json(json!({"ok": true})))
 }
 
-/// Starts one due plan; true when one was looked at (more may be due). The saver's rights are read
-/// first: one who lost them stops the plan, and a level that cannot be read now is tried again.
-/// A plan whose run fails is moved a minute on with the reason, so it never blocks the others.
+/// Plans looked at in one pass, and the lanes they run in.
+const BATCH: usize = 200;
+const LANES: usize = 8;
+
+/// Starts the due plans of one pass: the oldest `BATCH`, in `LANES` lanes side by side. Two runners
+/// or a restart never start a plan twice (the claim in [`plans::run`]). True when more may be
+/// due. The saver's rights are read first: one who lost them stops the plan, and a level that
+/// cannot be read now is tried again. A plan whose run fails is moved a minute on with the
+/// reason, so it never blocks the others.
 pub(crate) async fn run_one(st: &AppState) -> Result<bool, ApiError> {
-    for (id, guild, by) in plans::due(&st.db).await? {
-        match try_plan(st, id, guild, by).await {
-            Ok(true) => return Ok(true),
-            Ok(false) => {}
-            Err(e) => {
-                tracing::warn!(?e, id, "a giveaway plan could not run");
-                plans::delay(
-                    &st.db,
-                    id,
-                    "Brim could not run this plan and tries again in a minute.",
-                )
-                .await?;
+    static UP: std::sync::OnceLock<chrono::DateTime<Utc>> = std::sync::OnceLock::new();
+    let up = *UP.get_or_init(Utc::now);
+    let due = plans::due(&st.db, BATCH as i64).await?;
+    let more = due.len() == BATCH;
+    let mut lanes = vec![vec![]; LANES];
+    for (i, d) in due.into_iter().enumerate() {
+        lanes[i % LANES].push(d);
+    }
+    let mut set = tokio::task::JoinSet::new();
+    for lane in lanes.into_iter().filter(|l| !l.is_empty()) {
+        let st = st.clone();
+        set.spawn(async move {
+            for (id, guild, by) in lane {
+                if let Err(e) = try_plan(&st, id, guild, by, up).await {
+                    tracing::warn!(?e, id, "a giveaway plan could not run");
+                    let why = "Brim could not run this plan and tries again in a minute.";
+                    if let Err(e) = plans::delay(&st.db, id, why).await {
+                        tracing::warn!(?e, id, "a giveaway plan could not be moved on");
+                    }
+                }
             }
+        });
+    }
+    while let Some(r) = set.join_next().await {
+        if let Err(e) = r {
+            tracing::error!(?e, "a giveaway plan lane stopped");
         }
     }
-    Ok(false)
+    Ok(more)
 }
 
-/// One candidate of [`run_one`]; true when it ran or was stopped.
-async fn try_plan(st: &AppState, id: i64, guild: i64, by: i64) -> Result<bool, ApiError> {
+/// One plan of [`run_one`].
+async fn try_plan(
+    st: &AppState,
+    id: i64,
+    guild: i64,
+    by: i64,
+    up: chrono::DateTime<Utc>,
+) -> Result<(), ApiError> {
     let saver = Sess {
         id: String::new(),
         user_id: by,
@@ -202,17 +227,15 @@ async fn try_plan(st: &AppState, id: i64, guild: i64, by: i64) -> Result<bool, A
         Err(ApiError::Forbidden(_)) => {
             let why = format!("Stopped: the member who last saved this plan (user id {by}) can no longer manage giveaways. Someone who can saves it again and turns it on.");
             plans::pause(&st.db, guild, id, by, &why).await?;
-            return Ok(true);
+            return Ok(());
         }
         Err(e) => return Err(e),
     }
     let cfg = settings(st, guild).await?;
-    match plans::run(&st.db, id, by, cfg.as_ref()).await? {
-        Some(Ran::Started(g)) => tracing::info!(plan = id, giveaway = g, "giveaway plan started"),
-        Some(_) => {}
-        None => return Ok(false),
+    if let Some(Ran::Started(g)) = plans::run(&st.db, id, by, cfg.as_ref(), up).await? {
+        tracing::info!(plan = id, giveaway = g, "giveaway plan started");
     }
-    Ok(true)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -267,7 +290,7 @@ mod tests {
             .unwrap();
             ids.push(p.id);
         }
-        while run_one(&st).await.unwrap() {}
+        run_one(&st).await.unwrap();
         let made = |plan: i64| {
             sqlx::query_scalar::<_, i64>("select count(*) from giveaways where plan_id = $1")
                 .bind(plan)

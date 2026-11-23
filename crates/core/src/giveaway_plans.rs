@@ -27,9 +27,6 @@ pub const LATE_SECS: i64 = 3600;
 pub const LAST_GRACE_SECS: i64 = 6 * 3600;
 /// A run that waits for the plan's giveaway to end looks again after this long.
 pub const RETRY_SECS: i64 = 60;
-/// The most plans one runner pass looks at.
-const CANDIDATES: i64 = 8;
-
 /// One stored template or plan.
 #[derive(Clone, Debug, sqlx::FromRow, Serialize)]
 pub struct Plan {
@@ -342,13 +339,40 @@ pub async fn delay(pool: &PgPool, id: i64, why: &str) -> Result<()> {
     Ok(())
 }
 
-/// The oldest due plans as (id, server, saver); the runner checks each saver, then calls [`run`].
-pub async fn due(pool: &PgPool) -> Result<Vec<(i64, i64, i64)>> {
+/// Servers with a plan due in the next 30 seconds (the bot's pause round asks which are attacked).
+pub async fn soon_guilds(pool: &PgPool) -> Result<Vec<i64>> {
+    Ok(sqlx::query_scalar(
+        "SELECT DISTINCT guild_id FROM giveaway_plans
+         WHERE enabled AND next_at <= now() + interval '30 seconds'",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+/// A server under attack starts no giveaway: its plans due soon move a minute on, with the
+/// reason, and the round that follows asks again. A plan never counts as late for this wait, and
+/// it starts once, when the attack is over.
+pub async fn postpone(pool: &PgPool, guild: i64) -> Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE giveaway_plans SET next_at = now() + make_interval(secs => $2), issue = $3
+         WHERE guild_id = $1 AND enabled AND next_at <= now() + interval '30 seconds'",
+    )
+    .bind(guild)
+    .bind(RETRY_SECS as f64)
+    .bind("Waits while the server is under attack, and starts when it is over.")
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+/// The `limit` oldest due plans as (id, server, saver); the runner checks each saver, then calls
+/// [`run`].
+pub async fn due(pool: &PgPool, limit: i64) -> Result<Vec<(i64, i64, i64)>> {
     Ok(sqlx::query_as(
         "SELECT id, guild_id, created_by FROM giveaway_plans
          WHERE enabled AND next_at <= now() ORDER BY next_at LIMIT $1",
     )
-    .bind(CANDIDATES)
+    .bind(limit)
     .fetch_all(pool)
     .await?)
 }
@@ -368,12 +392,15 @@ pub enum Ran {
 /// stored in the same transaction that makes the giveaway, so a plan never starts twice (a restart,
 /// a late job or a second runner see the moved time) and never loses a run to a crash. The limit
 /// of running giveaways counts as for any start; a run over it is skipped with the reason.
-/// `cfg`: the server's giveaway settings; `None` when giveaways are off.
+/// `cfg`: the server's giveaway settings; `None` when giveaways are off. `up_since`: when the
+/// runner started. A run is late by the time Brim was down (`up_since` minus its time), never by
+/// the time it waited for a busy runner.
 pub async fn run(
     pool: &PgPool,
     id: i64,
     by: i64,
     cfg: Option<&GiveawaysCfg>,
+    up_since: DateTime<Utc>,
 ) -> Result<Option<Ran>> {
     let mut tx = pool.begin().await?;
     let Some(p): Option<Plan> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -394,7 +421,7 @@ pub async fn run(
         .as_ref()
         .and_then(|r| r.as_ref().ok())
         .and_then(|s| msgsched::next(s, now));
-    let late = p.next_at.map_or(0, |a| (now - a).num_seconds());
+    let late = p.next_at.map_or(0, |a| (up_since - a).num_seconds());
     let (ran, next_at, held) = 'run: {
         if let Some(Err(e)) = &parsed {
             break 'run (
@@ -607,17 +634,19 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            run(&pool, p.id, 9, Some(&cfg(25))).await.unwrap(),
+            run(&pool, p.id, 9, Some(&cfg(25)), Utc::now())
+                .await
+                .unwrap(),
             None,
             "not due yet"
         );
         due_now(&pool, p.id).await;
         let c = cfg(25);
         let (a, b, c2, d) = tokio::join!(
-            run(&pool, p.id, 9, Some(&c)),
-            run(&pool, p.id, 9, Some(&c)),
-            run(&pool, p.id, 9, Some(&c)),
-            run(&pool, p.id, 9, Some(&c))
+            run(&pool, p.id, 9, Some(&c), Utc::now()),
+            run(&pool, p.id, 9, Some(&c), Utc::now()),
+            run(&pool, p.id, 9, Some(&c), Utc::now()),
+            run(&pool, p.id, 9, Some(&c), Utc::now())
         );
         let started = [a, b, c2, d]
             .into_iter()
@@ -649,7 +678,10 @@ mod tests {
         assert!(after.last_run.is_some() && after.issue.is_none());
         // Another saver's run does not count: the plan runs with the rights of who saved it last.
         due_now(&pool, p.id).await;
-        assert_eq!(run(&pool, p.id, 10, Some(&c)).await.unwrap(), None);
+        assert_eq!(
+            run(&pool, p.id, 10, Some(&c), Utc::now()).await.unwrap(),
+            None
+        );
     }
 
     /// The limit of running giveaways holds for a plan: the run is skipped with the reason and the
@@ -664,11 +696,11 @@ mod tests {
         let c = cfg(1);
         due_now(&pool, p.id).await;
         assert!(matches!(
-            run(&pool, p.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Started(_))
         ));
         due_now(&pool, p.id).await;
-        let r = run(&pool, p.id, 9, Some(&c)).await.unwrap();
+        let r = run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap();
         assert!(
             matches!(&r, Some(Ran::Skipped(w)) if w.contains("limit")),
             "{r:?}"
@@ -692,12 +724,12 @@ mod tests {
         let c = cfg(25);
         due_now(&pool, p.id).await;
         assert!(matches!(
-            run(&pool, p.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Started(_))
         ));
         due_now(&pool, p.id).await;
         assert_eq!(
-            run(&pool, p.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Held)
         );
         let held = list(&pool, g).await.unwrap().remove(0);
@@ -710,7 +742,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            run(&pool, p.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Held)
         );
         assert_eq!(made(&pool, p.id).await, 1);
@@ -721,7 +753,7 @@ mod tests {
             .unwrap();
         due_now(&pool, p.id).await;
         assert!(matches!(
-            run(&pool, p.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Started(_))
         ));
         assert_eq!(made(&pool, p.id).await, 2);
@@ -743,14 +775,14 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        let r = run(&pool, p.id, 9, Some(&c)).await.unwrap();
+        let r = run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap();
         assert!(
             matches!(&r, Some(Ran::Skipped(w)) if w.contains("not running")),
             "{r:?}"
         );
         assert_eq!(made(&pool, p.id).await, 0);
         due_now(&pool, p.id).await;
-        let r = run(&pool, p.id, 9, None).await.unwrap();
+        let r = run(&pool, p.id, 9, None, Utc::now()).await.unwrap();
         assert!(
             matches!(&r, Some(Ran::Skipped(w)) if w.contains("off")),
             "{r:?}"
@@ -772,7 +804,7 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(
-            run(&pool, o.id, 9, Some(&c)).await.unwrap(),
+            run(&pool, o.id, 9, Some(&c), Utc::now()).await.unwrap(),
             Some(Ran::Started(_))
         ));
         let done = list(&pool, g)
@@ -782,7 +814,7 @@ mod tests {
             .find(|x| x.id == o.id)
             .unwrap();
         assert!(!done.enabled && done.next_at.is_none(), "no run left");
-        assert!(due(&pool).await.unwrap().iter().all(|d| d.0 != o.id));
+        assert!(due(&pool, 100).await.unwrap().iter().all(|d| d.0 != o.id));
     }
 
     /// A restore that makes a role or channel again moves it into templates and plans; a deleted
@@ -834,8 +866,154 @@ mod tests {
         assert!(!pause(&pool, g, p.id, 10, "x").await.unwrap());
         assert!(pause(&pool, g, p.id, 9, "x").await.unwrap());
         due_now(&pool, p.id).await;
-        assert!(due(&pool).await.unwrap().iter().all(|d| d.0 != p.id));
+        assert!(due(&pool, 100).await.unwrap().iter().all(|d| d.0 != p.id));
         assert!(delete(&pool, g, p.id).await.unwrap());
         assert!(!delete(&pool, g, p.id).await.unwrap());
+    }
+
+    /// A busy runner never makes a plan late: only the time Brim was down counts.
+    #[tokio::test]
+    async fn a_plan_the_runner_was_late_to_is_not_skipped() {
+        let Some((pool, g)) = db(7).await else { return };
+        let c = cfg(25);
+        let p = save(&pool, g, None, &save_of("Busy", hourly()), 9, Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        sqlx::query("UPDATE giveaway_plans SET next_at = now() - interval '5 hours' WHERE id = $1")
+            .bind(p.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        // The runner started 5 hours ago and took until now to reach this plan: it starts.
+        let up = Utc::now() - chrono::Duration::hours(6);
+        assert!(matches!(
+            run(&pool, p.id, 9, Some(&c), up).await.unwrap(),
+            Some(Ran::Started(_))
+        ));
+        // After a down time of 5 hours it is skipped.
+        sqlx::query("UPDATE giveaway_plans SET next_at = now() - interval '5 hours' WHERE id = $1")
+            .bind(p.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            run(&pool, p.id, 9, Some(&c), Utc::now()).await.unwrap(),
+            Some(Ran::Skipped(_))
+        ));
+        sqlx::query("DELETE FROM giveaway_plans WHERE guild_id = $1")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM giveaways WHERE guild_id = $1")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    /// A server under attack: its plans move on and keep their place; the others are not touched.
+    #[tokio::test]
+    async fn an_attacked_server_postpones_its_due_plans() {
+        let Some((pool, g)) = db(8).await else { return };
+        let p = save(&pool, g, None, &save_of("Soon", hourly()), 9, Utc::now())
+            .await
+            .unwrap()
+            .unwrap();
+        due_now(&pool, p.id).await;
+        assert!(soon_guilds(&pool).await.unwrap().contains(&g));
+        assert_eq!(postpone(&pool, g).await.unwrap(), 1);
+        assert!(!soon_guilds(&pool).await.unwrap().contains(&g));
+        assert!(due(&pool, 100).await.unwrap().iter().all(|d| d.0 != p.id));
+        let after = list(&pool, g).await.unwrap().remove(0);
+        assert!(after.enabled && after.issue.unwrap().starts_with("Waits while"));
+        assert_eq!(postpone(&pool, g).await.unwrap(), 0);
+        sqlx::query("DELETE FROM giveaway_plans WHERE guild_id = $1")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    /// Many plans due in the same minute across many servers: every one starts once, none is
+    /// skipped as late, and 8 lanes side by side never start one twice. `PLAN_LOAD` sets the number
+    /// of plans (default 400; the load numbers use 10000).
+    #[tokio::test]
+    async fn many_due_plans_all_start_once() {
+        let Some((pool, _)) = db(9).await else { return };
+        let n: i64 = std::env::var("PLAN_LOAD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(400);
+        let base = 7_300_000_000 + std::process::id() as i64 * 100_000;
+        let all = "guild_id >= $1 AND guild_id < $1 + 100000";
+        let clean = || async {
+            for t in ["giveaway_plans", "giveaways", "scheduled_jobs"] {
+                sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {t} WHERE {all}")))
+                    .bind(base)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        };
+        clean().await;
+        // 10 plans per server, all due now.
+        sqlx::query(
+            "INSERT INTO giveaway_plans (guild_id, name, channel_id, prize, winners, duration_secs,
+               spec, next_at, enabled, created_by)
+             SELECT $1 + i / 10, 'P' || i, 2, 'Nitro', 1, 3600,
+               '{\"tz\": \"UTC\", \"lines\": [{\"kind\": \"every\", \"minutes\": 60}]}',
+               now() - interval '1 minute', true, 9
+             FROM generate_series(0, $2 - 1) i",
+        )
+        .bind(base)
+        .bind(n)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let t = std::time::Instant::now();
+        let c = std::sync::Arc::new(cfg(25));
+        let mut lanes = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let (pool, c) = (pool.clone(), c.clone());
+            lanes.spawn(async move {
+                let mut started = 0;
+                loop {
+                    // Only these plans: other tests may leave a due plan behind.
+                    let mut due = due(&pool, 200).await.unwrap();
+                    due.retain(|d| (base..base + 100_000).contains(&d.1));
+                    if due.is_empty() {
+                        return started;
+                    }
+                    for (id, _, by) in due {
+                        if let Some(Ran::Started(_)) =
+                            run(&pool, id, by, Some(&c), Utc::now()).await.unwrap()
+                        {
+                            started += 1;
+                        }
+                    }
+                }
+            });
+        }
+        let mut started = 0;
+        while let Some(r) = lanes.join_next().await {
+            started += r.unwrap();
+        }
+        eprintln!(
+            "{n} due plans started in {:.1} s",
+            t.elapsed().as_secs_f64()
+        );
+        assert_eq!(started, n);
+        let twice: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM (SELECT plan_id FROM giveaways WHERE plan_id IS NOT NULL
+               AND guild_id >= $1 AND guild_id < $1 + 100000 GROUP BY plan_id HAVING count(*) > 1) x",
+        )
+        .bind(base)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(twice, 0);
+        clean().await;
     }
 }
