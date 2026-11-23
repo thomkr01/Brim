@@ -388,6 +388,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 false => winners_text(&g.winner_ids),
             };
             let note = ended_note(g);
+            let count = g.winners.to_string();
             let banner = banner(&choice, true);
             let vars = [
                 ("prize", g.prize.as_str()),
@@ -397,6 +398,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 ("sponsor_picture", &picture),
                 ("banner", &banner),
                 ("entries", &entries),
+                ("ga_winner_count", &count),
                 ("winners", &winners),
                 ("note", &note),
                 ("id", &id),

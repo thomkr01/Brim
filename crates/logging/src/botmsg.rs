@@ -4553,6 +4553,17 @@ fn giveaways(out: &mut Vec<Def>) {
         }
         m
     };
+    // The facts sit in three small fields under the lines; a field without a value is dropped, so
+    // nothing shows empty. The lines start right under the title: a host's own text can go there.
+    let fielded = |mut m: Value, fields: Vec<(&str, &str, bool)>| {
+        m["embeds"][0]["fields"] = Value::Array(
+            fields
+                .into_iter()
+                .map(|(n, v, inline)| json!({"name": n, "value": v, "inline": inline}))
+                .collect(),
+        );
+        m
+    };
     out.push(msg(
         "giveaway.running",
         "Giveaway message (running)",
@@ -4569,20 +4580,24 @@ fn giveaways(out: &mut Vec<Def>) {
             "id",
         ],
         &["prize", "ends"],
-        pictures(
-            true,
-            card(
-                "{prize}",
-                ORANGE,
-                &[
-                    "{e:clock} **Ends:** {ends}",
-                    "{e:user_id} **Hosted by:** {host}",
-                    "{e:star} **Sponsored by:** {sponsor}",
-                    "{e:members} **Entries:** {entries}",
-                    "{e:trophy} **Winners:** {winners}",
-                    "{requirements}",
-                ],
+        fielded(
+            pictures(
+                true,
+                card(
+                    "{prize}",
+                    ORANGE,
+                    &[
+                        "{e:user_id} **Hosted by:** {host}",
+                        "{e:star} **Sponsored by:** {sponsor}",
+                        "{requirements}",
+                    ],
+                ),
             ),
+            vec![
+                ("{e:clock} Ends", "{ends}", true),
+                ("{e:members} Entries", "{entries}", true),
+                ("{e:trophy} Winners", "{winners}", true),
+            ],
         ),
     ));
     out.push(msg(
@@ -4596,25 +4611,31 @@ fn giveaways(out: &mut Vec<Def>) {
             "sponsor_picture",
             "banner",
             "entries",
+            "ga_winner_count",
             "winners",
             "note",
             "id",
         ],
         &["prize", "winners"],
-        pictures(
-            true,
-            card(
-                "{prize}",
-                GREY,
-                &[
-                    "{e:clock} **Ended:** {ended}",
-                    "{e:user_id} **Hosted by:** {host}",
-                    "{e:star} **Sponsored by:** {sponsor}",
-                    "{e:members} **Entries:** {entries}",
-                    "{e:trophy} **Winners:** {winners}",
-                    "{note}",
-                ],
+        fielded(
+            pictures(
+                true,
+                card(
+                    "{prize}",
+                    GREY,
+                    &[
+                        "{e:user_id} **Hosted by:** {host}",
+                        "{e:star} **Sponsored by:** {sponsor}",
+                        "{note}",
+                    ],
+                ),
             ),
+            vec![
+                ("{e:clock} Ends", "Ended", true),
+                ("{e:members} Entries", "{entries}", true),
+                ("{e:trophy} Winners", "{ga_winner_count}", true),
+                ("Result", "{winners}", false),
+            ],
         ),
     ));
     out.push(msg(
@@ -6354,7 +6375,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "The running and recently ended giveaways, one per line",
         "`12` Nitro: ends in 2 days",
     ),
-    ("prize", "The giveaway prize", "Nitro for a month"),
+    ("prize", "The giveaway prize", "[Insert prize here]"),
     (
         "ends",
         "When the giveaway ends (time left and date)",
@@ -6382,6 +6403,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "/giveaway-a.png",
     ),
     ("entries", "Number of entries", "42"),
+    ("ga_winner_count", "How many winners the giveaway has", "2"),
     (
         "winners",
         "The winners (mentions), or the winner count while it runs",
@@ -7258,6 +7280,64 @@ mod tests {
         );
         assert_eq!(m["embeds"][0]["thumbnail"]["url"], "https://cdn/a.png");
         assert!(m["embeds"][0]["image"].is_null());
+    }
+
+    /// The default giveaway cards show the facts as fields; the sponsor line and an empty field
+    /// are left out, never shown empty.
+    #[test]
+    fn giveaway_cards_use_fields() {
+        let field = |m: &Value, n: &str| {
+            m["embeds"][0]["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["name"].as_str().unwrap().ends_with(n))
+                .map(|f| f["value"].as_str().unwrap().to_string())
+        };
+        let run = |sponsor: &'static str| {
+            render(
+                "giveaway.running",
+                None,
+                &[
+                    ("prize", "P"),
+                    ("ends", "soon"),
+                    ("host", "<@1>"),
+                    ("sponsor", sponsor),
+                    ("entries", "42"),
+                    ("winners", "2"),
+                    ("requirements", ""),
+                ],
+            )
+        };
+        let m = run("<@2>");
+        let d = m["embeds"][0]["description"].as_str().unwrap();
+        assert!(d.contains("<@1>") && d.contains("<@2>"));
+        assert_eq!(field(&m, "Ends").as_deref(), Some("soon"));
+        assert_eq!(field(&m, "Entries").as_deref(), Some("42"));
+        assert_eq!(field(&m, "Winners").as_deref(), Some("2"));
+        assert!(m["embeds"][0]["fields"][0]["inline"] == true);
+        let d = run("")["embeds"][0]["description"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(d.contains("<@1>") && !d.contains("Sponsored"));
+        let m = render(
+            "giveaway.ended",
+            None,
+            &[
+                ("prize", "P"),
+                ("entries", "7"),
+                ("ga_winner_count", "2"),
+                ("winners", "<@3>"),
+                ("note", ""),
+            ],
+        );
+        assert_eq!(field(&m, "Ends").as_deref(), Some("Ended"));
+        assert_eq!(field(&m, "Result").as_deref(), Some("<@3>"));
+        assert_eq!(field(&m, "Winners").as_deref(), Some("2"));
+        for k in ["giveaway.running", "giveaway.ended"] {
+            assert!(missing_text(k, &find(k).unwrap().template).is_none(), "{k}");
+        }
     }
 
     #[test]

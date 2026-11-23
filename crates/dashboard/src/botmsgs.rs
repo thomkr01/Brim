@@ -227,22 +227,31 @@ async fn shown(
     }
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = botmsg::render(&key, stored.as_ref(), &vars);
-    // Brim emoji tags (`{e:name}`) in the texts, as `panel_message` fills them.
-    for e in m["embeds"].as_array_mut().into_iter().flatten() {
-        for p in ["/title", "/description", "/footer/text"] {
-            if let Some(v) = e.pointer_mut(p) {
-                if let Some(t) = v.as_str() {
-                    *v = json!(brim_logging::emoji::fill(t).trim());
-                }
-            }
-        }
-    }
+    fill_emoji(&mut m);
     let tickets: brim_core::sections::TicketsCfg =
         serde_json::from_value(cfg["tickets"].clone()).unwrap_or_default();
     let added = added_buttons(&st, guild, &tickets).await?;
     Ok(Json(
         json!({"message": m, "added": added.get(key.as_str())}),
     ))
+}
+
+/// Brim emoji tags (`{e:name}`) in the texts and fields, as `panel_message` fills them.
+fn fill_emoji(m: &mut Value) {
+    let fill = |v: &mut Value| {
+        if let Some(t) = v.as_str() {
+            *v = json!(brim_logging::emoji::fill(t).trim());
+        }
+    };
+    for e in m["embeds"].as_array_mut().into_iter().flatten() {
+        for p in ["/title", "/description", "/footer/text"] {
+            e.pointer_mut(p).map(fill);
+        }
+        for f in e["fields"].as_array_mut().into_iter().flatten() {
+            fill(&mut f["name"]);
+            fill(&mut f["value"]);
+        }
+    }
 }
 
 /// The outside-server keys, for SQL.
@@ -755,7 +764,8 @@ async fn test(
     let server = st.discord.guild_name(guild).await?.unwrap_or_default();
     let ex = examples(d, &server);
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
-    let m = botmsg::render(&key, stored.as_ref(), &vars);
+    let mut m = botmsg::render(&key, stored.as_ref(), &vars);
+    fill_emoji(&mut m);
     let content = format!(
         "-# Test of “{}” from the dashboard, with example values.\n{}",
         d.name,
