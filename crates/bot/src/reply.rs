@@ -458,7 +458,7 @@ fn punish_vars<'a>(
     appeal: &'a str,
 ) -> Vec<(&'static str, &'a str)> {
     vec![
-        ("server", server),
+        ("guild.name", server),
         ("reason", reason.unwrap_or("No reason.")),
         ("moderator", moderator.unwrap_or("")),
         ("moderator_code", moderator_code),
@@ -825,7 +825,7 @@ pub(crate) async fn quarantine_dm_job(app: &App, gid: Id<GuildMarker>, p: &Value
         Some(gid),
         user,
         "dm.quarantine_notice",
-        &[("server", &server)],
+        &[("guild.name", &server)],
         &[],
     )
     .await

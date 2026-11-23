@@ -229,7 +229,7 @@ pub async fn rescue_expired_job(app: &App, gid: Id<GuildMarker>) -> Result<()> {
         Some(u) => format!("{}/#/{gid}/rescue", u.trim_end_matches('/')),
         None => "the dashboard's Rescue Key page".into(),
     };
-    let vars = [("name", name.as_str()), ("page", page.as_str())];
+    let vars = [("guild.name", name.as_str()), ("page", page.as_str())];
     reply::dm_msg(
         app,
         Some(gid),

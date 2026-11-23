@@ -287,7 +287,7 @@ fn messages() -> Value {
             ..Default::default()
         })),
         "verify_help": interaction(verify::embed_reply(verify::help_embed(&help_cfg, None))),
-        "verify_deleted": log(verify::deleted::deleted_log("deleted_by_trusted", &[("channel_name", "verify-here"), ("by", "<@1003>"), ("made", "Brim made a new one: <#2001>.")])),
+        "verify_deleted": log(verify::deleted::deleted_log("deleted_by_trusted", &[("channel.name", "verify-here"), ("by", "<@1003>"), ("made", "Brim made a new one: <#2001>.")])),
         "joingate_kick": log(joingate::gate_log(ROGUE, Action::Kick, "join gate", gate_bot, None)),
     });
     for (k, v) in tickets() {

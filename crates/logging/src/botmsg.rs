@@ -323,7 +323,7 @@ fn build() -> Vec<Def> {
     let moderator = format!("{} {{moderator_code}}", label_head("Moderator"));
     let duration = format!("{} {{duration}}", label_head("Duration"));
     let vars = &[
-        "server",
+        "guild.name",
         "reason",
         "moderator",
         "moderator_code",
@@ -335,74 +335,74 @@ fn build() -> Vec<Def> {
         (
             "warn",
             "Warn",
-            "You have been warned in {server}!",
+            "You have been warned in {guild.name}!",
             ORANGE,
-            &format!("{WARNING} You got a warning in `{{server}}`."),
+            &format!("{WARNING} You got a warning in `{{guild.name}}`."),
         ),
         (
             "timeout",
             "Timeout",
-            "You have been timed out in {server}!",
+            "You have been timed out in {guild.name}!",
             RED,
-            &format!("{TIMEOUT} You cannot talk in `{{server}}` for a while."),
+            &format!("{TIMEOUT} You cannot talk in `{{guild.name}}` for a while."),
         ),
         (
             "quarantine",
             "Quarantine",
-            "You have been quarantined in {server}!",
+            "You have been quarantined in {guild.name}!",
             RED,
-            &format!("{LOCK} You were put in quarantine in `{{server}}`."),
+            &format!("{LOCK} You were put in quarantine in `{{guild.name}}`."),
         ),
         (
             "kick",
             "Kick",
-            "You have been kicked in {server}!",
+            "You have been kicked in {guild.name}!",
             RED,
-            &format!("{KICK} You were removed from `{{server}}`."),
+            &format!("{KICK} You were removed from `{{guild.name}}`."),
         ),
         (
             "softban",
             "Softban",
-            "You have been softbanned in {server}!",
+            "You have been softbanned in {guild.name}!",
             RED,
             &format!(
-                "{PURGE} You were removed from `{{server}}` and your recent messages were deleted."
+                "{PURGE} You were removed from `{{guild.name}}` and your recent messages were deleted."
             ),
         ),
         (
             "tempban",
             "Temporary ban",
-            "You have been temporarily banned in {server}!",
+            "You have been temporarily banned in {guild.name}!",
             RED,
-            &format!("{BAN} You are banned from `{{server}}` for a set time."),
+            &format!("{BAN} You are banned from `{{guild.name}}` for a set time."),
         ),
         (
             "unquarantine",
             "Unquarantine",
-            "You have been unquarantined in {server}!",
+            "You have been unquarantined in {guild.name}!",
             GREEN,
-            &format!("{YES} Your quarantine in `{{server}}` was lifted."),
+            &format!("{YES} Your quarantine in `{{guild.name}}` was lifted."),
         ),
         (
             "untimeout",
             "Timeout removed",
-            "Your timeout was removed in {server}!",
+            "Your timeout was removed in {guild.name}!",
             GREEN,
-            &format!("{YES} You can talk in `{{server}}` again."),
+            &format!("{YES} You can talk in `{{guild.name}}` again."),
         ),
         (
             "unban",
             "Unban",
-            "You have been unbanned in {server}!",
+            "You have been unbanned in {guild.name}!",
             GREEN,
-            &format!("{YES} You can join `{{server}}` again."),
+            &format!("{YES} You can join `{{guild.name}}` again."),
         ),
         (
             "ban",
             "Ban",
-            "You have been banned in {server}!",
+            "You have been banned in {guild.name}!",
             RED,
-            &format!("{BAN} You can no longer join `{{server}}`."),
+            &format!("{BAN} You can no longer join `{{guild.name}}`."),
         ),
     ] {
         let mut lines = vec![
@@ -436,10 +436,10 @@ fn build() -> Vec<Def> {
         "dm.quarantine_notice",
         "Quarantine notice (no case)",
         g,
-        &["server"],
+        &["guild.name"],
         "You have been quarantined",
         RED,
-        &format!("{LOCK} You have been quarantined in `{{server}}`. You can DM Brim to reach this server's staff."),
+        &format!("{LOCK} You have been quarantined in `{{guild.name}}`. You can DM Brim to reach this server's staff."),
     ));
     out.push(plain("dm.invite_link", "Your invite link", g, &["code", "expiry", "uses"], "Your invite link", BLUE, &format!("{CHAIN} Your invite link: https://discord.gg/{{code}}\nIt {{expiry}}, {{uses}}. Joins through it count for you.")));
     out.push(plain(
@@ -451,7 +451,7 @@ fn build() -> Vec<Def> {
         RED,
         &format!("{TIMEOUT} You were timed out by automod{{why}}{{note}}"),
     ));
-    out.push(plain("dm.verify_reminder", "Verification reminder", g, &["server", "time"], "Verification needed", ORANGE, &format!("{WARNING} You have not verified in `{{server}}`, so you cannot see its channels. Verify in its verification channel within {{time}}, or you will be removed from the server.")));
+    out.push(plain("dm.verify_reminder", "Verification reminder", g, &["guild.name", "time"], "Verification needed", ORANGE, &format!("{WARNING} You have not verified in `{{guild.name}}`, so you cannot see its channels. Verify in its verification channel within {{time}}, or you will be removed from the server.")));
     for (key, name, color) in [
         ("dm.appeal_approved", "Appeal approved", GREEN),
         ("dm.appeal_denied", "Appeal denied", RED),
@@ -548,7 +548,7 @@ fn build() -> Vec<Def> {
         ORANGE,
     ));
     // Locked (owner decision 2026-11-21): no rescue key text is editable.
-    out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["name", "page"], embed("Rescue key expired", ORANGE, &[format!("{WARNING} The rescue key of **{{name}}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {{page}}. It needs your dashboard 2FA.")])));
+    out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["guild.name", "page"], embed("Rescue key expired", ORANGE, &[format!("{WARNING} The rescue key of **{{guild.name}}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {{page}}. It needs your dashboard 2FA.")])));
     out.push(def("dm.dashboard_2fa", "Dashboard 2FA setup code", s, false, &["code"], embed("Your setup code", BLUE, &[format!("{FINGERPRINT} Your Brim authenticator setup code is **{{code}}**. If you didn't start this, don't share it: someone may have your dashboard session.")])));
     feeds(&mut out);
     giveaways(&mut out);
@@ -576,7 +576,7 @@ fn build() -> Vec<Def> {
                 // like a normal one.
                 k if k.starts_with("log.") => d.required.insert(0, "title"),
                 "dm.rescue_expired" => {
-                    d.required = vec!["name", "page"];
+                    d.required = vec!["guild.name", "page"];
                     d.what = "the server's name and the page to make a new key";
                 }
                 "dm.dashboard_2fa" => {
@@ -811,12 +811,12 @@ pub const EVENT_LOGS: &[(&str, &str, &[&str])] = &[
     (
         "member",
         "Member Join",
-        &["Target|{member}", "{when}", "Creation|{created}"],
+        &["Target|{member}", "{when}", "Creation|{member.created_at}"],
     ),
     (
         "member",
         "Member Leave",
-        &["Target|{member}", "{when}", "Creation|{created}"],
+        &["Target|{member}", "{when}", "Creation|{member.created_at}"],
     ),
     (
         "member",
@@ -860,7 +860,7 @@ pub const EVENT_LOGS: &[(&str, &str, &[&str])] = &[
         "Thread Archived Automatically",
         &[
             "Thread|{channel}",
-            "Name|{thread_name}",
+            "Name|{thread.name}",
             "Inactive For|{inactive}",
             "{when}",
         ],
@@ -1055,15 +1055,10 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "How many deleted messages are in the file below",
         "`12/12` saved in `bulk-abc.txt` below",
     ),
-    (
-        "created",
-        "When the account was made",
-        "<t:1600000000:F> (<t:1600000000:R>)",
-    ),
     ("from", "Voice channel left", "#lounge"),
     ("to", "Voice channel joined", "#gaming"),
     ("event", "The scheduled event", "Movie night"),
-    ("thread_name", "The thread's name", "help-123"),
+    ("thread.name", "The thread's name", "help-123"),
     ("inactive", "How long the thread had no messages", "`1 day`"),
     ("before", "The old value", "old-name"),
     ("after", "The new value", "new-name"),
@@ -1225,7 +1220,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "Their account accessories (decoration, banner, Nitro, server avatar)",
         "✅ Avatar Decoration\n❌ Banner\n✅ Nitro\n❌ Server Avatar",
     ),
-    ("member_roles", "The member's roles (mentions)", "@Helpers, @Trial"),
+    ("member.roles", "The member's roles (mentions)", "@Helpers, @Trial"),
     ("webhooks", "Names of the webhooks they made", "Alerts"),
     ("role", "The role (mention with ID)", "@Helpers *`123456789012345678`*"),
     ("role.name", "The role's name", "Helpers"),
@@ -1241,17 +1236,17 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "❌ Managed\n✅ Mentionable\n✅ Hoisted\n❌ Main Role",
     ),
     ("guild.name", "Server name", "My Server"),
-    ("owner", "The server owner (mention with ID)", "@sam *`123456789012345679`*"),
+    ("guild.owner_id", "The server owner (mention with ID)", "@sam *`123456789012345679`*"),
     (
         "guild.created_at",
         "When the server was made (Discord time stamp)",
         "<t:1600000000:R>",
     ),
-    ("members", "How many members the server has", "120"),
+    ("guild.member_count", "How many members the server has", "120"),
     ("role_count", "How many roles the server has", "14"),
     ("channel_count", "How many channels the server has", "30"),
-    ("boosts", "How many boosts the server has", "3"),
-    ("boost_tier", "The server's boost tier", "1"),
+    ("guild.premium_subscription_count", "How many boosts the server has", "3"),
+    ("guild.premium_tier", "The server's boost tier", "1"),
     ("role_list", "The roles on this page, top down (mentions)", "▸ @Admins\n▸ @Helpers"),
     ("page_no", "The page shown", "2"),
     ("pages", "How many pages the answer has", "3"),
@@ -1448,7 +1443,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "@alex left the server: removed Moderators",
     ),
     ("accounts", "The accounts, as mentions", "@SomeBot"),
-    ("channel_name", "The channel's name", "verify"),
+    ("channel.name", "The channel's name", "verify"),
     ("channel_kind", "What kind of channel it was", "log channel"),
     ("made", "What Brim did about the channel", "Brim made a new one: #verify."),
     (
@@ -2771,16 +2766,16 @@ pub const SECURITY_LOGS: &[(&str, &str, u32, &[&str], &[(&str, &str, bool)])] = 
     ("log.anti_nuke.permit_holders_left", "Permits: holders who left", ORANGE, &["{gone}"], &[]),
     ("log.anti_nuke.bot_check_failed", "Anti-nuke: bot check failed", ORANGE, &["Could not check if {accounts} are bots, so they stay listed. Only users can be Extra Owner, Trusted Admin or on the quarantine whitelist; the check runs again at the next start."], &[]),
     ("log.anti_nuke.bots_removed", "Anti-nuke: bots removed from user-only lists", ORANGE, &["Bot accounts were removed: {accounts}. Only users can be Extra Owner, Trusted Admin or on the quarantine whitelist. A bot permit gives a bot exactly the whitelist flags you pick: add the bot as a member of a permit on the dashboard's Permits page."], &[]),
-    ("log.anti_nuke.verification_channel_not_remade", "Anti-nuke: verification channel deleted, not made again", ALERT, &["The verification channel #{channel_name} was deleted and Brim could not make a new one: {error}"], &[]),
-    ("log.anti_nuke.verification_channel_deleted_again", "Anti-nuke: verification channel deleted again", ALERT, &["The verification channel #{channel_name} was deleted again after {count} new ones in 10 minutes. Brim stopped making new ones. Check who is deleting it."], &[]),
+    ("log.anti_nuke.verification_channel_not_remade", "Anti-nuke: verification channel deleted, not made again", ALERT, &["The verification channel #{channel.name} was deleted and Brim could not make a new one: {error}"], &[]),
+    ("log.anti_nuke.verification_channel_deleted_again", "Anti-nuke: verification channel deleted again", ALERT, &["The verification channel #{channel.name} was deleted again after {count} new ones in 10 minutes. Brim stopped making new ones. Check who is deleting it."], &[]),
     ("log.anti_nuke.verification_channel_not_set_up", "Anti-nuke: verification channel made again, not set up", ALERT, &["Brim made the verification channel {channel} again, but could not set it up: {error}. Press Setup Channel on the dashboard."], &[]),
-    ("log.anti_nuke.verification_channel_level_unread", "Anti-nuke: verification channel deleted, level not read", ALERT, &["The verification channel #{channel_name} was deleted by {by}. {made} Brim could not read the permit level of {by}, so nobody was punished. Check who this is."], &[]),
-    ("log.anti_nuke.verification_channel_deleted_by_owner", "Anti-nuke: verification channel deleted by the owner", ALERT, &["The verification channel #{channel_name} was deleted by the server owner. {made}"], &[]),
-    ("log.anti_nuke.verification_channel_deleted_by_trusted", "Anti-nuke: verification channel deleted by a trusted member", ALERT, &["The verification channel #{channel_name} was deleted by {by}. {made} {by} is trusted, so only this message was sent. If they delete it again, they will be quarantined."], &[]),
-    ("log.anti_nuke.verification_channel_not_quarantined", "Anti-nuke: verification channel deleted, deleter not quarantined", ALERT, &["The verification channel #{channel_name} was deleted by {by}. {made} Brim could not quarantine them: {error}"], &[]),
-    ("log.anti_nuke.protected_channel_deleted", "Anti-nuke: log channel or other kept channel deleted", ALERT, &["The {channel_kind} #{channel_name} was deleted by {by}. {made}"], &[]),
-    ("log.anti_nuke.log_channel_locked", "Anti-nuke: log channel locked", ALERT, &["Brim locked the log channel #{channel_name}: only Brim may delete messages or the channel there now."], &[]),
-    ("log.anti_nuke.log_channel_lock_changed", "Anti-nuke: log channel lock changed", ALERT, &["{by} changed the permissions on the log channel #{channel_name} so others could delete messages or the channel. Brim put the lock back."], &[]),
+    ("log.anti_nuke.verification_channel_level_unread", "Anti-nuke: verification channel deleted, level not read", ALERT, &["The verification channel #{channel.name} was deleted by {by}. {made} Brim could not read the permit level of {by}, so nobody was punished. Check who this is."], &[]),
+    ("log.anti_nuke.verification_channel_deleted_by_owner", "Anti-nuke: verification channel deleted by the owner", ALERT, &["The verification channel #{channel.name} was deleted by the server owner. {made}"], &[]),
+    ("log.anti_nuke.verification_channel_deleted_by_trusted", "Anti-nuke: verification channel deleted by a trusted member", ALERT, &["The verification channel #{channel.name} was deleted by {by}. {made} {by} is trusted, so only this message was sent. If they delete it again, they will be quarantined."], &[]),
+    ("log.anti_nuke.verification_channel_not_quarantined", "Anti-nuke: verification channel deleted, deleter not quarantined", ALERT, &["The verification channel #{channel.name} was deleted by {by}. {made} Brim could not quarantine them: {error}"], &[]),
+    ("log.anti_nuke.protected_channel_deleted", "Anti-nuke: log channel or other kept channel deleted", ALERT, &["The {channel_kind} #{channel.name} was deleted by {by}. {made}"], &[]),
+    ("log.anti_nuke.log_channel_locked", "Anti-nuke: log channel locked", ALERT, &["Brim locked the log channel #{channel.name}: only Brim may delete messages or the channel there now."], &[]),
+    ("log.anti_nuke.log_channel_lock_changed", "Anti-nuke: log channel lock changed", ALERT, &["{by} changed the permissions on the log channel #{channel.name} so others could delete messages or the channel. Brim put the lock back."], &[]),
     ("log.anti_nuke.log_messages_deleted", "Anti-nuke: messages deleted in a log channel", ALERT, &["{by} deleted {count} message(s) in the log channel {channel}. Deleted messages cannot be brought back."], &[]),
     ("log.panic.heat_panic", "Panic: heat panic mode triggered", ALERT, &["[arrow] {count} raiders will be timed out on every message for {duration}."], &[]),
     ("log.panic.triggered", "Panic: panic mode triggered", ALERT, &["{alert}", "[arrow] Brim will lockdown the server and run a scan."], &[]),
@@ -4123,7 +4118,7 @@ fn answer_entries(out: &mut Vec<Def>) {
                 f("Dangerous Permissions:", "{dangerous}"),
                 f("Brim Permissions:", "{permits}"),
                 f("Account Accessories:", "{accessories}"),
-                f("Roles:", "{member_roles}"),
+                f("Roles:", "{member.roles}"),
                 f("Webhooks:", "{webhooks}"),
             ],
             footer: String::new(),
@@ -4161,12 +4156,15 @@ fn answer_entries(out: &mut Vec<Def>) {
             title: "{guild.name}'s Info:".into(),
             color: BLUE,
             lines: vec![
-                l("Owner", "{owner}"),
+                l("Owner", "{guild.owner_id}"),
                 l("Created", "{guild.created_at}"),
-                l("Members", "`{members}`"),
+                l("Members", "`{guild.member_count}`"),
                 l("Roles", "`{role_count}`"),
                 l("Channels", "`{channel_count}`"),
-                l("Boosts", "`{boosts}` (tier {boost_tier})"),
+                l(
+                    "Boosts",
+                    "`{guild.premium_subscription_count}` (tier {guild.premium_tier})",
+                ),
             ],
             fields: none(),
             footer: "Page: 1/{pages}".into(),
@@ -4686,13 +4684,13 @@ fn giveaways(out: &mut Vec<Def>) {
     out.push(msg(
         "giveaway.winner_dm",
         "Winner DM",
-        &["prize", "server", "sponsor", "link", "deadline"],
+        &["prize", "guild.name", "sponsor", "link", "deadline"],
         &["prize", "link"],
         card(
             "You won a giveaway!",
             ORANGE,
             &[
-                "{e:trophy} You won **{prize}** in `{server}`.",
+                "{e:trophy} You won **{prize}** in `{guild.name}`.",
                 "{e:star} **Sponsored by:** {sponsor}",
                 "{e:clock} Press **Claim** before {deadline}, or the prize goes to another entrant.",
                 "[Go to the giveaway]({link})",
@@ -4702,23 +4700,23 @@ fn giveaways(out: &mut Vec<Def>) {
     out.push(msg(
         "giveaway.entry_removed",
         "Entry removed DM",
-        &["prize", "server", "reason"],
+        &["prize", "guild.name", "reason"],
         &["prize", "reason"],
         card(
             "Giveaway entry removed",
             ORANGE,
-            &["Your entry in **{prize}** in `{server}` was removed: {reason}"],
+            &["Your entry in **{prize}** in `{guild.name}` was removed: {reason}"],
         ),
     ));
     out.push(msg(
         "giveaway.entry_denied_dm",
         "Reaction entry refused DM",
-        &["prize", "server", "reason"],
+        &["prize", "guild.name", "reason"],
         &["prize", "reason"],
         card(
             "Giveaway entry refused",
             ORANGE,
-            &["Your reaction did not enter you in **{prize}** in `{server}`: {reason}"],
+            &["Your reaction did not enter you in **{prize}** in `{guild.name}`: {reason}"],
         ),
     ));
     out.push(msg(
@@ -5513,11 +5511,11 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Confirm the server",
         g,
         false,
-        &["server", "server_id"],
+        &["guild.name", "guild.id"],
         embed(
             &format!("{TICKET} Confirmation"),
             BLUE,
-            &[format!("{TICKET} You are sending this message to `{{server}}` (ID: `{{server_id}}`)."), "Press **Send** to confirm, **Other server** to pick another server, or **Cancel** to stop.".into()],
+            &[format!("{TICKET} You are sending this message to `{{guild.name}}` (ID: `{{guild.id}}`)."), "Press **Send** to confirm, **Other server** to pick another server, or **Cancel** to stop.".into()],
         ),
     );
     c.template["embeds"][0]["footer"] = json!({"text": "Tip: you can turn confirmation messages off with the t!confirmation command."});
@@ -5583,12 +5581,12 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Ticket closed",
         g,
         false,
-        &["server", "reason"],
+        &["guild.name", "reason"],
         embed(
             &format!("{TICKET_CLOSE} Ticket Closed"),
             BLUE,
             &[
-                format!("{MAILBOX} Your ticket in `{{server}}` was closed."),
+                format!("{MAILBOX} Your ticket in `{{guild.name}}` was closed."),
                 format!("{} {{reason}}", label_head("Reason")),
             ],
         ),
@@ -5628,22 +5626,22 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "verify.passed",
         "Verification passed",
         g,
-        &["server"],
+        &["guild.name"],
         "You have been verified!",
         GREEN,
-        &format!("{YES} You passed the verification. You can now access `{{server}}`!"),
+        &format!("{YES} You passed the verification. You can now access `{{guild.name}}`!"),
     ));
     // The panel the `verifysetup` command and the dashboard post; Brim adds Verify and Help.
     let mut d = plain(
         "verify.panel",
         "Verification panel",
         g,
-        &["server"],
+        &["guild.name"],
         &format!("{CAPTCHA} Verification Required!"),
         GREEN,
-        &format!("To access `{{server}}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."),
+        &format!("To access `{{guild.name}}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."),
     );
-    d.required = vec!["server"];
+    d.required = vec!["guild.name"];
     out.push(d);
     out.push(plain(
         "verify.wrong",
@@ -5675,7 +5673,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
             &["{steps}".into()],
         ),
     ));
-    out.push(def("verify.kicked", "Removed for not verifying", g, false, &["server", "again"], embed("Timed out. Try again", RED, &[format!("{TIMEOUT} You did not finish the verification of `{{server}}` in time, so you were removed from the server."), format!("{ARROW} {{again}}")])));
+    out.push(def("verify.kicked", "Removed for not verifying", g, false, &["guild.name", "again"], embed("Timed out. Try again", RED, &[format!("{TIMEOUT} You did not finish the verification of `{{guild.name}}` in time, so you were removed from the server."), format!("{ARROW} {{again}}")])));
     out.push(say(
         "reply.verify.not_set_up",
         "Reply: verification is not set up",
@@ -5791,15 +5789,15 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
     d.required = vec!["permissions"];
     out.push(d);
     let g = "Verification";
-    out.push(plain("verify.banned", "Banned for not verifying", g, &["server"], "Timed out. Try again", RED, &format!("{BAN} You did not finish the verification of `{{server}}` in time 3 times in 24 hours, so you were banned for 7 days.\nWhen the ban ends, Brim sends you a new invite here, valid for 24 hours.")));
+    out.push(plain("verify.banned", "Banned for not verifying", g, &["guild.name"], "Timed out. Try again", RED, &format!("{BAN} You did not finish the verification of `{{guild.name}}` in time 3 times in 24 hours, so you were banned for 7 days.\nWhen the ban ends, Brim sends you a new invite here, valid for 24 hours.")));
     out.push(plain(
         "verify.ban_ended",
         "Verification ban ended",
         g,
-        &["server"],
+        &["guild.name"],
         "Your ban has ended",
         GREEN,
-        &format!("{YES} You can join `{{server}}` again and verify. The invite below works once, for 24 hours."),
+        &format!("{YES} You can join `{{guild.name}}` again and verify. The invite below works once, for 24 hours."),
     ));
 
     out.push(def(
@@ -5807,12 +5805,12 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Thank you for adding Brim",
         "Welcome",
         false,
-        &["server", "setup"],
+        &["guild.name", "setup"],
         embed(
             "Thank you for choosing Brim!",
             GREEN,
             &[
-                format!("{YES} `Brim` has been added to `{{server}}`."),
+                format!("{YES} `Brim` has been added to `{{guild.name}}`."),
                 String::new(),
                 "{setup} Every feature is free.".into(),
             ],
@@ -6451,7 +6449,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "Link to the giveaway message",
         "https://discord.com/channels/1/2/3",
     ),
-    ("server", "Server name", "My Server"),
+    ("guild.name", "Server name", "My Server"),
     ("claim", "How long a winner has to press Claim", "48 hours"),
     (
         "closes",
@@ -6529,7 +6527,6 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "Text Brim writes",
         "What happened, written by Brim.",
     ),
-    ("name", "Server name", "My Server"),
     ("channel", "Channel", "#verify"),
     ("prefix", "Command prefix", "t!"),
     ("permit", "Permit name", "lock updates"),
@@ -6537,7 +6534,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     ("error", "What went wrong", "Missing Permissions"),
     ("tag", "Tag the member typed", "rules"),
     ("title", "Log title", "Message Deleted"),
-    ("server_id", "Server ID", "123456789012345678"),
+    ("guild.id", "Server ID", "123456789012345678"),
     (
         "steps",
         "Steps for this server's verification",
@@ -6629,11 +6626,10 @@ const FEED_VARS: &[(&str, &str, &str)] = &[
     ("number", "Issue or pull request number", "2"),
 ];
 
-/// Variables for a Discord thing, named the way Discord names it: the object and its field, as
-/// the Message Builder does (`{member.id}`, `{channel.name}`, `{guild.name}`). The code name is
-/// on the left. `{member}`, `{user}`, `{channel}`, `{role}`, `{roles}` and a field of a Discord
-/// object (`{member.username}`) already are Discord's names.
-const DISCORD_NAMES: &[(&str, &str)] = &[
+/// Old bare names of Discord things, with the Discord name that replaced them in the code too.
+/// Only old copies (a message backup or kit from before the rename) still hold them; `to_public`
+/// renames them when such a copy loads.
+const OLD_DISCORD_NAMES: &[(&str, &str)] = &[
     ("server", "guild.name"),
     ("name", "guild.name"),
     ("server_id", "guild.id"),
@@ -6727,9 +6723,6 @@ pub fn public_name(key: &str, var: &str) -> String {
     // A settings path (`bans.heat`) is Brim's own: its dots become underscores.
     let flat = var.trim_start_matches('.').replace('.', "_");
     let var = flat.as_str();
-    if let Some((_, to)) = DISCORD_NAMES.iter().find(|(from, _)| *from == var) {
-        return (*to).into();
-    }
     let Some((_, pre, words)) = FUNCTIONS
         .iter()
         .filter(|(start, ..)| key.starts_with(start))
@@ -6802,6 +6795,7 @@ pub fn to_public(key: &str, msg: &Value) -> Value {
         rename_vars(&mut m, &|n| {
             let n = OLD_FIELDS
                 .iter()
+                .chain(OLD_DISCORD_NAMES)
                 .find(|(o, _)| *o == n)
                 .map_or(n, |(_, to)| to);
             d.vars
@@ -7525,7 +7519,18 @@ mod tests {
             public_name("log.ticket.ticket_closed", "ticket_type"),
             "tk_type"
         );
-        assert_eq!(public_name("dm.punish.ban", "server"), "guild.name");
+        assert_eq!(public_name("dm.punish.ban", "guild.name"), "guild.name");
+        // A Discord thing has its Discord name in the code too: no entry uses an old bare name.
+        for d in defs() {
+            for (old, _) in OLD_DISCORD_NAMES {
+                assert!(!d.vars.contains(old), "{} {old}", d.key);
+            }
+        }
+        let old = json!({"content": "{server} {e:x}"});
+        assert_eq!(
+            to_public("verify.panel", &old)["content"],
+            "{guild.name} {e:x}"
+        );
         assert_eq!(public_name("dm.punish.ban", "reason"), "mod_reason");
         assert_eq!(public_name("log.member.member_join", "member"), "member");
         assert_eq!(public_name("reply.info.server", "guild.name"), "guild.name");
@@ -7615,7 +7620,7 @@ mod tests {
             ("link", "https://discord.com/x"),
             ("claim", "2d"),
             ("closes", "soon"),
-            ("server", "S"),
+            ("guild.name", "S"),
             ("deadline", "soon"),
         ];
         for k in [
@@ -7709,7 +7714,7 @@ mod tests {
             "dm.punish.timeout",
             None,
             &[
-                ("server", "S"),
+                ("guild.name", "S"),
                 ("reason", "spam"),
                 ("moderator", ""),
                 ("moderator_code", ""),
@@ -7828,12 +7833,11 @@ mod tests {
         // No rescue key text is editable: a saved copy never applies.
         let rescue = find("dm.rescue_expired").unwrap();
         assert!(rescue.locked && rescue.security);
-        let copy =
-            json!({"content": "", "embeds": [{"title": "Hi", "description": "{name} {page}"}]});
+        let copy = json!({"content": "", "embeds": [{"title": "Hi", "description": "{guild.name} {page}"}]});
         let m = render(
             "dm.rescue_expired",
             Some(&copy),
-            &[("name", "S"), ("page", "https://x")],
+            &[("guild.name", "S"), ("page", "https://x")],
         );
         assert_eq!(m["embeds"][0]["title"], "Rescue key expired");
         assert_eq!(find("dm.dashboard_2fa").unwrap().required, ["code"]);
@@ -8060,7 +8064,7 @@ mod tests {
             "dm.punish.ban",
             None,
             &[
-                ("server", "S"),
+                ("guild.name", "S"),
                 ("reason", &long),
                 ("moderator", ""),
                 ("moderator_code", ""),
@@ -8085,7 +8089,7 @@ mod tests {
             "dm.punish.ban",
             None,
             &[
-                ("server", "{moderator}"),
+                ("guild.name", "{moderator}"),
                 ("reason", "{staff_line}"),
                 ("moderator", "m"),
                 ("moderator_code", "`m`"),
@@ -8099,7 +8103,7 @@ mod tests {
             .contains("{staff_line}"));
         let bad = json!({"content": "", "embeds": [1, "a"]});
         assert!(
-            render("dm.punish.ban", Some(&bad), &[("server", "S")])["embeds"][0]["title"]
+            render("dm.punish.ban", Some(&bad), &[("guild.name", "S")])["embeds"][0]["title"]
                 .is_string()
         );
     }
@@ -8381,7 +8385,7 @@ mod tests {
         let m = render(
             "dm.punish.ban",
             Some(&stored),
-            &[("server", "S"), ("moderator_code", "")],
+            &[("guild.name", "S"), ("moderator_code", "")],
         );
         assert_eq!(m["embeds"][0]["title"], "You have been banned in S!");
     }

@@ -1706,7 +1706,7 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
     if let Some(why) = payload["removed"].as_str() {
         let vars = [
             ("prize", g.prize.as_str()),
-            ("server", &server),
+            ("guild.name", &server),
             ("reason", why),
         ];
         let (text, embeds) = rendered(app, gid, "giveaway.entry_removed", &vars).await;
@@ -1716,7 +1716,7 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
     if let Some(why) = payload["denied"].as_str() {
         let vars = [
             ("prize", g.prize.as_str()),
-            ("server", &server),
+            ("guild.name", &server),
             ("reason", why),
         ];
         let (text, embeds) = rendered(app, gid, "giveaway.entry_denied_dm", &vars).await;
@@ -1746,7 +1746,7 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
     let deadline = deadline.map(when).unwrap_or_default();
     let vars = [
         ("prize", g.prize.as_str()),
-        ("server", &server),
+        ("guild.name", &server),
         ("sponsor", &sponsor),
         ("link", &link),
         ("deadline", &deadline),

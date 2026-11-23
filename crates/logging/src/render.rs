@@ -234,7 +234,7 @@ pub fn thread_auto_archive(thread: &Channel) -> (Log, Option<Link>) {
     });
     let log = Log::new("Thread Archived Automatically", ORANGE)
         .fact("Thread", "channel", &embed::channel(thread.id.get()))
-        .fact("Name", "thread_name", name.as_deref().unwrap_or(""))
+        .fact("Name", "thread.name", name.as_deref().unwrap_or(""))
         .fact(
             "Inactive For",
             "inactive",
@@ -358,7 +358,7 @@ fn member_log(title: &str, color: u32, user: &User) -> Log {
         .time()
         .fact(
             "Creation",
-            "created",
+            "member.created_at",
             &format!("<t:{created}:F> (<t:{created}:R>)"),
         )
 }

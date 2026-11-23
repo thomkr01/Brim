@@ -716,7 +716,7 @@ fn every_channel_alert_reads_as_before() {
     let v = |text: &str| Log::new("Verification Channel Deleted", ALERT).text(text);
     let d = verify::deleted::deleted_log;
     let base = [
-        ("channel_name", "verify"),
+        ("channel.name", "verify"),
         ("by", "<@5>"),
         ("made", "Brim made a new one: <#8>."),
     ];
@@ -726,12 +726,12 @@ fn every_channel_alert_reads_as_before() {
         v("The verification channel #verify was deleted and Brim could not make a new one: boom"),
         d(
             "not_remade",
-            &[("channel_name", "verify"), ("error", "boom")],
+            &[("channel.name", "verify"), ("error", "boom")],
         ),
     );
     check(
         v("The verification channel #verify was deleted again after 3 new ones in 10 minutes. Brim stopped making new ones. Check who is deleting it."),
-        d("deleted_again", &[("channel_name", "verify"), ("count", "3")]),
+        d("deleted_again", &[("channel.name", "verify"), ("count", "3")]),
     );
     check(
         v("Brim made the verification channel <#8> again, but could not set it up: boom. Press Setup Channel on the dashboard."),
@@ -766,7 +766,7 @@ fn every_channel_alert_reads_as_before() {
         "log.anti_nuke.protected_channel_deleted",
         &[
             ("channel_kind", "log channel"),
-            ("channel_name", "logs"),
+            ("channel.name", "logs"),
             ("by", "<@5>"),
             ("made", "Brim did not make a new one."),
         ],
@@ -775,13 +775,13 @@ fn every_channel_alert_reads_as_before() {
         p("Log Channel Locked", "Brim locked the log channel #logs: only Brim may delete messages or the channel there now."),
         "Log Channel Locked",
         "log.anti_nuke.log_channel_locked",
-        &[("channel_name", "logs")],
+        &[("channel.name", "logs")],
     );
     sec(
         p("Log Channel Lock Changed", "<@5> changed the permissions on the log channel #logs so others could delete messages or the channel. Brim put the lock back."),
         "Log Channel Lock Changed",
         "log.anti_nuke.log_channel_lock_changed",
-        &[("by", "<@5>"), ("channel_name", "logs")],
+        &[("by", "<@5>"), ("channel.name", "logs")],
     );
     sec(
         p("Log Messages Deleted", "<@5> deleted 2 message(s) in the log channel <#8>. Deleted messages cannot be brought back."),

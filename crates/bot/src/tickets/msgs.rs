@@ -4,7 +4,10 @@ use super::*;
 /// The DM asking the member to confirm the server before their first message goes out.
 pub(crate) fn confirm(s: &Server, msg: Id<MessageMarker>) -> (Embed, Component) {
     let id = s.id.to_string();
-    let e = s.tpl("ticket.confirm", &[("server", &s.name), ("server_id", &id)]);
+    let e = s.tpl(
+        "ticket.confirm",
+        &[("guild.name", &s.name), ("guild.id", &id)],
+    );
     let row = action_row(vec![
         button(
             "Send",
@@ -97,7 +100,10 @@ pub(crate) fn notice(s: &Server, closing: bool, text: &str, u: &User, kind: &str
 
 /// The DM telling the member their ticket was closed.
 pub(crate) fn closed(s: &Server, reason: &str, staff: Option<&User>) -> Embed {
-    let mut e = stamp(s.tpl("ticket.closed", &[("server", &s.name), ("reason", reason)]));
+    let mut e = stamp(s.tpl(
+        "ticket.closed",
+        &[("guild.name", &s.name), ("reason", reason)],
+    ));
     if let Some(staff) = staff {
         e = author(e, &staff.name, avatar(staff));
     }

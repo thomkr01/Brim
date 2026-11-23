@@ -192,7 +192,7 @@ pub(crate) async fn user_info(
         ("permits", level_name(&level)),
         ("accessories", accessories),
         (
-            "member_roles",
+            "member.roles",
             list(m.roles.iter().map(|r| format!("<@&{r}>")).collect()),
         ),
         ("webhooks", list(webhooks)),
@@ -298,22 +298,22 @@ pub async fn server_page(app: &App, gid: Id<GuildMarker>, page: usize) -> Result
     let channels = app.http.guild_channels(gid).await?.models().await?.len();
     let vars = [
         ("guild.name", g.name.clone()),
-        ("owner", embed::user(g.owner_id.get())),
+        ("guild.owner_id", embed::user(g.owner_id.get())),
         (
             "guild.created_at",
             format!("<t:{}:R>", created_secs(gid.get())),
         ),
         (
-            "members",
+            "guild.member_count",
             g.approximate_member_count.unwrap_or_default().to_string(),
         ),
         ("role_count", g.roles.len().to_string()),
         ("channel_count", channels.to_string()),
         (
-            "boosts",
+            "guild.premium_subscription_count",
             g.premium_subscription_count.unwrap_or_default().to_string(),
         ),
-        ("boost_tier", u8::from(g.premium_tier).to_string()),
+        ("guild.premium_tier", u8::from(g.premium_tier).to_string()),
         ("pages", pages.to_string()),
     ];
     let e = reply::answer(app, gid, "reply.info.server", &vars).await;

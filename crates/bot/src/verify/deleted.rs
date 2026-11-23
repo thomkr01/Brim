@@ -111,14 +111,14 @@ pub async fn on_channel_delete(app: &App, c: &Channel) -> Result<()> {
             Ok(id) => Remade::Made(id),
             Err(e) => {
                 let why = crate::http_err::why(&e);
-                let vars = [("channel_name", name.as_str()), ("error", &why)];
+                let vars = [("channel.name", name.as_str()), ("error", &why)];
                 alert(app, gid, deleted_log("not_remade", &vars)).await;
                 Remade::Not
             }
         }
     } else {
         let vars = [
-            ("channel_name", name.as_str()),
+            ("channel.name", name.as_str()),
             ("count", &REMAKE_CAP.to_string()),
         ];
         alert(app, gid, deleted_log("deleted_again", &vars)).await;
@@ -246,7 +246,7 @@ pub async fn on_audit(app: &App, e: &AuditLogEntry) -> Result<()> {
     let deleted = format!("The verification channel #{name} was deleted by <@{actor}>. {made}");
     let by = format!("<@{actor}>");
     let vars = [
-        ("channel_name", name.as_str()),
+        ("channel.name", name.as_str()),
         ("by", by.as_str()),
         ("made", made.as_str()),
     ];

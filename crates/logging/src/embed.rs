@@ -355,7 +355,7 @@ pub fn button(label: &str, id: &str, style: ButtonStyle) -> Component {
 /// The verify panel, posted by the `verifysetup` command and by the dashboard wizard: the entry
 /// `verify.panel` (the server's copy `stored`, else the default) and the buttons Brim adds.
 pub fn verify_panel(server: &str, stored: Option<&serde_json::Value>) -> (Embed, Component) {
-    let embed = crate::overlay::bot_embed("verify.panel", stored, &[("server", server)]);
+    let embed = crate::overlay::bot_embed("verify.panel", stored, &[("guild.name", server)]);
     let row = Component::ActionRow(ActionRow {
         id: None,
         components: vec![
@@ -372,8 +372,7 @@ mod tests {
 
     #[test]
     fn verify_panel_takes_the_servers_copy() {
-        let copy =
-            serde_json::json!({"embeds": [{"title": "Hi", "description": "Welcome to {server}"}]});
+        let copy = serde_json::json!({"embeds": [{"title": "Hi", "description": "Welcome to {guild.name}"}]});
         let (e, row) = verify_panel("Mine", Some(&copy));
         assert_eq!(e.description.as_deref(), Some("Welcome to Mine"));
         assert!(matches!(row, Component::ActionRow(r) if r.components.len() == 2));

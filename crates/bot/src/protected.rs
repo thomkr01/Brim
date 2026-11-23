@@ -89,7 +89,7 @@ pub async fn report(app: &App, c: &Channel, what: &str, made: &Remade, dm: bool)
     let name = c.name.as_deref().unwrap_or("unknown");
     let vars = [
         ("channel_kind", what),
-        ("channel_name", name),
+        ("channel.name", name),
         ("by", by.as_str()),
         ("made", made.text.as_str()),
     ];
@@ -192,7 +192,7 @@ pub async fn on_channel_update(app: &Arc<App>, c: &Channel) -> Result<()> {
         let log = security_log(
             "Log Channel Lock Changed",
             "log.anti_nuke.log_channel_lock_changed",
-            &[("by", &by), ("channel_name", &name)],
+            &[("by", &by), ("channel.name", &name)],
         );
         let dm = dm_due(id.get(), now_secs());
         if let Err(e) = alert(&app, gid, log, dm).await {
@@ -223,7 +223,7 @@ pub async fn lock_all(app: &App, gid: Id<GuildMarker>, channels: &[Channel]) -> 
                 let log = security_log(
                     "Log Channel Locked",
                     "log.anti_nuke.log_channel_locked",
-                    &[("channel_name", name)],
+                    &[("channel.name", name)],
                 );
                 alert(app, gid, log, false).await?;
             }

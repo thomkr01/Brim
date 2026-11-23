@@ -727,7 +727,7 @@ pub async fn sweep(app: &App, gid: Id<GuildMarker>) -> Result<()> {
         )
         .await?;
         let (server, time) = (server.to_string(), period(v.verify.time_limit_ms));
-        let vars = [("server", server.as_str()), ("time", time.as_str())];
+        let vars = [("guild.name", server.as_str()), ("time", time.as_str())];
         crate::reply::dm_msg(app, Some(gid), m.user.id, "dm.verify_reminder", &vars, &[]).await;
     }
     Ok(())
@@ -986,7 +986,7 @@ pub async fn retry_after_ban(app: &App, gid: Id<GuildMarker>, user: Id<UserMarke
     };
     let server = guild_name(app, gid).await;
     let rows = [row(crate::welcome::link("Join again", link))];
-    let vars = [("server", server.as_str())];
+    let vars = [("guild.name", server.as_str())];
     crate::reply::dm_msg(app, Some(gid), user, "verify.ban_ended", &vars, &rows).await;
 }
 
@@ -1006,12 +1006,12 @@ pub(crate) fn timed_out_msg(
     } else {
         "verify.kicked"
     };
-    (key, [("server", server), ("again", again)])
+    (key, [("guild.name", server), ("again", again)])
 }
 
 /// The default pass message (dashboard preview).
 pub(crate) fn passed_embed(server: &str) -> Embed {
-    crate::reply::bot_embed("verify.passed", None, &[("server", server)])
+    crate::reply::bot_embed("verify.passed", None, &[("guild.name", server)])
 }
 
 /// An ephemeral answer with the text and embeds of a short reply.
@@ -1404,7 +1404,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
                     match self_grant(app, gid, user, &cfg.verification).await {
                         Ok(()) => {
                             let server = guild_name(app, gid).await;
-                            let vars = [("server", server.as_str())];
+                            let vars = [("guild.name", server.as_str())];
                             let done =
                                 [
                                     crate::reply::bot_embed_for(app, gid, "verify.passed", &vars)
@@ -1569,7 +1569,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
                     return Ok(true);
                 }
                 let server = guild_name(app, gid).await;
-                let vars = [("server", server.as_str())];
+                let vars = [("guild.name", server.as_str())];
                 let done = crate::reply::bot_embed_for(app, gid, "verify.passed", &vars).await;
                 client
                     .create_followup(&i.token)

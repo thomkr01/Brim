@@ -674,7 +674,7 @@ pub async fn on_guild_create(app: &App, ev: &GuildCreate) -> Result<()> {
         ),
         None => "Ask the bot owner for the dashboard link to set it up.".into(),
     };
-    let vars = [("server", g.name.as_str()), ("setup", wizard.as_str())];
+    let vars = [("guild.name", g.name.as_str()), ("setup", wizard.as_str())];
     let embeds = [crate::reply::bot_embed_for(app, g.id, "welcome.added", &vars).await];
     // Discord rejects an empty action row.
     let rows: Vec<Component> = if links.is_empty() {

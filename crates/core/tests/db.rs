@@ -1280,7 +1280,7 @@ async fn variable_names_migration_rewrites_saved_texts() {
         let sent = brim_logging::botmsg::render(
             "dm.punish.ban",
             Some(&ban),
-            &[("server", "S"), ("moderator", "M"), ("reason", "R")],
+            &[("guild.name", "S"), ("moderator", "M"), ("reason", "R")],
         );
         assert!(
             sent["embeds"][0]["description"]

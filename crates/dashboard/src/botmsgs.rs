@@ -723,13 +723,13 @@ fn banner_example(cfg: &Value, site: &str, key: &str) -> String {
     }
 }
 
-/// The examples for `key`'s variables; `server` and `name` (`{guild.name}`) get the real server name.
+/// The examples for `key`'s variables; `guild.name` gets the real server name.
 fn examples(d: &botmsg::Def, server: &str) -> Vec<(&'static str, String)> {
     d.vars
         .iter()
         .map(|v| {
             let ex = match *v {
-                "server" | "name" => server.to_string(),
+                "guild.name" => server.to_string(),
                 "title" if is_log_type(d, v) => d.name.clone(),
                 // Discord needs the full link; the editor's own preview uses the short one.
                 "banner" => format!(

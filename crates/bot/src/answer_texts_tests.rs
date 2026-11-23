@@ -91,7 +91,7 @@ fn every_info_answer_default_reads_as_the_code_built_it() {
         ("Dangerous Permissions:", "dangerous", "Ban Members"),
         ("Brim Permissions:", "permits", "Trusted Admin"),
         ("Account Accessories:", "accessories", "❌ Banner"),
-        ("Roles:", "member_roles", "<@&5>, <@&6>"),
+        ("Roles:", "member.roles", "<@&5>, <@&6>"),
         ("Webhooks:", "webhooks", "❌"),
     ];
     base.extend(v(&[("color", "#3498db"), ("badges", "Verified Bot")]));
@@ -127,13 +127,13 @@ fn every_info_answer_default_reads_as_the_code_built_it() {
 
     let server = v(&[
         ("guild.name", "My Server"),
-        ("owner", &embed::user(9)),
+        ("guild.owner_id", &embed::user(9)),
         ("guild.created_at", "<t:1500000000:R>"),
-        ("members", "120"),
+        ("guild.member_count", "120"),
         ("role_count", "14"),
         ("channel_count", "30"),
-        ("boosts", "3"),
-        ("boost_tier", "1"),
+        ("guild.premium_subscription_count", "3"),
+        ("guild.premium_tier", "1"),
         ("pages", "2"),
     ]);
     same(
