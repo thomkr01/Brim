@@ -32,7 +32,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
         ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
-        ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
+        ("Set up in the dashboard", "base", &[P("General", &["Use the verification module", "Verification mode|Captcha ▾", "Verification channel|#verify ▾", "Verification roles|@Member", "Fail action|Kick ▾", "Verification targets|Everyone ▾"]), C("Settings")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
         ("Every raid gets a report", "base", &[T("Raid report", &[("8 joins in 10 s", "paused"), ("6 accounts without avatar", "flagged"), ("Joins resumed", "ok")]), E("raid_report"), M("Mika", "Joined 3 minutes ago, no avatar"), C("Report")]),
