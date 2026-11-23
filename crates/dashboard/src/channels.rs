@@ -219,9 +219,10 @@ pub struct Node {
     /// its own when it moves.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fixed: Option<&'static str>,
-    /// The channel of an open ticket: shown, but its name, place and existence are not layout.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub ticket: bool,
+    /// "Ticket" or "Lockdown" for an open ticket's channel or the lock's `#server-locked`: shown,
+    /// but its name, place and existence are not layout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp: Option<&'static str>,
     /// Role overwrites as the Advanced grid shows them: [role id, allow, deny], `HARMLESS` bits only.
     pub grid: Vec<(String, u64, u64)>,
     pub issues: Vec<Issue>,
@@ -863,7 +864,7 @@ pub fn desired(live: &[ChannelImg], draft: &Draft, ctx: &Ctx) -> Vec<Node> {
             tag,
             tag_roles,
             fixed: None,
-            ticket: false,
+            temp: None,
             grid: img
                 .overwrites
                 .iter()
@@ -1200,8 +1201,8 @@ pub(crate) struct World {
     pub(crate) settings: brim_antinuke::Settings,
     /// Raw Discord JSON for the backup Push takes first.
     raw: (Value, Value),
-    /// Channels of open tickets, by Brim's ticket records: temporary, so not part of the layout.
-    pub(crate) tickets: HashSet<u64>,
+    /// Channels of open tickets and of a held lock, by Brim's own records: not part of the layout.
+    pub(crate) temp: crate::layout::Temp,
 }
 
 impl World {
@@ -1278,13 +1279,8 @@ async fn world_of(
             .collect(),
         settings: crate::layout::settings_of(&l.guild),
         raw: (l.roles.clone(), l.channels.clone()),
-        tickets: crate::layout::ticket_channels(
-            &st.db,
-            guild,
-            l.image.channels.iter().map(|c| c.id),
-        )
-        .await?
-        .open,
+        temp: crate::layout::temp_channels(&st.db, guild, l.image.channels.iter().map(|c| c.id))
+            .await?,
     })
 }
 
@@ -1414,10 +1410,10 @@ fn fixed_of(w: &World, id: &str) -> Option<&'static str> {
 }
 
 /// A feature's channel keeps its own permissions: a move keeps them and a reset is dropped. An open
-/// ticket's channel belongs to its ticket: a draft cannot rename, move or delete it.
+/// ticket's channel and the lock's channel are temporary: a draft cannot rename, move or delete them.
 fn hold_fixed(draft: &mut Draft, w: &World) {
     for (k, it) in draft.items.iter_mut() {
-        if k.parse().is_ok_and(|id| w.tickets.contains(&id)) {
+        if k.parse().is_ok_and(|id| w.temp.open.contains(&id)) {
             (it.name, it.parent, it.position, it.delete) = (None, None, None, false);
         }
         if fixed_of(w, k).is_some() {
@@ -1432,7 +1428,12 @@ fn view(w: &World, draft: &Draft, level: Level, version: &str) -> (Vec<Node>, Ve
     let mut tree = desired(&w.channels, draft, &w.ctx);
     for n in &mut tree {
         n.fixed = fixed_of(w, &n.id);
-        n.ticket = !n.new && w.tickets.contains(&n.img.id);
+        n.temp = match n.img.id {
+            _ if n.new => None,
+            id if w.temp.lock.contains(&id) => Some("Lockdown"),
+            id if w.temp.open.contains(&id) => Some("Ticket"),
+            _ => None,
+        };
     }
     let issues = draft_issues(&w.channels, &tree, &w.ctx, &w.config);
     for n in &mut tree {
@@ -2277,7 +2278,7 @@ pub(crate) mod tests {
             permit: vec![],
             settings: Default::default(),
             raw: (json!([]), json!([])),
-            tickets: HashSet::new(),
+            temp: Default::default(),
         };
         let mut d = draft(json!({"11": {"parent": "20", "reset": true}, "13": {"reset": true}}));
         hold_fixed(&mut d, &w);
@@ -2295,7 +2296,10 @@ pub(crate) mod tests {
             permit: vec![],
             settings: Default::default(),
             raw: (json!([]), json!([])),
-            tickets: HashSet::from([11]),
+            temp: crate::layout::Temp {
+                open: HashSet::from([11]),
+                ..Default::default()
+            },
         };
         let access = json!({"roles": [], "staff": true, "limited": true});
         let mut d = draft(json!({

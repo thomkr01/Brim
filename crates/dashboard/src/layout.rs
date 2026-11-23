@@ -318,36 +318,45 @@ pub(crate) fn settings_of(g: &Value) -> Settings {
     }
 }
 
-/// The ticket channels among `ids`, from Brim's own ticket records (never from a name or a
-/// category, so nobody can hide a channel from the guard): `open` are the channels of tickets
-/// not closed yet, which are temporary and never part of a layout; `all` also holds the channels
-/// of closed tickets, so a layout saved with a ticket channel in it does not miss it once it closes.
-/// One query by the channel ids the page already has, however many tickets are open.
-pub(crate) async fn ticket_channels(
+/// The temporary channels among `ids`: ticket channels and the lockdown's `#server-locked`, from
+/// Brim's own ticket and lock records (never from a name or a category, so nobody can hide a
+/// channel from the guard). `open` are the channels of tickets not closed yet and of locks still
+/// held, which are never part of a layout; `all` also holds the channels of closed tickets, so a
+/// layout saved with a ticket channel in it does not miss it once it closes. `lock` is the lock
+/// part of `open`. One query by the channel ids the page already has, however many are open.
+pub(crate) async fn temp_channels(
     db: &sqlx::PgPool,
     guild: i64,
     ids: impl Iterator<Item = u64>,
-) -> sqlx::Result<Tickets> {
+) -> sqlx::Result<Temp> {
     let ids: Vec<i64> = ids.map(|i| i as i64).collect();
-    let rows: Vec<(i64, bool)> = sqlx::query_as(
-        "SELECT channel_id, status <> 'closed' FROM tickets
-         WHERE guild_id = $1 AND channel_id = ANY($2)",
+    let rows: Vec<(i64, bool, bool)> = sqlx::query_as(
+        "SELECT channel_id, status <> 'closed', false FROM tickets
+         WHERE guild_id = $1 AND channel_id = ANY($2)
+         UNION ALL
+         SELECT (snapshot->>'locked_channel')::bigint, true, true FROM lock_snapshots
+         WHERE guild_id = $1 AND (snapshot->>'locked_channel')::bigint = ANY($2)",
     )
     .bind(guild)
     .bind(&ids)
     .fetch_all(db)
     .await?;
-    Ok(Tickets {
-        open: rows.iter().filter(|r| r.1).map(|r| r.0 as u64).collect(),
-        all: rows.iter().map(|r| r.0 as u64).collect(),
+    let ids = |f: fn(&(i64, bool, bool)) -> bool| {
+        rows.iter().filter(|r| f(r)).map(|r| r.0 as u64).collect()
+    };
+    Ok(Temp {
+        open: ids(|r| r.1),
+        all: ids(|_| true),
+        lock: ids(|r| r.2),
     })
 }
 
-/// See [`ticket_channels`].
+/// See [`temp_channels`].
 #[derive(Default)]
-pub(crate) struct Tickets {
+pub(crate) struct Temp {
     pub open: HashSet<u64>,
     pub all: HashSet<u64>,
+    pub lock: HashSet<u64>,
 }
 
 /// `img` without the channels in `ids`.
@@ -455,7 +464,7 @@ async fn view(st: &AppState, guild: i64, level: Level) -> Res {
     let l = ops::live(st, guild, &config).await?;
     let live = image_of(&l);
     let ids = saved.channels.iter().chain(&live.channels).map(|c| c.id);
-    let t = ticket_channels(&st.db, guild, ids).await?;
+    let t = temp_channels(&st.db, guild, ids).await?;
     let mut out = differences(&without(saved, &t.all), &without(live, &t.open));
     if !out.is_empty() {
         // shortcut: the newest 100 entries only; a busy server's older changes show no name.
@@ -508,7 +517,7 @@ async fn save(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         return Ok(Json(json!({"saved": false, "blocking": blocking})));
     }
     let image = image_of(&l);
-    let t = ticket_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
+    let t = temp_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
     let image = without(image, &t.open);
     // Version and the Owner rule in one statement, so two saves cannot both be "the first".
     let version: Option<i32> = sqlx::query_scalar(
@@ -865,12 +874,12 @@ pub(crate) async fn after_push(
     let Some((version, saved)) = p.base else {
         return Recorded::None;
     };
-    // Ticket channels stay out: the live ones cannot be taken in, and an older layout that holds one
-    // drops it.
-    let saved = match ticket_channels(&st.db, guild, saved.channels.iter().map(|c| c.id)).await {
+    // Ticket and lock channels stay out: the live ones cannot be taken in, and an older layout that
+    // holds a ticket channel drops it.
+    let saved = match temp_channels(&st.db, guild, saved.channels.iter().map(|c| c.id)).await {
         Ok(t) => without(saved, &t.all),
         Err(e) => {
-            tracing::warn!("layout: ticket read after a push in {guild} failed: {e}");
+            tracing::warn!("layout: temporary channel read after a push in {guild} failed: {e}");
             return Recorded::Failed;
         }
     };
@@ -880,7 +889,7 @@ pub(crate) async fn after_push(
         channels: p.w.channels.clone(),
         ..Default::default()
     };
-    let live = without(live, &p.w.tickets);
+    let live = without(live, &p.w.temp.open);
     let image = match with_draft(&saved, &live, draft, &p.w.ctx, p.made) {
         Ok(Some(i)) => i,
         Ok(None) => return Recorded::None,
@@ -1014,7 +1023,7 @@ async fn rollback(
         return Ok(Json(json!({"saved": false, "blocking": blocking})));
     }
     // An older version can hold a ticket channel: it is not taken back into the layout.
-    let t = ticket_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
+    let t = temp_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
     let image = without(image, &t.all);
     let note = format!("Rolled back to v{version}");
     let Some(new) = record(
@@ -1121,7 +1130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ticket_channels_come_from_the_ticket_records() {
+    async fn temp_channels_come_from_the_ticket_and_lock_records() {
         let Ok(url) = brim_core::db::test_url() else {
             return;
         };
@@ -1139,17 +1148,29 @@ mod tests {
         .await
         .unwrap();
         let ids = [c, c + 1, c + 2, c + 3].map(|i| i as u64);
-        let t = ticket_channels(&db, g, ids.into_iter()).await.unwrap();
-        sqlx::query("DELETE FROM tickets WHERE guild_id = $1")
-            .bind(g)
-            .execute(&db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO lock_snapshots (guild_id, kind, snapshot, state)
+             VALUES ($1, 'Some(Server)', jsonb_build_object('locked_channel', $2 + 3), 'locked'),
+                    ($1, 'Some(Channels)', '{\"locked_channel\": null}', 'locked')",
+        )
+        .bind(g)
+        .bind(c)
+        .execute(&db)
+        .await
+        .unwrap();
+        let t = temp_channels(&db, g, ids.into_iter()).await.unwrap();
+        for sql in [
+            "DELETE FROM tickets WHERE guild_id = $1",
+            "DELETE FROM lock_snapshots WHERE guild_id = $1",
+        ] {
+            sqlx::query(sql).bind(g).execute(&db).await.unwrap();
+        }
         let c = c as u64;
-        assert_eq!(t.open, HashSet::from([c, c + 2]));
-        assert_eq!(t.all, HashSet::from([c, c + 1, c + 2]));
+        assert_eq!(t.open, HashSet::from([c, c + 2, c + 3]));
+        assert_eq!(t.all, HashSet::from([c, c + 1, c + 2, c + 3]));
+        assert_eq!(t.lock, HashSet::from([c + 3]), "the lock's #server-locked");
         // Another server's ticket record does not count here.
-        let none = ticket_channels(&db, g + 1, ids.into_iter()).await.unwrap();
+        let none = temp_channels(&db, g + 1, ids.into_iter()).await.unwrap();
         assert!(none.all.is_empty());
     }
 

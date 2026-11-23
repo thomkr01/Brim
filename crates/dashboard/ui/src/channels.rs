@@ -79,8 +79,10 @@ fn is_voice(t: &[Value], id: &str) -> bool {
 fn siblings(t: &[Value], parent_id: Option<&str>, cat: bool) -> Vec<String> {
     let mut list: Vec<String> = t
         .iter()
-        // An open ticket's channel keeps its place: a drag never renumbers it.
-        .filter(|n| is_cat(n) == cat && (cat || parent(t, n).as_deref() == parent_id) && n["ticket"] != true)
+        // A temporary channel (open ticket, lockdown) keeps its place: a drag never renumbers it.
+        .filter(|n| {
+            is_cat(n) == cat && (cat || parent(t, n).as_deref() == parent_id) && n["temp"].is_null()
+        })
         .map(|n| s(&n["id"]))
         .collect();
     list.sort_by_key(|x| is_voice(t, x));
@@ -108,8 +110,10 @@ fn access(roles: &[String], staff: bool, limited: bool) -> Value {
 
 /// Puts `id` at index `at` among the siblings in `parent` and renumbers the ones that moved.
 fn place(d: &mut Value, t: &[Value], id: &str, parent_id: Option<String>, at: usize) {
-    // An open ticket's channel never moves (the server drops such a move too).
-    let Some(n) = find(t, id).filter(|n| n["ticket"] != true) else { return };
+    // A temporary channel never moves (the server drops such a move too).
+    let Some(n) = find(t, id).filter(|n| n["temp"].is_null()) else {
+        return;
+    };
     let cat = is_cat(n);
     let mut list = siblings(t, parent_id.as_deref(), cat);
     list.retain(|x| x != id);
@@ -443,8 +447,13 @@ impl MoveAsk {
     }
 }
 
-/// The note on an open ticket's channel.
-const TICKET: &str = "An open ticket's channel. It is temporary: it closes with its ticket, so Layout Guard leaves it out and you cannot move, rename or delete it here.";
+/// The note on a temporary channel ("Ticket" or "Lockdown" in `temp`).
+fn temp_note(kind: &str) -> &'static str {
+    match kind {
+        "Lockdown" => "The lockdown's channel. It is temporary: Brim deletes it when the lock ends, so Layout Guard leaves it out and you cannot move, rename or delete it here.",
+        _ => "An open ticket's channel. It is temporary: it closes with its ticket, so Layout Guard leaves it out and you cannot move, rename or delete it here.",
+    }
+}
 
 /// The ⋮ menu on touch screens and for keyboard users: drag is off on touch (plan 3.2a).
 pub(crate) fn coarse_pointer() -> bool {
@@ -800,7 +809,8 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         let (k1, pv2) = (id.clone(), pv.clone());
         let row_label = label(&n);
         let rl = StoredValue::new(row_label.clone());
-        let ticket = n["ticket"] == true;
+        let temp = n["temp"].as_str().map(String::from);
+        let ticket = temp.is_some();
         let step = move |id: String, p: Option<String>, down: bool| {
             if !ticket && ((down && at < last) || (!down && at > 0)) {
                 move_to(id, p, if down { at + 1 } else { at - 1 });
@@ -873,7 +883,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                 {(n["exception"] == true).then(|| view! { <span class="exc"><Tip text="Has its own settings. Category changes do not change it.".to_string() /></span> })}
                 {(!issues.is_empty()).then(|| view! { <span class="risk-i"><Tip icon="warning" text=risk /></span> })}
                 <span class="sp"></span>
-                {ticket.then(|| view! { <span class="mini" title=TICKET>"Ticket"</span> })}
+                {temp.map(|k| view! { <span class="mini" title=temp_note(&k)>{k.clone()}</span> })}
                 {chips(&n)}
                 <span class="acts">{(!ticket).then(|| acts(i5, deleted, false))}</span>
                 {menu}
@@ -932,7 +942,8 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         } else {
             view! { <h2>{s(&n["name"])}</h2> }.into_any()
         };
-        let ticket = n["ticket"] == true;
+        let temp = n["temp"].as_str().map(temp_note);
+        let ticket = temp.is_some();
         let head = view! { <div class="ttl">{title}<span class="muted">{kind_name(kind)}</span><span class="sp"></span><span class="acts">{(!ticket).then(|| acts(id.clone(), deleted, true))}</span></div> };
         if deleted {
             return view! { <div class="card cs-panel">{head}<p class="muted">"Deleted when you push. Undo keeps it."</p></div> }.into_any();
@@ -1055,7 +1066,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
             })}
             {follow}
             {grid}
-            {ticket.then(|| view! { <p class="line muted">{TICKET}</p> })}
+            {temp.map(|t| view! { <p class="line muted">{t}</p> })}
             {(!ticket).then(|| view! {
                 <div class="lbl">"Position"</div>
                 <div class="row2">
@@ -1331,7 +1342,7 @@ mod tests {
     #[test]
     fn an_open_tickets_channel_is_never_renumbered_or_a_drop_target() {
         let mut t = tree();
-        t.push(json!({"id": "tk", "name": "ticket-1", "kind": 0, "parent": "c1", "position": 2, "ticket": true}));
+        t.push(json!({"id": "tk", "name": "ticket-1", "kind": 0, "parent": "c1", "position": 2, "temp": "Ticket"}));
         assert_eq!(siblings(&t, Some("c1"), false), ["a", "b"]);
         assert_eq!(drop_target(&t, "r", "tk"), None);
         let mut d = json!({"items": {}});
