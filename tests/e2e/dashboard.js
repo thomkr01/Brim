@@ -674,15 +674,23 @@ fs.mkdirSync(out, { recursive: true });
   psql(`delete from giveaway_plans where guild_id = ${gid}`);
   psql(`delete from giveaways where guild_id = ${gid}`);
   // Leaving a page while its requests run (or fail, as while the dashboard restarts) must not read disposed signals.
-  for (const mode of ['slow', 'fail']) {
-    errors.length = 0;
-    await page.route('**/api/**', async (r) => { await new Promise((ok) => setTimeout(ok, 800)); mode === 'slow' ? r.continue() : r.abort(); });
-    for (const h of links) { await page.evaluate((x) => (location.hash = x), h); await page.waitForTimeout(1200); }
-    await page.waitForTimeout(2000);
-    await page.unroute('**/api/**');
-    const crash = errors.filter((e) => /disposed|unreachable|panicked/.test(e));
+  // The two modes share no state, so each runs in its own tab at the same time.
+  await Promise.all(['slow', 'fail'].map(async (mode) => {
+    const tab = await ctx.newPage();
+    const errs = [];
+    tab.on('pageerror', (e) => errs.push(`pageerror: ${e.message}`));
+    tab.on('console', (m) => m.type() === 'error' && errs.push(`console: ${m.text()}`));
+    await tab.goto(`${base}/${links[0]}`);
+    await tab.waitForFunction(() => document.body.innerText.trim().length >= 40, null, { timeout: 5000 }).catch(() => {});
+    errs.length = 0;
+    await tab.route('**/api/**', async (r) => { await new Promise((ok) => setTimeout(ok, 800)); mode === 'slow' ? r.continue() : r.abort(); });
+    for (const h of links) { await tab.evaluate((x) => (location.hash = x), h); await tab.waitForTimeout(1200); }
+    await tab.waitForTimeout(2000);
+    await tab.unroute('**/api/**');
+    const crash = errs.filter((e) => /disposed|unreachable|panicked/.test(e));
     if (crash.length) failed.push(`page switch (${mode}): ${crash[0]}`);
-  }
+    await tab.close();
+  }));
   await browser.close();
   if (failed.length) { console.log('FAIL\n' + failed.join('\n')); process.exit(1); }
   console.log('PASS');

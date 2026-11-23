@@ -151,13 +151,18 @@ jobs:
       - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
         with:
           tool: trunk@0.21.14
+      - uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.64.1-chromium
       - run: mkdir -p "$E2E_OUT" && npm i --no-save playwright@1.64.1 && npx playwright install --with-deps chromium
       # Both at once: the updater test needs only Docker, the sweep the Postgres service and cargo.
       # Together they took about 20 minutes one after the other, the updater test 7 of them.
       - name: Dashboard browser sweep and updater against Docker
         run: |
-          tests/e2e/updater.sh > "$E2E_OUT/updater.log" 2>&1 & upd=$!
+          { tests/e2e/updater.sh; r=$?; echo "Updater test ended after ${SECONDS}s"; exit $r; } > "$E2E_OUT/updater.log" 2>&1 & upd=$!
           sweep=0; tests/e2e/run.sh || sweep=$?
+          echo "Sweep ended after ${SECONDS}s"
           updater=0; wait "$upd" || updater=$?
           echo "::group::Updater against Docker (exit $updater)"; cat "$E2E_OUT/updater.log"; echo "::endgroup::"
           echo "Browser sweep: exit $sweep. Updater against Docker: exit $updater."
