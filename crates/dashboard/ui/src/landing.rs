@@ -370,6 +370,16 @@ mod tests {
         assert!(appeal_login("").is_none());
     }
 
+    /// The editor text of the verification panel scene is the bot's own default (botmsg.rs), so a change there fails this test until the scene follows.
+    #[test]
+    fn verification_scene_text_is_the_bot_default() {
+        let bot = include_str!("../../../logging/src/botmsg.rs");
+        let rows: Vec<&str> = SECTIONS.iter().flat_map(|(_, t)| t.iter()).flat_map(|(_, _, items)| items.iter()).filter_map(|it| match it { Item::P(_, rows) => Some(rows.iter().copied()), _ => None }).flatten().collect();
+        let desc = rows.iter().find_map(|r| r.strip_prefix("Description|To access")).expect("the verification scene has the panel description");
+        let text = format!("To access{desc}").replace('{', "{{").replace('}', "}}");
+        assert!(bot.contains(&text), "default verify.panel text changed: {text}");
+    }
+
     /// Every setting, card title and button a scene names exists in the dashboard's own source (schema, wizard cards, pages).
     #[test]
     fn scenes_name_real_settings() {
