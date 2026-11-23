@@ -128,7 +128,6 @@ pub fn split(
         <div class="msplit" class:two=move || edit.get() == Some(true)>
             {move || (edit.get() == Some(true)).then(|| view! {
                 <div class="mside">
-                    {crate::msgparts::placeholder_hint()}
                     {message()}
                 </div>
             })}
@@ -1434,6 +1433,7 @@ impl Editor {
                         </div>
                         <Tip text="Type straight into the message. Grey names show what can be filled. Grey squares are images you can add, the link icons add a link to the author or title. Tick Inline to put a field next to the one before it, as Discord does. Type { or press { } for variables Brim fills in when it sends. JSON is for advanced users and is checked when you save." />
                     </div>
+                    {crate::msgparts::placeholder_hint()}
                     {move || if json_view.get() { view! {
                         <textarea class="json" spellcheck="false" aria-label="message JSON" class:need=move || jerr.with(Option::is_some) prop:value=move || jtext.get()
                             on:input=move |e| { let v = event_target_value(&e); jtext.set(v.clone()); match serde_json::from_str::<Value>(&v) {

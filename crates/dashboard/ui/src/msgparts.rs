@@ -116,7 +116,7 @@ pub fn placeholder_hint() -> Option<AnyView> {
         [a, b, c] => format!("{a}, {b} and {c}"),
         _ => return None,
     };
-    Some(view! { <p class="muted small">{format!("Placeholders such as {list} show each post's own details: Brim fills them in every time it posts, so one design works every time. Press ")}<b>"{ }"</b>" to add one."</p> }.into_any())
+    Some(view! { <p class="muted small pvnote">{format!("Placeholders such as {list} show each post's own details: Brim fills them in every time it posts, so one design works every time. Press ")}<b>"{ }"</b>" to add one."</p> }.into_any())
 }
 
 fn bot_mode() -> bool {
