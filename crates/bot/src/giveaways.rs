@@ -9,7 +9,7 @@ use brim_core::{
     jobs,
     permits::Level,
 };
-use brim_logging::{botmsg, embed::ORANGE, Log, LogKind};
+use brim_logging::{botmsg, embed::ORANGE, emoji, Log, LogKind};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -53,20 +53,21 @@ const CODE: &str = "gw:k:";
 
 /// The Claim button under the winners post and in the winner DM.
 pub(crate) fn claim_row(id: i64) -> Component {
+    let button = Button {
+        id: None,
+        custom_id: Some(format!("{CLAIM}{id}")),
+        disabled: false,
+        emoji: Some(EmojiReactionType::Unicode {
+            name: emoji::TROPHY.fallback.into(),
+        }),
+        label: Some("Claim".into()),
+        style: ButtonStyle::Success,
+        url: None,
+        sku_id: None,
+    };
     Component::ActionRow(ActionRow {
         id: None,
-        components: vec![Component::Button(Button {
-            id: None,
-            custom_id: Some(format!("{CLAIM}{id}")),
-            disabled: false,
-            emoji: Some(EmojiReactionType::Unicode {
-                name: "🏆".into()
-            }),
-            label: Some("Claim".into()),
-            style: ButtonStyle::Success,
-            url: None,
-            sku_id: None,
-        })],
+        components: vec![Component::Button(emoji::TROPHY.on(button))],
     })
 }
 
@@ -209,7 +210,7 @@ async fn line(app: &App, gid: Id<GuildMarker>, key: &str, vars: &[(&str, &str)])
     text
 }
 
-/// `🎉` or `<:name:id>` as a button emoji; anything else none.
+/// `🎫` or `<:name:id>` as a button emoji; anything else none.
 fn button_emoji(s: &str) -> Option<EmojiReactionType> {
     Some(match store::button_emoji(s)? {
         store::ButtonEmoji::Unicode(name) => EmojiReactionType::Unicode { name },
@@ -221,11 +222,13 @@ fn button_emoji(s: &str) -> Option<EmojiReactionType> {
     })
 }
 
-/// The reaction that enters a reaction giveaway: the button emoji, or 🎉.
+/// The reaction that enters a reaction giveaway: the button emoji, or the default Enter emoji.
 fn reaction_emoji(s: &str) -> EmojiReactionType {
-    button_emoji(s).unwrap_or(EmojiReactionType::Unicode {
-        name: "🎉".into()
-    })
+    button_emoji(s)
+        .or_else(|| button_emoji("{e:giveaway_enter}"))
+        .unwrap_or(EmojiReactionType::Unicode {
+            name: emoji::GIVEAWAY_ENTER.fallback.into(),
+        })
 }
 
 /// The reaction emoji as message text.
@@ -3070,9 +3073,14 @@ mod tests {
     #[test]
     fn button_emoji_takes_unicode_or_a_custom_tag() {
         assert!(matches!(
-            button_emoji("🎉"),
+            button_emoji("🎫"),
             Some(EmojiReactionType::Unicode { .. })
         ));
+        assert!(matches!(
+            button_emoji("{e:giveaway_enter}"),
+            Some(EmojiReactionType::Unicode { .. })
+        ));
+        assert_eq!(button_emoji("{e:nope}"), None);
         assert!(matches!(
             button_emoji("<a:party:123>"),
             Some(EmojiReactionType::Custom { animated: true, .. })
@@ -3300,7 +3308,7 @@ mod tests {
         let mut set = tokio::task::JoinSet::new();
         for k in 0..12_000u64 {
             let (app, user) = (t.app.clone(), (1u64 << 40) + k % 10_000);
-            set.spawn(async move { on_reaction(&app, &reaction(gid, message, user, "🎉")).await });
+            set.spawn(async move { on_reaction(&app, &reaction(gid, message, user, "🎫")).await });
         }
         while let Some(r) = set.join_next().await {
             r.unwrap().unwrap();
@@ -3328,7 +3336,7 @@ mod tests {
         on_reaction(&t.app, &reaction(gid, message, 5, "👍"))
             .await
             .unwrap();
-        on_reaction(&t.app, &reaction(gid, message + 1, 6, "🎉"))
+        on_reaction(&t.app, &reaction(gid, message + 1, 6, "🎫"))
             .await
             .unwrap();
         assert_eq!(
@@ -3366,7 +3374,7 @@ mod tests {
         }
         // One reacted while Brim was online.
         remember_reactions(t.base + 79, gw.id);
-        on_reaction(&t.app, &reaction(gid, t.base + 79, users[0], "🎉"))
+        on_reaction(&t.app, &reaction(gid, t.base + 79, users[0], "🎫"))
             .await
             .unwrap();
         let before = t.calls("/members/");
@@ -3409,10 +3417,10 @@ mod tests {
         .await
         .unwrap();
         for _ in 0..3 {
-            on_reaction(&t.app, &reaction(gid, message, new, "🎉"))
+            on_reaction(&t.app, &reaction(gid, message, new, "🎫"))
                 .await
                 .unwrap();
-            on_reaction(&t.app, &reaction(gid, message, caught, "🎉"))
+            on_reaction(&t.app, &reaction(gid, message, caught, "🎫"))
                 .await
                 .unwrap();
         }

@@ -1507,7 +1507,7 @@ pub fn schema() -> Vec<Value> {
                     "Off: nobody can start or enter a giveaway. Running giveaways still end and draw their winners.",
                 ),
                 ti(dv(fg("New giveaways", "button_label", "text"), "Enter"), "Button label"),
-                ti(dv(fg("New giveaways", "button_emoji", "text"), "🎉"), "Button emoji"),
+                ti(dv(fg("New giveaways", "button_emoji", "text"), "{e:giveaway_enter}"), "Button emoji"),
                 hp(
                     ti(fg("New giveaways", "blocked_roles", "roles"), "Blocked roles"),
                     "Members with one of these roles cannot enter, also with a bypass role.",

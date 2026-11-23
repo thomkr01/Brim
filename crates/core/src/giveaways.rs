@@ -50,11 +50,25 @@ pub enum ButtonEmoji {
     },
 }
 
-/// `🎉` or `<:name:id>` as a button emoji; anything else none.
+/// `🎫`, `<:name:id>` or a Brim emoji tag like `{e:giveaway_enter}` as a button emoji; anything
+/// else none. The default tag shows its Unicode fallback until the emoji is uploaded.
 pub fn button_emoji(s: &str) -> Option<ButtonEmoji> {
     let s = s.trim();
     if s.is_empty() {
         return None;
+    }
+    if let Some(name) = brim_logging::emoji::tag_name(s) {
+        return match brim_logging::emoji::id_of(name) {
+            Some(id) => Some(ButtonEmoji::Custom {
+                animated: false,
+                name: name.into(),
+                id,
+            }),
+            None if name == brim_logging::emoji::GIVEAWAY_ENTER.name => Some(ButtonEmoji::Unicode(
+                brim_logging::emoji::GIVEAWAY_ENTER.fallback.into(),
+            )),
+            None => None,
+        };
     }
     if let Some(inner) = s.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
         let mut it = inner.split(':');

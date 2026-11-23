@@ -1465,7 +1465,7 @@ impl Default for GiveawaysCfg {
             // Off until the server turns it on (owner decision 2026-11-23).
             enabled: false,
             button_label: "Enter".into(),
-            button_emoji: "🎉".into(),
+            button_emoji: "{e:giveaway_enter}".into(),
             blocked_roles: vec![],
             min_account_age_days: 7,
             min_member_hours: 0,

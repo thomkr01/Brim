@@ -316,7 +316,7 @@ fn added_buttons() -> Value {
     let link = |label: &'static str| crate::events::link_row(Some(&(label, jump())));
     use brim_logging::{GO_CHANNEL, GO_MESSAGE, GO_POLL};
     let mut m = json!({
-        "giveaway.running": [crate::giveaways::enter_row(1, "", "🎉")],
+        "giveaway.running": [crate::giveaways::enter_row(1, "", "{e:giveaway_enter}")],
         "giveaway.winners": claim,
         "giveaway.reroll": claim,
         "giveaway.winner_dm": claim,
