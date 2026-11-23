@@ -648,10 +648,16 @@ pub fn BotMessages(
                 let place = if r3["in_text"] == true { "in the text or the first embed" } else { "in the first embed" };
                 let hide = if r3["plain_facts"] == true { " Don't hide them in a spoiler or a link." } else { "" };
                 // Each variable copies itself on a click, missing ones in red.
+                let info = vars_of(&r3);
                 let chips = all.into_iter().map(|v| {
                     let miss = lost.iter().any(|l| format!("{{{l}}}") == v);
+                    // What it is and an example, on hover.
+                    let tip = info.iter().find(|(n, ..)| format!("{{{n}}}") == v).map_or("Click to copy.".to_string(), |(_, l, ex)| match ex.is_empty() {
+                        true => format!("{l}. Click to copy."),
+                        false => format!("{l}, for example “{ex}”. Click to copy."),
+                    });
                     let t = v.clone();
-                    view! { <button class="chip copyvar" class:need=miss title="Click to copy" on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}</button> }
+                    view! { <button class="chip copyvar" class:need=miss title=tip on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}</button> }
                 }).collect_view();
                 view! {
                     <div class="note req-text" class:bad=gone>
