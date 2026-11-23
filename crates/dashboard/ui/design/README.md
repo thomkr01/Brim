@@ -114,6 +114,8 @@ Every loading state uses the one `Working` indicator (`common.rs`): four dots in
 
 A module's setup is simple: one on/off switch, a few clear fields, and defaults that work without any change. A message Brim sends is edited in the visible message builder (the embed editor with its live preview), never in a plain text box. A setting that most servers never touch is folded or left out. Why: the person is a server owner, not an engineer, and a fresh server must be safe on the first switch.
 
+**Showing a message (owner decision):** every message Brim posts is shown the same way, by the one shared `embeds::split`: the editor on the left and the live preview on the right, both open, both cards the same height; on a phone the editor comes first and the preview below. A click on a part of the preview edits that part in the editor (it is not a second editor). The phone preview sits beside the desktop one only when both fit, else the Desktop/Phone switch stays. Several messages of one place (for example the four giveaway messages) are one tab row, the shared `PageTabs`, above the editor. Outside the Messages pages the same editor opens in place, with a button to the full editor for more tools. A new place that shows a message uses this component and adds no layout of its own.
+
 ## Look rules that apply everywhere
 
 - Orange is one gradient (`--orange-grad`) and the accent colour; there is no second brand colour. Effects are stars only. The star is the list marker (orange outline idle, white outline on hover, filled with the static glow only when selected). No tilt, no transparency, no blur (the Servers page is the one allowed blur besides Loading dots). Every feature heading has the turf under its first letters (see above) for now.

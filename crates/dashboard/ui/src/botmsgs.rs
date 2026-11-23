@@ -8,16 +8,17 @@ use crate::embeds::Editor;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
-/// A few messages of one place, a switch between them, and the one shown editable in place (the
-/// same editor and save as the Messages page, with a link there for more tools). Only the shown
-/// one is open, so the variable list is its own; a switch asks first when there are unsaved edits.
+/// A few messages of one place, a tab row between them (the same row and height as the page's
+/// tabs), and the one shown editable in place (the same editor and save as the Messages page, with
+/// a button to the full editor for more tools). Only the shown one is open, so the variable list
+/// is its own; a tab change asks first when there are unsaved edits.
 #[component]
 pub fn MessageSwitch(guild: String, keys: Vec<(&'static str, &'static str)>) -> impl IntoView {
     let pick = RwSignal::new(keys[0].0);
     let g = StoredValue::new(guild);
-    let tabs = keys.into_iter().map(|(k, l)| view! { <button class:on=move || pick.get() == k on:click=move |_| crate::guard::leave(move || pick.set(k))>{l}</button> }).collect_view();
+    let tabs = keys.into_iter().map(|(k, l)| Tab::state(k, l)).collect();
     view! {
-        <div class="seg" role="group" aria-label="message">{tabs}</div>
+        <PageTabs tabs id="messages" active=Signal::derive(move || pick.get().to_string()) on_pick=Callback::new(move |k| crate::guard::leave(move || pick.set(k))) />
         <div class="msgswitch">{move || view! { <BotMessages guild=g.get_value() open_key=pick.get().to_string() embedded=true /> }}</div>
     }
 }

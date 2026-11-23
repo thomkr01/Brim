@@ -475,14 +475,16 @@ impl Tab {
     }
 }
 
-thread_local! { static TAB_AT: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) }; static TAB_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+thread_local! { static TAB_AT: std::cell::RefCell<std::collections::HashMap<&'static str, (f64, f64)>> = std::cell::RefCell::new(std::collections::HashMap::new()); static TAB_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 /// `active` is the open tab's key. A state tab calls `on_pick` with its key; a route tab is a plain link.
+/// `row`: a name for a second tab row on the same page, so each row slides from its own last place.
 #[component]
 pub fn PageTabs(
     tabs: Vec<Tab>,
     #[prop(into)] active: Signal<String>,
     #[prop(optional, into)] on_pick: Option<Callback<&'static str>>,
+    #[prop(default = "page")] id: &'static str,
 ) -> impl IntoView {
     let row = NodeRef::<leptos::html::Div>::new();
     // The orange underline slides to the open tab and the content below fades in (transform and opacity only, style.css `.tabs`).
@@ -499,8 +501,8 @@ pub fn PageTabs(
             };
             let on: web_sys::HtmlElement = on.unchecked_into();
             let (x, w) = (f64::from(on.offset_left()), f64::from(on.offset_width()));
-            let first = TAB_AT.with(|t| t.get().is_none());
-            let from = TAB_AT.with(|t| t.replace(Some((x, w))));
+            let from = TAB_AT.with(|t| t.borrow_mut().insert(id, (x, w)));
+            let first = from.is_none();
             let st = row.style();
             if let Some((fx, fw)) = from {
                 let _ = st.set_property("--tx", &format!("{fx}px"));

@@ -904,9 +904,9 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .pane .tog > label { flex:none; }
 /* Message page: the preview on the right, the editor on the left behind "Edit message". */
 .msplit { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-16); align-items:start; } .msplit.two { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .mside { min-width:0; } .vchip { max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
-.msplit.two .mview { position:sticky; top:var(--space-16); }
+.msplit.two { align-items:stretch; } .msplit.two .mview { display:flex; } .msplit.two .mview > .pvcard { flex:1; min-width:0; }
 .added-note { display:flex; gap:var(--space-8); align-items:flex-start; margin:0 0 var(--space-12); padding:var(--space-8) var(--space-12); border:1px solid var(--accent); border-radius:var(--radius-row); background:var(--b2); font-size:var(--fs-ui); }
-@media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { position:static; } }
+@media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { display:block; } }
 .msgswitch .mbhead { margin-top:var(--space-12); }
 /* Preview: a click on a part edits it (the outline is on the part itself); wide enough, the phone preview sits beside the desktop one. */
 .pvwrap.can [data-p], .pvwrap.can [data-b] { cursor:pointer; outline:2px solid transparent; transition:outline-color var(--dur) var(--ease); } .pvwrap.can [data-p] { border-radius:var(--radius-row); padding:var(--space-4) var(--space-8); margin:calc(var(--space-4) * -1) calc(var(--space-8) * -1); } .pvwrap.can [data-p]:hover, .pvwrap.can [data-b]:hover { outline-color:var(--accent); }

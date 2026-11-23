@@ -683,7 +683,7 @@ fs.mkdirSync(out, { recursive: true });
   // The Giveaways page shows the message as members see it, with the Enter button Brim adds, and an editor beside it (a button goes to the full editor).
   await page.click('.tabs button:has-text("Messages")', { timeout: 5000 }).catch(() => failed.push('giveaways: no Messages tab'));
   await page.locator('.msgswitch .dmsg .dbtn.added', { hasText: 'Enter' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: no live preview with the Enter button'));
-  await page.click('.seg button:text-is("Winners post")', { timeout: 3000 }).catch(() => failed.push('giveaways: no Winners post switch'));
+  await page.click('.tabs button:has-text("Winners post")', { timeout: 3000 }).catch(() => failed.push('giveaways: no Winners post switch'));
   await page.locator('.msgswitch .dbtn.added', { hasText: 'Claim' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: the Winners post preview has no Claim button'));
   if (!(await page.locator('.msgswitch .live .ed').count()) || !(await page.locator('.msgswitch button', { hasText: 'Edit with more tools' }).count())) failed.push('giveaways: no editor or more-tools button beside the preview');
   await page.reload();
