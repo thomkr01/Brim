@@ -360,7 +360,7 @@ pub fn verify_panel(server: &str, stored: Option<&serde_json::Value>) -> (Embed,
         id: None,
         components: vec![
             button("Verify", VERIFY_START, ButtonStyle::Success),
-            button("Help", VERIFY_HELP, ButtonStyle::Secondary),
+            button("Help", VERIFY_HELP, ButtonStyle::Primary),
         ],
     });
     (embed, row)

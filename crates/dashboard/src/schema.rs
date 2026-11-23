@@ -1697,7 +1697,7 @@ fn bool_help(sec: &str, path: &str, card: &str) -> Option<String> {
         ("backups", "delete_webhooks") => "Deletes webhooks made since the backup. Message Builder webhooks stay.",
         ("appeals", "enabled") => "Punished members can ask for the punishment to be lifted, with the link in their DM.",
         ("verification", "enabled") => "Off: new members get full access without a check.",
-        ("verification", "show_notes") => "Adds short tips under the captcha: type the traced characters, ignore the decoys, case does not matter.",
+        ("verification", "show_notes") => "Adds short tips to the Help answer of the panel: type the traced characters, ignore the decoys, case does not matter.",
         ("verification", "captcha.trace") => "Harder for scripts to read, and easy for people to follow.",
         ("verification", "captcha.mixed") => "Harder for scripts to read.",
         ("verification", "captcha.spread") => "Decoy characters that people ignore and scripts read.",

@@ -227,7 +227,7 @@ fn messages() -> Value {
             .encode(verify::new_captcha(&Default::default()).1)
     );
     let challenge = |body: &str, png: bool| {
-        let mut e = json!(verify::challenge_embed(body, png, png, 120_000));
+        let mut e = json!(verify::challenge_embed(body, png, 120_000));
         if png {
             e["image"]["url"] = json!(captcha);
         }

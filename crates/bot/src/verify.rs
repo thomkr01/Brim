@@ -264,12 +264,21 @@ fn help_steps(cfg: &VerificationCfg) -> String {
     if v.on_fail != FailAction::Nothing {
         steps.push(format!("Finish within {}.", period(v.time_limit_ms)));
     }
-    steps
+    let steps = steps
         .iter()
         .enumerate()
         .map(|(i, s)| format!("**{}.** {s}", i + 1))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    // The picture captcha's tips (setting Notes).
+    let picture = !matches!(
+        v.mode,
+        VerifyMode::Button | VerifyMode::Web | VerifyMode::SimpleCaptcha
+    );
+    match picture && v.show_notes {
+        true => steps + NOTES,
+        false => steps,
+    }
 }
 
 /// Gives a fresh joiner until the time limit to verify; see [`deadline`]. True when they must verify.
@@ -1209,19 +1218,17 @@ fn guild_of(i: &Interaction, id: &str) -> Option<Id<GuildMarker>> {
 }
 
 pub(crate) const PROMPT: &str = "Please type the captcha below to be able to access this server!";
+/// Tips for reading the captcha picture: in the Help answer, so the challenge stays short.
 const NOTES: &str = "\n\n**Additional Notes:**\n› Type out the traced colored characters from left to right.\n› Ignore the decoy characters spread-around.\n› You don't have to respect characters cases (upper/lower case)!";
 
-pub(crate) fn challenge_embed(body: &str, notes: bool, png: bool, limit_ms: i64) -> Embed {
+pub(crate) fn challenge_embed(body: &str, png: bool, limit_ms: i64) -> Embed {
     let mut e = EmbedBuilder::new()
         .color(GREEN)
         .title(format!(
             "{} Hello! Are you human? Let's find out!",
             brim_logging::emoji::CAPTCHA
         ))
-        .description(format!(
-            "```\n{body}\n```{}",
-            if notes { NOTES } else { "" }
-        ))
+        .description(format!("```\n{body}\n```"))
         .footer(EmbedFooterBuilder::new(format!(
             "Verification Period: {}",
             period(limit_ms)
@@ -1256,7 +1263,7 @@ async fn regenerate(
             }
             live
         };
-        let embeds = [challenge_embed(PROMPT, v.show_notes, true, v.time_limit_ms)];
+        let embeds = [challenge_embed(PROMPT, true, v.time_limit_ms)];
         let file = [Attachment::from_bytes("captcha.png".into(), png, 1)];
         let enter = [row(button("Answer", &format!("{ENTER}{}", key.0)))];
         if !live
@@ -1423,12 +1430,7 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
                         }
                     };
                     let png_shown = png.is_some();
-                    let embed = challenge_embed(
-                        &body,
-                        v.show_notes && png.is_some(),
-                        png.is_some(),
-                        v.time_limit_ms,
-                    );
+                    let embed = challenge_embed(&body, png.is_some(), v.time_limit_ms);
                     let key = (gid.get(), user.get());
                     let expires = now_secs() * 1000 + v.time_limit_ms;
                     let now = now_secs() * 1000;
@@ -1619,9 +1621,12 @@ mod tests {
             "{steps}"
         );
         assert!(
-            steps.ends_with("**5.** Finish within 2 minutes."),
+            steps.contains("**5.** Finish within 2 minutes.") && steps.ends_with(NOTES),
             "{steps}"
         );
+        c.verify.show_notes = false;
+        assert!(help_steps(&c).ends_with("**5.** Finish within 2 minutes."));
+        c.verify.show_notes = true;
         c.roles = vec![Id::new(1), Id::new(2)];
         assert!(help_steps(&c).contains("you get: <@&1>, <@&2>"));
         // No roles: no role line; no fail action: no time limit line.
@@ -1632,7 +1637,7 @@ mod tests {
             !steps.contains("you get") && !steps.contains("Finish within"),
             "{steps}"
         );
-        assert!(steps.ends_with("**3.** Press **Answer** and type the characters."));
+        assert!(steps.contains("**3.** Press **Answer** and type the characters."));
     }
 
     #[test]
