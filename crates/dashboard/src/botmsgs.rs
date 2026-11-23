@@ -128,18 +128,43 @@ async fn added_buttons(st: &AppState, guild: i64) -> Result<Value, ApiError> {
         .await?
         .flatten()
         .unwrap_or_else(|| json!({}));
-    if let Some(cfg) = crate::giveaways::settings(st, guild).await? {
-        let b = &mut all["giveaway.running"][0]["components"][0];
-        if !cfg.button_label.trim().is_empty() {
-            b["label"] = json!(cfg.button_label.trim());
+    // The panel of this server: the buttons the bot posts, from its real ticket types.
+    let (_, c) = crate::store::current(&st.db, guild).await?;
+    let t: brim_core::sections::TicketsCfg =
+        serde_json::from_value(c["tickets"].clone()).unwrap_or_default();
+    let panels = if t.panels.is_empty() {
+        serde_json::from_value(brim_core::sections::default_panels()).unwrap_or_default()
+    } else {
+        t.panels.clone()
+    };
+    let on: Vec<&brim_core::sections::TicketPanel> = panels.iter().filter(|p| p.enabled).collect();
+    all["ticket.panel"] =
+        brim_core::sections::panel_message(&on, false, None, &t.types, t.button_per_type)
+            ["components"]
+            .clone();
+    // Panels that Brim builds from the live settings are not drawn: the notice says so.
+    for d in botmsg::defs() {
+        let k = d.key.as_str();
+        if k.starts_with("reply.panel.")
+            || matches!(k, "reply.help.panel" | "reply.whitelist.prompt")
+        {
+            all[k] = json!("panel");
         }
-        b["emoji"] = match giveaways::button_emoji(&cfg.button_emoji) {
-            Some(giveaways::ButtonEmoji::Unicode(name)) => json!({"name": name}),
-            Some(giveaways::ButtonEmoji::Custom { animated, name, id }) => {
-                json!({"name": name, "id": id.to_string(), "animated": animated})
+    }
+    if let Some(cfg) = crate::giveaways::settings(st, guild).await? {
+        // The bot may not have saved its samples yet (it updates apart from the dashboard).
+        if let Some(b) = all.pointer_mut("/giveaway.running/0/components/0") {
+            if !cfg.button_label.trim().is_empty() {
+                b["label"] = json!(cfg.button_label.trim());
             }
-            None => Value::Null,
-        };
+            b["emoji"] = match giveaways::button_emoji(&cfg.button_emoji) {
+                Some(giveaways::ButtonEmoji::Unicode(name)) => json!({"name": name}),
+                Some(giveaways::ButtonEmoji::Custom { animated, name, id }) => {
+                    json!({"name": name, "id": id.to_string(), "animated": animated})
+                }
+                None => Value::Null,
+            };
+        }
     }
     Ok(all)
 }

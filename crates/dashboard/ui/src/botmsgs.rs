@@ -337,7 +337,7 @@ pub fn BotMessages(
                     if open.with_untracked(|o| o.as_ref().is_some_and(|o| o["key"] == key.as_str())) {
                         let d = open.with_untracked(|o| o.as_ref().map(|o| o["default"].clone())).unwrap_or_default();
                         orig.set(d.clone());
-                        cur.set(json!({"body": d}));
+                        cur.update(|c| c["body"] = d);
                     }
                     msg.done("Reverted to the default.");
                     load();
@@ -654,7 +654,6 @@ pub fn BotMessages(
             </div>
             {locked.then(|| view! { <p class="muted">{crate::icons::icon("lock")}" It is shown here, but it cannot be changed."</p> })}
             {(!locked && !can_edit).then(|| view! { <p class="muted">{if r["security"] == true { "Trusted Admins and above can change security texts, with a 2FA code." } else { "Only the Owner, Extra Owners and Trusted Admins can change bot messages." }}</p> })}
-            {move || (ed.edit.get() == Some(true)).then(|| view! { <p class="muted small">"Type { or press { } for the values Brim fills in."</p> })}
             {bot_text}
             {warn}
             {crate::embeds::split(ed.edit, message_tab, preview_tab)}

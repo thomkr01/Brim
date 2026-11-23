@@ -153,7 +153,7 @@ async fn warn_public(app: &App, channel: Id<ChannelMarker>) {
 }
 
 /// A link button row under a log, or nothing.
-fn link_row(link: Option<&(&str, String)>) -> Vec<Component> {
+pub(crate) fn link_row(link: Option<&(&str, String)>) -> Vec<Component> {
     link.map(|(label, url)| {
         Component::ActionRow(ActionRow {
             id: None,

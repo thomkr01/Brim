@@ -21,7 +21,12 @@ use twilight_model::{
 /// Discord snowflakes count milliseconds from this epoch.
 const DISCORD_EPOCH_MS: u64 = 1_420_070_400_000;
 
-/// "Go to Message" / "Go to Channel" link button under a log.
+/// The labels of the link button under a log; the dashboard preview draws the same ones.
+pub const GO_MESSAGE: &str = "Go to Message";
+pub const GO_POLL: &str = "Go to Poll";
+pub const GO_CHANNEL: &str = "Go to Channel";
+
+/// A link button under a log: label and address.
 pub type Link = (&'static str, String);
 
 fn message_link(label: &'static str, guild: u64, channel: u64, id: u64) -> Link {
@@ -136,7 +141,7 @@ pub fn poll_end(msg: &Message, poll: &Poll) -> (Log, Option<Link>) {
 
 fn poll_link(msg: &Message) -> Option<Link> {
     msg.guild_id
-        .map(|g| message_link("Go to Poll", g.get(), msg.channel_id.get(), msg.id.get()))
+        .map(|g| message_link(GO_POLL, g.get(), msg.channel_id.get(), msg.id.get()))
 }
 
 /// A vote added or taken back. `poll` names the question and answer when the logger saw the poll.
@@ -172,12 +177,7 @@ pub fn poll_vote(
     .time();
     (
         log,
-        Some(message_link(
-            "Go to Poll",
-            guild,
-            channel.get(),
-            message.get(),
-        )),
+        Some(message_link(GO_POLL, guild, channel.get(), message.get())),
     )
 }
 
@@ -189,7 +189,7 @@ pub fn message_publish(msg: &Message) -> (Log, Option<Link>) {
         .time();
     let link = msg
         .guild_id
-        .map(|g| message_link("Go to Message", g.get(), msg.channel_id.get(), msg.id.get()));
+        .map(|g| message_link(GO_MESSAGE, g.get(), msg.channel_id.get(), msg.id.get()));
     (log, link)
 }
 
@@ -242,7 +242,7 @@ pub fn thread_auto_archive(thread: &Channel) -> (Log, Option<Link>) {
         );
     let link = thread.guild_id.map(|g| {
         (
-            "Go to Channel",
+            GO_CHANNEL,
             format!("https://discord.com/channels/{g}/{}", thread.id),
         )
     });
@@ -271,7 +271,7 @@ pub fn message_edit(old: Option<&str>, msg: &Message) -> (Log, Option<Link>) {
             "https://discord.com/channels/{g}/{}/{}",
             msg.channel_id, msg.id
         );
-        ("Go to Message", url)
+        (GO_MESSAGE, url)
     });
     (embed, link)
 }
@@ -535,10 +535,9 @@ pub fn audit(e: &AuditLogEntry) -> Option<Entry> {
 
     // Logs link the channel of channel and thread logs, except when it is gone.
     let link = match (kind, e.guild_id, channel.or(e.target_id.map(Id::get))) {
-        (LogKind::Channel | LogKind::Thread, Some(g), Some(c)) if !deleted => Some((
-            "Go to Channel",
-            format!("https://discord.com/channels/{g}/{c}"),
-        )),
+        (LogKind::Channel | LogKind::Thread, Some(g), Some(c)) if !deleted => {
+            Some((GO_CHANNEL, format!("https://discord.com/channels/{g}/{c}")))
+        }
         _ => None,
     };
 

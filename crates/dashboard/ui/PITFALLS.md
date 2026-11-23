@@ -744,3 +744,21 @@ The screen scale was a `zoom` on the page root. A password manager adds its own 
 `act(String::new(), ..)` built `{base}/`. The server routes the list and start on `{base}` and answered 405, so Start from a form did nothing. One helper now leaves the slash out when the path is empty.
 
 **Rule:** build an API URL from parts with one helper that never leaves a trailing slash, and let the browser test press the button that starts the thing.
+
+## A long variable chip ran out of the editor box
+
+A chip had `white-space:nowrap` and no width limit. A long variable name pushed the chip under the next column, and on a phone it was cut at the edge of the screen. The chip now stays inside its box, cuts with an ellipsis and keeps the full text as its title.
+
+**Rule:** an inline part that cannot wrap needs `max-width:100%` and an ellipsis. Check it in the narrowest column and at 390 px.
+
+## A preview drew only the part that can be edited
+
+The preview drew the saved message. Buttons that Brim adds when it posts (Enter, Claim, links under logs) were missing, so the owner could not see the real message. A wrong example for a variable (names where a running giveaway has a number) was not seen either.
+
+**Rule:** a preview shows the whole message a member gets. Parts that Brim adds come from the bot's own builders (`crates/bot/src/previews.rs`, `added_buttons`), never from a copy in the page. They carry the shared notice and cannot be pressed. Give a variable the example that fits each message, not one example for all.
+
+## Revert and Undo set the message without the parts Brim adds
+
+The revert path replaced the whole editor value with `{"body": ..}`. The `added` rows (buttons Brim adds) were lost, so the preview showed less than the bot posts until the page was reloaded.
+
+**Rule:** change one field of the editor value (`cur.update(|c| c["body"] = ..)`), never rebuild the whole value in a later path.

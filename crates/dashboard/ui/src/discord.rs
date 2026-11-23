@@ -188,7 +188,7 @@ fn button(b: &Value) -> AnyView {
     let link = b["style"] == 5;
     let emoji = emoji(&b["emoji"]);
     // `data-url`: the Message Builder's preview opens it after asking, as Discord does.
-    let url = b["url"].as_str().map(String::from);
+    let url = b["url"].as_str().filter(|_| b["added"] != true).map(String::from);
     let added = b["added"] == true;
     let id = b["custom_id"].as_str().filter(|_| !added).map(String::from);
     view! { <span class=format!("dbtn blk {style}") class:added=added data-url=url data-id=id><span inner_html=emoji />{b["label"].as_str().unwrap_or("").to_string()}{link.then_some(" ↗")}</span> }.into_any()
@@ -342,6 +342,7 @@ pub fn VerifyPreview(#[prop(into)] mode: Signal<String>, #[prop(into, optional)]
         view! {
             <div class="vprev" on:click=click>
                 {show("verify_panel")}
+                {crate::embeds::added_notice(&serde_json::json!({"added": sample("verify_panel")["components"]}))}
                 <p class="muted">{move || if pressed.get().is_some() { "Press Verify or Help again to see the other answer." } else { "Press Verify or Help, as in Discord." }}</p>
                 {reply}
             </div>

@@ -312,7 +312,10 @@ fn added_buttons() -> Value {
         own: vec![],
     };
     let claim = json!([crate::giveaways::claim_row(1)]);
-    json!({
+    let jump = || "https://discord.com/channels/1/2/3".to_string();
+    let link = |label: &'static str| crate::events::link_row(Some(&(label, jump())));
+    use brim_logging::{GO_CHANNEL, GO_MESSAGE, GO_POLL};
+    let mut m = json!({
         "giveaway.running": [crate::giveaways::enter_row(1, "", "🎉")],
         "giveaway.winners": claim,
         "giveaway.reroll": claim,
@@ -321,7 +324,46 @@ fn added_buttons() -> Value {
         "ticket.confirm": [tickets::confirm(&server, Id::new(1)).1],
         "reply.confirm.question": [crate::confirm::sample_question(MEMBER).1],
         "log.mod_command.raider_list_match": crate::raiders::alert_rows(MEMBER),
-    })
+        "log.report.message_reported": crate::reports::rows(1, jump(), true),
+        "log.join_raid.raid_report": crate::events::link_row(Some(&(joingate::RAID_REPORT, jump()))),
+    });
+    // The links the log entries carry (`render.rs`): the label comes from the same constant.
+    for (label, keys) in [
+        (
+            GO_MESSAGE,
+            &[
+                "log.message.message_edited",
+                "log.message.message_published",
+            ][..],
+        ),
+        (
+            GO_POLL,
+            &[
+                "log.poll.poll_created",
+                "log.poll.poll_ended",
+                "log.poll.poll_vote_added",
+                "log.poll.poll_vote_removed",
+            ],
+        ),
+        (
+            GO_CHANNEL,
+            &[
+                "log.channel.channel_create",
+                "log.channel.channel_update",
+                "log.channel.channel_overwrite_create",
+                "log.channel.channel_overwrite_update",
+                "log.channel.channel_overwrite_delete",
+                "log.thread.thread_create",
+                "log.thread.thread_update",
+                "log.thread.thread_archived_automatically",
+            ],
+        ),
+    ] {
+        for k in keys {
+            m[*k] = json!(link(label));
+        }
+    }
+    m
 }
 
 /// Saves the samples, and the command list under `commands`, for the dashboard; run at startup,

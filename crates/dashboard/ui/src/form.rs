@@ -757,7 +757,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                     <p class="muted">"Members press it in #open-a-ticket. Save, and Brim edits the posted message."</p>
                     <p class="muted">"The message's title, text and color are on Default messages."</p>
                     // One row, so the two buttons keep the row gap and do not touch.
-                    <div class="row"><a class="btn ghost" href=entry>"Edit embed"</a>
+                    <div class="row"><a class="btn ghost" href=entry>"Edit message"</a>
                     {move || (count.get() == 0).then(|| view! { <button on:click=start>"Edit the ticket button"</button> })}</div>
                     {move || if count.get() == 0 {
                         ().into_any()

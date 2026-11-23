@@ -73,7 +73,7 @@ fn button(label: &str, id: i64, action: &str, style: ButtonStyle) -> Component {
     })
 }
 
-fn rows(id: i64, jump: String, deletable: bool) -> Vec<Component> {
+pub(crate) fn rows(id: i64, jump: String, deletable: bool) -> Vec<Component> {
     let row = |components| {
         Component::ActionRow(ActionRow {
             id: None,

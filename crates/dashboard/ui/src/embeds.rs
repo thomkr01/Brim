@@ -96,6 +96,10 @@ fn with_added(c: &Value, mut msg: Value) -> Value {
 /// The one notice for parts Brim adds when it posts (`c["added"]`): none when it adds nothing.
 /// Shown in the editor and beside the preview, with the same words.
 pub fn added_notice(c: &Value) -> Option<AnyView> {
+    // A panel built from the live settings: Brim adds its controls, the preview does not draw them.
+    if c["added"] == "panel" {
+        return Some(view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds this panel's controls itself."</b>" They are not shown here."</span></p> }.into_any());
+    }
     let names: Vec<String> = c["added"]
         .as_array()?
         .iter()
@@ -119,6 +123,7 @@ pub fn split(
                 <div class="mside">
                     <div class="mtop"><b>"Edit message"</b><span class="sp"></span>
                         <button class="ghost" on:click=move |_| edit.set(Some(false))>"Close editor"</button></div>
+                    {crate::msgparts::placeholder_hint()}
                     {message()}
                 </div>
             })}

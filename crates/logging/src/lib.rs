@@ -14,7 +14,7 @@ mod render;
 use cache::{CachedMessage, MessageCache};
 pub use config::{CustomLog, LogConfig, LogEvent, LogKind};
 pub use embed::Log;
-pub use render::perm_names;
+pub use render::{perm_names, GO_CHANNEL, GO_MESSAGE, GO_POLL};
 use twilight_model::{
     channel::{Channel, Message},
     poll::Poll,
