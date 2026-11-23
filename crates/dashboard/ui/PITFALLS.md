@@ -771,6 +771,12 @@ The revert path replaced the whole editor value with `{"body": ..}`. The `added`
 
 **Rule:** when a variable name is shared by messages that fill it with different things, give each message its own example (`var_info` in `crates/logging/src/botmsg.rs`), and take it from the server's real data where the dashboard knows it (the ticket panel lines).
 
+## Click-to-edit in the preview must not become a second editor
+
+A click on a part of the editor's own preview opens the editor's text box or button popup for that part; it holds no data of its own. `discord::bot` marks parts only when the message carries `_edit` and each embed `_i` (its place in the editor's message, since colour-only embeds are left out of the preview). Other previews carry neither and stay plain.
+
+**Rule:** the part's address (`data-p`, `data-b`) is the editor's own JSON pointer or row:place, checked to plain path characters before it goes into a selector. Links in the text, spoilers and menus keep their Discord behaviour. When the preview card is 940 px wide or more the phone preview shows beside the desktop one (the notice only once); `e2e` selectors that act on the preview use `.first()` where the editor is closed.
+
 ## A long link in a Discord preview ran past the message box
 
 A message line with a long link had no break point, so on a phone it ran outside the box. Discord breaks such a link.
