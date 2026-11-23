@@ -1059,10 +1059,22 @@ async fn safe_roles(
     Vec<Id<RoleMarker>>,
     std::sync::Arc<crate::hierarchy::GuildInfo>,
 )> {
+    safe_roles_of(app, gid, &v.roles).await
+}
+
+/// The roles of `list` that Brim may hand out to anyone: roles of this server with no permit and
+/// no dangerous Discord permissions. Also the giveaway winner role.
+pub(crate) async fn safe_roles_of(
+    app: &App,
+    gid: Id<GuildMarker>,
+    list: &[Id<RoleMarker>],
+) -> Result<(
+    Vec<Id<RoleMarker>>,
+    std::sync::Arc<crate::hierarchy::GuildInfo>,
+)> {
     let info = crate::lockdown::unlocked_info(app, gid).await?;
     let permit_roles = brim_core::permits::permit_roles(&app.pool, gid.get() as i64).await?;
-    let roles = v
-        .roles
+    let roles = list
         .iter()
         .copied()
         .filter(|r| {
@@ -1076,7 +1088,7 @@ async fn safe_roles(
                 tracing::warn!(
                     guild = gid.get(),
                     role = r.get(),
-                    "verification role holds a permit or dangerous permissions, or is not a role of this server, not granted"
+                    "role holds a permit or dangerous permissions, or is not a role of this server, not granted"
                 );
             }
             safe

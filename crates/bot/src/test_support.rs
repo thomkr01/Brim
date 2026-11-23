@@ -73,6 +73,8 @@ pub(crate) struct Mock {
     pub(crate) audit_by_guild: HashMap<u64, Vec<Value>>,
     /// Native AutoMod rules by guild, as Discord's JSON.
     pub(crate) rules: HashMap<u64, Vec<Value>>,
+    /// Users who reacted to any message, as a reaction list returns them.
+    pub(crate) reacted: Vec<u64>,
     /// AutoMod rule lookups fail with 500.
     pub(crate) fail_rules: bool,
     /// Onboarding by guild, as Discord's JSON; 404 (none set up) when not set.
@@ -423,6 +425,24 @@ fn route(m: &mut Mock, method: &str, target: &str, reason: String, body: &str) -
                 "embeds": [], "components": [], "pinned": false, "type": 0});
             (200, msg.to_string())
         }
+        // A new thread is 880; adding and removing its members, a close and a reaction go through.
+        ("POST", ["channels", c, "threads"]) => {
+            let th = json!({"id": "880", "type": 12, "parent_id": c, "name": "thread"});
+            (200, th.to_string())
+        }
+        ("PUT" | "DELETE", ["channels", _, "thread-members", _])
+        | ("PUT", ["channels", _, "messages", _, "reactions", _, "@me"]) => (204, String::new()),
+        ("GET", ["channels", _, "messages", _, "reactions", _]) => {
+            let page: Vec<Value> = m
+                .reacted
+                .iter()
+                .filter(|u| **u > q("after").unwrap_or(0))
+                .take(q("limit").unwrap_or(25) as usize)
+                .map(|u| user(&u.to_string()))
+                .collect();
+            (200, json!(page).to_string())
+        }
+        ("PATCH", ["channels", t]) => (200, json!({"id": t, "type": 12}).to_string()),
         // An interaction's first answer, a follow-up and an edit of the answer: taken as sent.
         ("POST", ["interactions", _, _, "callback"]) => (204, String::new()),
         ("POST", ["webhooks", _, _]) | ("PATCH", ["webhooks", _, _, "messages", "@original"]) => {

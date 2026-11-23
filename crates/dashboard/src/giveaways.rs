@@ -14,7 +14,7 @@ use axum::{
     Json, Router,
 };
 use brim_core::{
-    giveaways::{self as store, EndNow, Giveaway, Req},
+    giveaways::{self as store, EndNow, Extras, Giveaway, Req},
     jobs,
     sections::GiveawaysCfg,
 };
@@ -95,6 +95,7 @@ fn row_with(g: &Giveaway, entries: i64, claims: &[store::Claim]) -> Value {
         "req": g.req.0, "winner_ids": ids(&g.winner_ids), "draws": g.draws,
         "needs_repost": g.needs_repost, "issue": g.issue, "entries": entries,
         "claim_hours": g.claim_hours, "claims": claims,
+        "extras": g.extras.0, "has_code": g.has_code, "thread": id(g.thread_id),
     })
 }
 
@@ -118,6 +119,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     Ok(Json(json!({
         "giveaways": all.iter().map(|g| row_with(g, n(g.id), &claims)).collect::<Vec<_>>(),
         "defaults": defaults,
+        "extras": Extras::default(),
         "on": settings(&st, guild).await?.is_some(),
         "limits": {
             "winners": store::WINNERS.1, "max_secs": store::DURATION.1, "min_secs": store::DURATION.0,
@@ -162,6 +164,41 @@ struct Start {
     /// Hours the winners have to claim; empty: the server's default.
     #[serde(default)]
     claim_hours: Option<i64>,
+    #[serde(default)]
+    extras: Extras,
+    /// The entry code; empty: none. Only its hash is kept.
+    #[serde(default)]
+    code: String,
+}
+
+/// The winner role must be one Brim can give to anyone: below Brim, not managed, not @everyone,
+/// with no dangerous Discord permissions. The bot checks again when it gives it.
+async fn check_role(st: &AppState, guild: i64, x: &Extras) -> Result<(), ApiError> {
+    let Some(role) = x.winner_role else {
+        return Ok(());
+    };
+    let (roles, bot_pos) = crate::ops::roles_and_bot_pos(st, guild).await?;
+    let r = roles
+        .iter()
+        .find(|r| r.id == role.to_string())
+        .ok_or_else(|| bad("the winner role is not a role of this server"))?;
+    if let Some(why) = r.unfit(guild, bot_pos) {
+        return Err(bad(format!("Brim cannot give the winner role: {why}")));
+    }
+    if brim_antinuke::has_dangerous(r.perms()) {
+        return Err(bad(
+            "the winner role has dangerous Discord permissions: pick a role without them",
+        ));
+    }
+    if brim_core::permits::permit_roles(&st.db, guild)
+        .await?
+        .contains(&(role.get() as i64))
+    {
+        return Err(bad(
+            "the winner role holds a permit: pick a role without one",
+        ));
+    }
+    Ok(())
 }
 
 async fn start(
@@ -176,6 +213,8 @@ async fn start(
     };
     let channel: i64 = b.channel.parse().map_err(|_| bad("pick a channel"))?;
     crate::feeds::check_channel(&st, guild, channel).await?;
+    check_role(&st, guild, &b.extras).await?;
+    let code = Some(b.code).filter(|c| !c.trim().is_empty());
     let new = store::New {
         guild_id: guild,
         channel_id: channel,
@@ -189,6 +228,8 @@ async fn start(
         button_label: cfg.button_label.clone(),
         button_emoji: cfg.button_emoji.clone(),
         claim_hours: b.claim_hours.unwrap_or(cfg.claim_hours as i64),
+        extras: b.extras,
+        code,
         post_job: true,
     };
     let g = store::create(&st.db, &new, cfg.max_running as i64)
@@ -216,6 +257,8 @@ struct Edit {
     winners: i64,
     #[serde(default)]
     req: Req,
+    #[serde(default)]
+    extras: Extras,
 }
 
 async fn edit(
@@ -231,7 +274,10 @@ async fn edit(
     if old.req.extra != b.req.extra && entered.first().is_some_and(|c| c.1 > 0) {
         return Err(bad("the extra entries cannot change once members entered"));
     }
-    if !store::edit(&st.db, guild, id, &b.prize, b.winners, &b.req)
+    if old.extras.winner_role != b.extras.winner_role {
+        check_role(&st, guild, &b.extras).await?;
+    }
+    if !store::edit(&st.db, guild, id, &b.prize, b.winners, &b.req, &b.extras)
         .await?
         .map_err(bad)?
     {

@@ -176,6 +176,8 @@ pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
         "GRANT UPDATE (status, handled_by, handled_at) ON reports TO brim_dashboard",
         // The bot's own records of what happened: read only (and deleted with their server).
         "REVOKE INSERT, UPDATE ON raid_log, joingate_actions, nuke_incidents FROM brim_dashboard",
+        // Only the bot counts wrong giveaway entry codes.
+        "REVOKE INSERT, UPDATE, DELETE ON giveaway_code_tries FROM brim_dashboard",
         // Members' stored names and avatars (migration 4044): it only counts them for a data
         // request. The bot deletes them (leave, retention, data delete request, server purge).
         "REVOKE INSERT, UPDATE, DELETE ON profile_snapshot FROM brim_dashboard",

@@ -4654,6 +4654,24 @@ fn giveaways(out: &mut Vec<Def>) {
             &["Your entry in **{prize}** in `{server}` was removed: {reason}"],
         ),
     ));
+    out.push(msg(
+        "giveaway.entry_denied_dm",
+        "Reaction entry refused DM",
+        &["prize", "server", "reason"],
+        &["prize", "reason"],
+        card(
+            "Giveaway entry refused",
+            ORANGE,
+            &["Your reaction did not enter you in **{prize}** in `{server}`: {reason}"],
+        ),
+    ));
+    out.push(msg(
+        "giveaway.thread",
+        "Winner thread message",
+        &["winners", "prize", "host", "sponsor", "closes"],
+        &["winners", "prize"],
+        json!({"content": "{e:trophy} {winners}, this is your private thread for **{prize}**. Talk here with the host about the prize.\n{e:user_id} **Hosted by:** {host}\n{e:star} **Sponsored by:** {sponsor}\n{e:clock} This thread closes {closes}.", "embeds": []}),
+    ));
     let rows: &[(&str, &str, &[&'static str], &str)] = &[
         ("giveaway.entry_ok", "Enter: entered", &["prize", "entries", "why"], "{e:success} You entered **{prize}**. You have **{entries}** entries.\n{why}"),
         ("giveaway.entry_again", "Enter: already in", &["prize", "entries"], "You are already in **{prize}**, with **{entries}** entries."),
@@ -6352,6 +6370,11 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     ),
     ("server", "Server name", "My Server"),
     ("claim", "How long a winner has to press Claim", "48 hours"),
+    (
+        "closes",
+        "When the winner thread closes (time left and date)",
+        "in 3 days (26 November 2026 20:00)",
+    ),
     (
         "deadline",
         "When the winner's claim time ends (time left and date)",

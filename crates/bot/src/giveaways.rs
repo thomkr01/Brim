@@ -4,7 +4,7 @@
 //! `brim_core::giveaways`; the dashboard makes and changes giveaways through the same rows.
 use anyhow::{Context, Result};
 use brim_core::{
-    giveaways::{self as store, Entered, Facts, Giveaway, Refusal, Req},
+    giveaways::{self as store, CodeTry, Entered, Facts, Giveaway, Refusal, Req},
     jobs,
     permits::Level,
 };
@@ -15,10 +15,15 @@ use twilight_model::{
         application_command::{CommandDataOption, CommandOptionValue},
         Interaction, InteractionData,
     },
-    channel::message::{
-        component::{ActionRow, Button, ButtonStyle, Component},
-        AllowedMentions, Embed, EmojiReactionType,
+    channel::{
+        message::{
+            component::{ActionRow, Button, ButtonStyle, Component, TextInput, TextInputStyle},
+            AllowedMentions, Embed, EmojiReactionType,
+        },
+        thread::AutoArchiveDuration,
+        ChannelType,
     },
+    gateway::payload::incoming::ReactionAdd,
     http::interaction::{InteractionResponse, InteractionResponseData, InteractionResponseType},
     id::{
         marker::{ChannelMarker, GuildMarker, RoleMarker, UserMarker},
@@ -37,6 +42,8 @@ use crate::{
 const ENTER: &str = "gw:e:";
 const ANSWER: &str = "gw:a:";
 const CLAIM: &str = "gw:c:";
+/// The entry code form.
+const CODE: &str = "gw:k:";
 
 /// The Claim button under the winners post and in the winner DM.
 fn claim_row(id: i64) -> Component {
@@ -103,9 +110,19 @@ fn roles(list: &[Id<RoleMarker>]) -> String {
         .join(", ")
 }
 
-/// Who may enter, one rule per line, for the running message.
-fn requirements(req: &Req) -> String {
+/// Who may enter and how, one rule per line, for the running message.
+fn requirements(g: &Giveaway) -> String {
+    let req = &g.req.0;
     let mut lines = vec![];
+    if g.extras.reaction {
+        lines.push(format!(
+            "**To enter:** react with {}",
+            emoji_text(&g.button_emoji)
+        ));
+    }
+    if g.has_code {
+        lines.push("**Entry code:** press the button and type the code".to_string());
+    }
     if !req.required.is_empty() {
         lines.push(format!("**Needs one of:** {}", roles(&req.required)));
     }
@@ -207,6 +224,38 @@ fn button_emoji(s: &str) -> Option<EmojiReactionType> {
         .then(|| EmojiReactionType::Unicode { name: s.into() })
 }
 
+/// The reaction that enters a reaction giveaway: the button emoji, or 🎉.
+fn reaction_emoji(s: &str) -> EmojiReactionType {
+    button_emoji(s).unwrap_or(EmojiReactionType::Unicode {
+        name: "🎉".into()
+    })
+}
+
+/// The reaction emoji as message text.
+fn emoji_text(s: &str) -> String {
+    match reaction_emoji(s) {
+        EmojiReactionType::Custom { animated, id, name } => format!(
+            "<{}:{}:{id}>",
+            if animated { "a" } else { "" },
+            name.unwrap_or_default()
+        ),
+        EmojiReactionType::Unicode { name } => name,
+    }
+}
+
+/// The same emoji; a Unicode one also without its variation selector.
+fn same_emoji(a: &EmojiReactionType, b: &EmojiReactionType) -> bool {
+    match (a, b) {
+        (EmojiReactionType::Custom { id: x, .. }, EmojiReactionType::Custom { id: y, .. }) => {
+            x == y
+        }
+        (EmojiReactionType::Unicode { name: x }, EmojiReactionType::Unicode { name: y }) => {
+            x.trim_end_matches('\u{fe0f}') == y.trim_end_matches('\u{fe0f}')
+        }
+        _ => false,
+    }
+}
+
 fn enter_row(g: &Giveaway) -> Component {
     let label = Some(g.button_label.trim())
         .filter(|l| !l.is_empty())
@@ -235,7 +284,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
     let entries = entries.to_string();
     match g.status.as_str() {
         "running" => {
-            let (winners, req) = (g.winners.to_string(), requirements(&g.req));
+            let (winners, req) = (g.winners.to_string(), requirements(g));
             let vars = [
                 ("prize", g.prize.as_str()),
                 ("ends", &when(g.ends_at)),
@@ -247,7 +296,11 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 ("id", &id),
             ];
             let (t, e) = rendered(app, gid, "giveaway.running", &vars).await;
-            (t, e, vec![enter_row(g)])
+            let rows = match g.extras.reaction {
+                true => vec![],
+                false => vec![enter_row(g)],
+            };
+            (t, e, rows)
         }
         "ended" => {
             let ended = g.ended_at.map(when).unwrap_or_default();
@@ -371,6 +424,10 @@ pub(crate) async fn post(app: &App, g: &Giveaway) -> Result<Option<i64>> {
     };
     let m = sent.id.get() as i64;
     store::set_posted(&app.pool, g.guild_id, g.id, g.channel_id, m).await?;
+    if g.extras.reaction {
+        remember_reactions(m as u64, g.id);
+        add_reaction(app, g, channel, sent.id).await;
+    }
     sqlx::query("UPDATE giveaways SET shown_entries = $2 WHERE id = $1 AND guild_id = $3")
         .bind(g.id)
         .bind(entries as i32)
@@ -416,6 +473,35 @@ pub(crate) async fn refresh(app: &App, g: &Giveaway) -> Result<()> {
             }
             None => Err(e),
         },
+    }
+}
+
+const NO_REACTION: &str =
+    "Brim could not add the entry reaction. Give Brim Add Reactions and Read Message History in the channel, or pick an emoji Brim can use.";
+
+/// Brim's own reaction on a reaction giveaway, so members see what to press.
+async fn add_reaction(
+    app: &App,
+    g: &Giveaway,
+    channel: Id<ChannelMarker>,
+    message: Id<twilight_model::id::marker::MessageMarker>,
+) {
+    use twilight_http::request::channel::reaction::RequestReactionType;
+    let emoji = reaction_emoji(&g.button_emoji);
+    let req = match &emoji {
+        EmojiReactionType::Custom { id, name, .. } => RequestReactionType::Custom {
+            id: *id,
+            name: name.as_deref(),
+        },
+        EmojiReactionType::Unicode { name } => RequestReactionType::Unicode { name },
+    };
+    if let Err(e) = app.http.create_reaction(channel, message, &req).await {
+        tracing::warn!(?e, id = g.id, "adding the giveaway entry reaction failed");
+        let set = store::set_issue(&app.pool, g.guild_id, g.id, Some(NO_REACTION)).await;
+        if let Err(e) = set {
+            tracing::warn!(?e, "saving the giveaway reaction problem failed");
+        }
+        problem_log(app, g, NO_REACTION).await;
     }
 }
 
@@ -582,15 +668,25 @@ async fn check(
 
 /// Handles the Enter button and the giveaway confirm buttons. False for other interactions.
 pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
-    let Some(InteractionData::MessageComponent(c)) = &i.data else {
-        return Ok(false);
-    };
-    if let Some(id) = c.custom_id.strip_prefix(ENTER) {
-        let id: i64 = id.parse().unwrap_or(0);
-        let text = match enter(app, i, id).await {
-            Ok(t) => t,
+    let client = app.http.interaction(Id::new(app.me.get()));
+    // The entry code form: its answer enters like a press.
+    if let Some(InteractionData::ModalSubmit(m)) = &i.data {
+        let Some(id) = m.custom_id.strip_prefix(CODE) else {
+            return Ok(false);
+        };
+        let typed: String = m
+            .components
+            .iter()
+            .find_map(crate::verify::typed_text)
+            .unwrap_or_default()
+            .chars()
+            .take(store::CODE_LEN.1)
+            .collect();
+        let text = match enter(app, i, id.parse().unwrap_or(0), Some(&typed)).await {
+            Ok(Answer::Text(t)) => t,
+            Ok(Answer::AskCode(_)) => "Something went wrong. Try again in a moment.".into(),
             Err(e) => {
-                tracing::warn!(?e, "a giveaway entry failed");
+                tracing::warn!(?e, "a giveaway code entry failed");
                 "Something went wrong. Try again in a moment.".into()
             }
         };
@@ -598,7 +694,28 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             InteractionResponseType::ChannelMessageWithSource,
             Some(&text),
         );
-        let client = app.http.interaction(Id::new(app.me.get()));
+        client.create_response(i.id, &i.token, &answer).await?;
+        return Ok(true);
+    }
+    let Some(InteractionData::MessageComponent(c)) = &i.data else {
+        return Ok(false);
+    };
+    if let Some(id) = c.custom_id.strip_prefix(ENTER) {
+        let id: i64 = id.parse().unwrap_or(0);
+        let answer = match enter(app, i, id, None).await {
+            Ok(Answer::Text(t)) => crate::verify::ephemeral(
+                InteractionResponseType::ChannelMessageWithSource,
+                Some(&t),
+            ),
+            Ok(Answer::AskCode(id)) => code_form(id),
+            Err(e) => {
+                tracing::warn!(?e, "a giveaway entry failed");
+                crate::verify::ephemeral(
+                    InteractionResponseType::ChannelMessageWithSource,
+                    Some("Something went wrong. Try again in a moment."),
+                )
+            }
+        };
         client.create_response(i.id, &i.token, &answer).await?;
         return Ok(true);
     }
@@ -619,20 +736,146 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
             InteractionResponseType::ChannelMessageWithSource,
             Some(&text),
         );
-        let client = app.http.interaction(Id::new(app.me.get()));
         client.create_response(i.id, &i.token, &answer).await?;
         return Ok(true);
     }
     Ok(false)
 }
 
-/// The private answer to an Enter press. Only database reads: Discord drops an answer after 3 s.
-async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
+/// The form a member types the entry code in.
+fn code_form(id: i64) -> InteractionResponse {
+    #[allow(deprecated)]
+    // Discord moved labels to the Label component; a plain row still works.
+    let input = Component::TextInput(TextInput {
+        id: None,
+        custom_id: "code".into(),
+        label: Some("Entry code".into()),
+        max_length: Some(store::CODE_LEN.1 as u16),
+        min_length: Some(1),
+        placeholder: None,
+        required: Some(true),
+        style: TextInputStyle::Short,
+        value: None,
+    });
+    InteractionResponse {
+        kind: InteractionResponseType::Modal,
+        data: Some(InteractionResponseData {
+            custom_id: Some(format!("{CODE}{id}")),
+            title: Some("Enter the giveaway".into()),
+            components: Some(vec![crate::verify::row(input)]),
+            ..Default::default()
+        }),
+    }
+}
+
+/// The answer to an Enter press: a private text, or the entry code form of this giveaway.
+enum Answer {
+    Text(String),
+    AskCode(i64),
+}
+
+/// The member who tries to enter, as Discord gives them in the press or the reaction.
+struct Who<'a> {
+    user: u64,
+    bot: bool,
+    roles: &'a [Id<RoleMarker>],
+    joined: Option<Timestamp>,
+    timeout: Option<Timestamp>,
+}
+
+/// What an entry try did.
+enum Admit {
+    Closed,
+    Off,
+    Paused,
+    /// Already in, with this many entries.
+    Again(u16),
+    Refused(Refusal),
+    /// In now, with this many entries and the role that gives them.
+    New(u16, Option<Id<RoleMarker>>),
+    /// The member may enter and must type the entry code first.
+    NeedsCode,
+    /// A wrong code; this many tries are left.
+    WrongCode(i16),
+    /// Too many wrong codes: minutes to wait.
+    Wait(i64),
+}
+
+/// One entry try, for the button and the reaction alike. Only database reads before the one
+/// insert: Discord drops a button answer after 3 s. `code`: what the member typed in the code form.
+async fn admit(app: &App, g: &Giveaway, m: Who<'_>, code: Option<&str>) -> Result<Admit> {
+    let gid = Id::new(g.guild_id as u64);
+    if !g.running() {
+        return Ok(Admit::Closed);
+    }
+    if !app.cfg(gid.get()).await?.giveaways.enabled {
+        return Ok(Admit::Off);
+    }
+    // The live state, not only the mark: the round that sets `paused_at` runs every 15 s.
+    if g.paused_at.is_some() || attacked(app, gid).await {
+        if g.paused_at.is_none() {
+            store::pause(&app.pool, g.guild_id).await?;
+        }
+        return Ok(Admit::Paused);
+    }
+    let me = m.user as i64;
+    // A repeat press (the most common one in a rush) needs no checks: the draw checks again.
+    let had: Option<i16> = sqlx::query_scalar(
+        "SELECT weight FROM giveaway_entries WHERE giveaway_id = $1 AND user_id = $2",
+    )
+    .bind(g.id)
+    .bind(me)
+    .fetch_optional(&app.pool)
+    .await?;
+    let (weight, why_role) = store::weight(&g.req, m.roles);
+    if let Some(w) = had {
+        if w as u16 != weight {
+            store::set_weight(&app.pool, g.guild_id, g.id, me, weight).await?;
+        }
+        return Ok(Admit::Again(weight));
+    }
+    let refused = check(app, g, m.user, m.bot, m.roles, ms(m.joined), m.timeout).await?;
+    if let Some(r) = refused {
+        return Ok(Admit::Refused(r));
+    }
+    // The code comes last: only a member who may enter is asked for it, and a wrong code is
+    // counted only for them.
+    if g.has_code {
+        let Some(code) = code else {
+            return Ok(match store::code_wait(&app.pool, g.id, me).await? {
+                Some(w) => Admit::Wait(w),
+                None => Admit::NeedsCode,
+            });
+        };
+        match store::try_code(&app.pool, g.guild_id, g.id, me, code).await? {
+            CodeTry::Right => {}
+            CodeTry::Wrong(left) => return Ok(Admit::WrongCode(left)),
+            CodeTry::Wait(w) => return Ok(Admit::Wait(w)),
+        }
+    }
+    match store::enter(&app.pool, g.guild_id, g.id, me, weight).await? {
+        Entered::New => {
+            queue_refresh(app, gid).await;
+            Ok(Admit::New(weight, why_role))
+        }
+        Entered::Already(w) => {
+            // Roles gained since the entry count now.
+            if w as u16 != weight {
+                store::set_weight(&app.pool, g.guild_id, g.id, me, weight).await?;
+            }
+            Ok(Admit::Again(weight))
+        }
+        Entered::Closed => Ok(Admit::Closed),
+    }
+}
+
+/// The private answer to an Enter press or to the code form.
+async fn enter(app: &App, i: &Interaction, id: i64, code: Option<&str>) -> Result<Answer> {
     let (Some(gid), Some(member)) = (i.guild_id, i.member.as_ref()) else {
-        return Ok("This button works only in a server.".into());
+        return Ok(Answer::Text("This button works only in a server.".into()));
     };
     let Some(user) = member.user.as_ref().or(i.user.as_ref()) else {
-        return Ok("This button works only in a server.".into());
+        return Ok(Answer::Text("This button works only in a server.".into()));
     };
     let g = store::get(&app.pool, gid.get() as i64, id).await?;
     let prize = g.as_ref().map_or(String::new(), |g| g.prize.clone());
@@ -645,55 +888,45 @@ async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
         )
         .await
     };
-    let Some(g) = g.filter(Giveaway::running) else {
-        return Ok(denied("this giveaway has ended.").await);
+    let Some(g) = g else {
+        return Ok(Answer::Text(denied("this giveaway has ended.").await));
     };
-    if !app.cfg(gid.get()).await?.giveaways.enabled {
-        return Ok(reply::say_line(app, gid, "reply.giveaway.off", &[]).await);
-    }
-    // The live state, not only the mark: the round that sets `paused_at` runs every 15 s.
-    if g.paused_at.is_some() || attacked(app, gid).await {
-        if g.paused_at.is_none() {
-            store::pause(&app.pool, g.guild_id).await?;
+    let who = Who {
+        user: user.id.get(),
+        bot: user.bot,
+        roles: &member.roles,
+        joined: member.joined_at,
+        timeout: member.communication_disabled_until,
+    };
+    let again = async |w: u16| {
+        let (prize, entries) = (g.prize.as_str(), w.to_string());
+        let vars = [("prize", prize), ("entries", entries.as_str())];
+        line(app, gid, "giveaway.entry_again", &vars).await
+    };
+    Ok(Answer::Text(match admit(app, &g, who, code).await? {
+        Admit::NeedsCode => return Ok(Answer::AskCode(g.id)),
+        Admit::Closed => denied("this giveaway has ended.").await,
+        Admit::Off => reply::say_line(app, gid, "reply.giveaway.off", &[]).await,
+        Admit::Paused => denied(PAUSED).await,
+        Admit::Again(w) => again(w).await,
+        Admit::Refused(r) => denied(&r.text()).await,
+        Admit::WrongCode(left) => {
+            let tries = if left == 1 { "try" } else { "tries" };
+            let why = format!(
+                "the entry code is wrong. You have {left} more {tries}, then a {} minute wait.",
+                store::CODE_WAIT_MINS
+            );
+            denied(&why).await
         }
-        return Ok(denied(PAUSED).await);
-    }
-    // A repeat press (the most common one in a rush) needs no checks: the draw checks again.
-    let had: Option<i16> = sqlx::query_scalar(
-        "SELECT weight FROM giveaway_entries WHERE giveaway_id = $1 AND user_id = $2",
-    )
-    .bind(g.id)
-    .bind(user.id.get() as i64)
-    .fetch_optional(&app.pool)
-    .await?;
-    if let Some(w) = had {
-        let (weight, _) = store::weight(&g.req, &member.roles);
-        if w as u16 != weight {
-            store::set_weight(&app.pool, g.guild_id, g.id, user.id.get() as i64, weight).await?;
+        Admit::Wait(w) => {
+            let why = format!(
+                "you typed a wrong entry code {} times. Try again in {w} minutes.",
+                store::CODE_TRIES
+            );
+            denied(&why).await
         }
-        let entries = weight.to_string();
-        let vars = [("prize", g.prize.as_str()), ("entries", &entries)];
-        return Ok(line(app, gid, "giveaway.entry_again", &vars).await);
-    }
-    let (joined, timeout) = (ms(member.joined_at), member.communication_disabled_until);
-    let refused = check(
-        app,
-        &g,
-        user.id.get(),
-        user.bot,
-        &member.roles,
-        joined,
-        timeout,
-    )
-    .await?;
-    if let Some(r) = refused {
-        return Ok(denied(&r.text()).await);
-    }
-    let (weight, why_role) = store::weight(&g.req, &member.roles);
-    let entries = weight.to_string();
-    match store::enter(&app.pool, g.guild_id, g.id, user.id.get() as i64, weight).await? {
-        Entered::New => {
-            queue_refresh(app, gid).await;
+        Admit::New(weight, why_role) => {
+            let entries = weight.to_string();
             let why = why_role
                 .map(|r| format!("<@&{r}> role: {weight} entries"))
                 .unwrap_or_default();
@@ -702,18 +935,193 @@ async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
                 ("entries", &entries),
                 ("why", &why),
             ];
-            Ok(line(app, gid, "giveaway.entry_ok", &vars).await)
+            line(app, gid, "giveaway.entry_ok", &vars).await
         }
-        Entered::Already(w) => {
-            // Roles gained since the entry count now.
-            if w as u16 != weight {
-                store::set_weight(&app.pool, g.guild_id, g.id, user.id.get() as i64, weight)
-                    .await?;
+    }))
+}
+
+/// Message ids of running reaction giveaways, with the giveaway id: a reaction on any other
+/// message costs no database read. Filled every 15 s and at each post.
+/// The time is when the entry came in, so a fill that read before a new post keeps it.
+static REACTS: std::sync::LazyLock<
+    std::sync::RwLock<std::collections::HashMap<u64, (i64, std::time::Instant)>>,
+> = std::sync::LazyLock::new(Default::default);
+/// The first fill is done; before it, a reaction asks the database.
+static REACTS_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn remember_reactions(message: u64, id: i64) {
+    REACTS
+        .write()
+        .unwrap()
+        .insert(message, (id, std::time::Instant::now()));
+}
+
+/// Reads the messages of all running reaction giveaways again (one query for the whole bot).
+pub(crate) async fn sync_reactions(app: &App) -> Result<()> {
+    let read = std::time::Instant::now();
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT message_id, id FROM giveaways WHERE status = 'running' AND message_id IS NOT NULL
+           AND extras->>'reaction' = 'true'",
+    )
+    .fetch_all(&app.pool)
+    .await?;
+    let mut map = REACTS.write().unwrap();
+    // Posted while the read ran: not in the rows yet.
+    map.retain(|_, (_, at)| *at > read);
+    map.extend(rows.into_iter().map(|(m, id)| (m as u64, (id, read))));
+    REACTS_READY.store(true, std::sync::atomic::Ordering::Release);
+    Ok(())
+}
+
+/// A reaction on a running reaction giveaway with its emoji enters the member: one insert, no
+/// message edit (the entry count follows at the refresh) and no answer. A member the rules keep
+/// out gets one DM with the reason; nobody is told during an attack or when moderation caught them.
+/// Taking the reaction away does not leave: an entry is an entry.
+pub async fn on_reaction(app: &App, r: &ReactionAdd) -> Result<()> {
+    let (Some(gid), Some(member)) = (r.guild_id, r.member.as_ref()) else {
+        return Ok(());
+    };
+    let known = REACTS.read().unwrap().get(&r.message_id.get()).map(|e| e.0);
+    let id = match known {
+        Some(id) => id,
+        None if REACTS_READY.load(std::sync::atomic::Ordering::Acquire) => return Ok(()),
+        None => {
+            match store::by_message(&app.pool, gid.get() as i64, r.message_id.get() as i64).await? {
+                Some(g) => g.id,
+                None => return Ok(()),
             }
-            let vars = [("prize", g.prize.as_str()), ("entries", &entries)];
-            Ok(line(app, gid, "giveaway.entry_again", &vars).await)
         }
-        Entered::Closed => Ok(denied("this giveaway has ended.").await),
+    };
+    if member.user.bot {
+        return Ok(());
+    }
+    let Some(g) = store::get(&app.pool, gid.get() as i64, id).await? else {
+        return Ok(());
+    };
+    if !g.extras.reaction || !same_emoji(&r.emoji, &reaction_emoji(&g.button_emoji)) {
+        return Ok(());
+    }
+    let who = Who {
+        user: r.user_id.get(),
+        bot: member.user.bot,
+        roles: &member.roles,
+        joined: member.joined_at,
+        timeout: member.communication_disabled_until,
+    };
+    let Admit::Refused(why) = admit(app, &g, who, None).await? else {
+        return Ok(());
+    };
+    if caught(why) || !may_tell(g.id, r.user_id.get()) {
+        return Ok(());
+    }
+    let payload = json!({ "id": g.id, "user": r.user_id.get() as i64, "denied": why.text() });
+    jobs::enqueue(&app.pool, g.guild_id, store::DM_JOB, payload, now_secs()).await?;
+    Ok(())
+}
+
+/// A refusal moderation made: no DM, it would tell a raider what was seen.
+fn caught(r: Refusal) -> bool {
+    matches!(
+        r,
+        Refusal::Quarantined | Refusal::Flagged | Refusal::RaidJoiner
+    )
+}
+
+/// Refusal DMs one giveaway may send in a minute: a wave of new accounts must not turn into a
+/// wave of DMs.
+const TELL_PER_MINUTE: u32 = 30;
+
+/// True when `user`, refused in giveaway `id` by reaction, gets a DM: once per member, also when
+/// they react again and again, and at most [`TELL_PER_MINUTE`] per giveaway.
+fn may_tell(id: i64, user: u64) -> bool {
+    type Told = (
+        std::collections::HashSet<(i64, u64)>,
+        std::collections::HashMap<i64, (i64, u32)>,
+    );
+    static TOLD: std::sync::LazyLock<std::sync::Mutex<Told>> =
+        std::sync::LazyLock::new(Default::default);
+    let mut t = TOLD.lock().unwrap();
+    // shortcut: forgets everyone past 100,000 (and on a restart); a member may then get a second DM.
+    if t.0.len() > 100_000 {
+        t.0.clear();
+        t.1.clear();
+    }
+    if t.0.contains(&(id, user)) {
+        return false;
+    }
+    let minute = now_secs() / 60;
+    let n = t.1.entry(id).or_insert((minute, 0));
+    if n.0 != minute {
+        *n = (minute, 0);
+    }
+    if n.1 >= TELL_PER_MINUTE {
+        return false;
+    }
+    n.1 += 1;
+    t.0.insert((id, user))
+}
+
+/// Reactions Brim did not see (made while it restarted, or in a pause) become entries before the
+/// draw. Discord lists the reactions 100 at a time; only members with no entry yet cost a member
+/// read, so a giveaway whose reactions all came in costs one list call per 100 reactions.
+async fn catch_up_reactions(app: &App, g: &Giveaway) -> Result<()> {
+    use twilight_http::request::channel::reaction::RequestReactionType;
+    let Some(message) = g.message_id.and_then(|m| Id::new_checked(m as u64)) else {
+        return Ok(());
+    };
+    let (gid, channel) = (Id::new(g.guild_id as u64), Id::new(g.channel_id as u64));
+    let emoji = reaction_emoji(&g.button_emoji);
+    let req = match &emoji {
+        EmojiReactionType::Custom { id, name, .. } => RequestReactionType::Custom {
+            id: *id,
+            name: name.as_deref(),
+        },
+        EmojiReactionType::Unicode { name } => RequestReactionType::Unicode { name },
+    };
+    let mut after: Option<Id<UserMarker>> = None;
+    loop {
+        let mut call = app.http.reactions(channel, message, &req).limit(100);
+        if let Some(a) = after {
+            call = call.after(a);
+        }
+        let users = match call.await.map_err(anyhow::Error::from) {
+            Ok(r) => r.models().await?,
+            // The message or the emoji is gone: nothing to catch up.
+            Err(e) if http_err::code(&e).is_some() => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        let Some(last) = users.last() else {
+            return Ok(());
+        };
+        after = Some(last.id);
+        let ids: Vec<i64> = users
+            .iter()
+            .filter(|u| !u.bot)
+            .map(|u| u.id.get() as i64)
+            .collect();
+        let entered: Vec<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM giveaway_entries WHERE giveaway_id = $1 AND user_id = ANY($2)",
+        )
+        .bind(g.id)
+        .bind(&ids)
+        .fetch_all(&app.pool)
+        .await?;
+        for u in ids.into_iter().filter(|u| !entered.contains(u)) {
+            let Some(m) = http_err::member(&app.http, gid, Id::new(u as u64)).await? else {
+                continue;
+            };
+            let who = Who {
+                user: u as u64,
+                bot: m.user.bot,
+                roles: &m.roles,
+                joined: m.joined_at,
+                timeout: m.communication_disabled_until,
+            };
+            admit(app, g, who, None).await?;
+        }
+        if users.len() < 100 {
+            return Ok(());
+        }
     }
 }
 
@@ -950,11 +1358,7 @@ pub async fn on_member_update(
             if store::remove_entry(&app.pool, g.guild_id, g.id, user.get() as i64).await? {
                 queue_refresh(app, gid).await;
                 // No DM to a member the moderation caught: it would tell a raider what was seen.
-                let caught = matches!(
-                    r,
-                    Refusal::Quarantined | Refusal::Flagged | Refusal::RaidJoiner
-                );
-                if !caught {
+                if !caught(r) {
                     queue_removed_dm(app, &g, user, &r.text()).await;
                 }
             }
@@ -1046,6 +1450,11 @@ pub(crate) async fn end_job(app: &App, gid: Id<GuildMarker>, job: i64, p: &Value
         )
         .await?;
         return Ok(());
+    }
+    if let Some(g) = store::get(&app.pool, gid.get() as i64, id).await? {
+        if g.running() && g.extras.reaction {
+            catch_up_reactions(app, &g).await?;
+        }
     }
     let Some(g) = store::claim_end(&app.pool, gid.get() as i64, id).await? else {
         return Ok(());
@@ -1201,9 +1610,25 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
         reply::send_dm(app, user, &text, &embeds, &[]).await;
         return Ok(());
     }
+    if let Some(why) = payload["denied"].as_str() {
+        let vars = [
+            ("prize", g.prize.as_str()),
+            ("server", &server),
+            ("reason", why),
+        ];
+        let (text, embeds) = rendered(app, gid, "giveaway.entry_denied_dm", &vars).await;
+        reply::send_dm(app, user, &text, &embeds, &[]).await;
+        return Ok(());
+    }
     // A redraw since the save took this winner out.
     if !g.winner_ids.contains(&(user.get() as i64)) {
         return Ok(());
+    }
+    if let Some(role) = g.extras.winner_role {
+        // Best effort: a role problem must not hold back the DM and its Claim button.
+        if let Err(e) = give_role(app, &g, user, role).await {
+            tracing::warn!(?e, id = g.id, "giving the giveaway winner role failed");
+        }
     }
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let link = link(&g);
@@ -1225,6 +1650,337 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
     ];
     let (text, embeds) = rendered(app, gid, "giveaway.winner_dm", &vars).await;
     reply::send_dm(app, user, &text, &embeds, &[claim_row(g.id)]).await;
+    Ok(())
+}
+
+const ROLE_UNSAFE: &str = "Brim did not give the winner role: it has dangerous Discord permissions or a permit, or it is gone. Pick another role.";
+const ROLE_NO_ACCESS: &str = "Brim cannot give or take the winner role. Give Brim Manage Roles and put Brim's role above the winner role.";
+
+/// Gives a winner the winner role and queues its removal at the end of the role time. A role
+/// with dangerous permissions or a permit is never given, whoever picked it.
+async fn give_role(
+    app: &App,
+    g: &Giveaway,
+    user: Id<UserMarker>,
+    role: Id<RoleMarker>,
+) -> Result<()> {
+    let gid = Id::new(g.guild_id as u64);
+    let (safe, _) = crate::verify::safe_roles_of(app, gid, &[role]).await?;
+    if safe.is_empty() {
+        store::set_issue(&app.pool, g.guild_id, g.id, Some(ROLE_UNSAFE)).await?;
+        problem_log(app, g, ROLE_UNSAFE).await;
+        return Ok(());
+    }
+    // A member who had the role before keeps it: no give and no removal later.
+    match http_err::member(&app.http, gid, user).await? {
+        Some(m) if !m.roles.contains(&role) => {}
+        _ => return Ok(()),
+    }
+    if let Err(e) = app.http.add_guild_member_role(gid, user, role).await {
+        let e = anyhow::Error::from(e);
+        return match http_err::code(&e) {
+            // The winner left.
+            Some(10007) => Ok(()),
+            Some(10011 | 50001 | 50013) => {
+                store::set_issue(&app.pool, g.guild_id, g.id, Some(ROLE_NO_ACCESS)).await?;
+                problem_log(app, g, ROLE_NO_ACCESS).await;
+                Ok(())
+            }
+            _ => Err(e),
+        };
+    }
+    // A redraw during the give may have replaced this winner: its removal job ran before the give.
+    let still = store::get(&app.pool, g.guild_id, g.id)
+        .await?
+        .is_some_and(|n| n.winner_ids.contains(&(user.get() as i64)));
+    let at = if still {
+        now_secs() + g.extras.role_hours as i64 * 3600
+    } else {
+        now_secs()
+    };
+    let payload = json!({ "id": g.id, "user": user.get() as i64, "role": role.get() as i64 });
+    jobs::enqueue(&app.pool, g.guild_id, store::ROLE_OFF_JOB, payload, at).await?;
+    Ok(())
+}
+
+/// The `giveaway_role_off` job: the role time is over, or a redraw replaced the winner.
+/// shortcut: takes the role also when the member won it again in another giveaway since; give
+/// each giveaway its own role if that matters.
+pub(crate) async fn role_off_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let (Some(user), Some(role)) = (
+        p["user"].as_i64().and_then(|u| Id::new_checked(u as u64)),
+        p["role"].as_i64().and_then(|r| Id::new_checked(r as u64)),
+    ) else {
+        return Ok(());
+    };
+    let Err(e) = app.http.remove_guild_member_role(gid, user, role).await else {
+        return Ok(());
+    };
+    let e = anyhow::Error::from(e);
+    match http_err::code(&e) {
+        // The member left or the role is gone: nothing to take back.
+        Some(10007 | 10011) => Ok(()),
+        Some(50001 | 50013) => {
+            let g = store::get(&app.pool, gid.get() as i64, p["id"].as_i64().unwrap_or(0)).await?;
+            if let Some(g) = g {
+                problem_log(app, &g, ROLE_NO_ACCESS).await;
+            }
+            Ok(())
+        }
+        _ => Err(e),
+    }
+}
+
+const NO_THREAD: &str = "Brim cannot make the winner thread. Give Brim Create Private Threads and Send Messages in Threads in the channel (an announcement channel has no private threads).";
+
+/// Giveaways whose winner thread is being made now, so two jobs never make two threads.
+/// shortcut: one bot process; several processes would need a database lock.
+static OPENING: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<i64>>> =
+    std::sync::LazyLock::new(Default::default);
+
+/// The `giveaway_thread` job, queued by the save of a draw: puts its new winners (still winners
+/// now) into the private winner thread, and takes the winners it replaced out. The first one makes
+/// the thread, adds the host and the sponsor, posts the thread message and queues the close.
+pub(crate) async fn thread_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let list = |k: &str| -> Vec<i64> {
+        p[k].as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_i64)
+            .collect()
+    };
+    let Some(g) = store::get(&app.pool, gid.get() as i64, p["id"].as_i64().unwrap_or(0)).await?
+    else {
+        return Ok(());
+    };
+    if !g.extras.thread || g.status != "ended" {
+        return Ok(());
+    }
+    // A later draw may have run first: only who is a winner now goes in, only who is not goes out.
+    let add: Vec<i64> = list("won")
+        .into_iter()
+        .filter(|u| g.winner_ids.contains(u))
+        .collect();
+    let out: Vec<i64> = list("gone")
+        .into_iter()
+        .filter(|u| !g.winner_ids.contains(u))
+        .collect();
+    // `setup`: an earlier run made the thread but failed before the host, sponsor and message.
+    let setup = p["setup"] == true;
+    let (thread, fresh) = match g.thread_id {
+        Some(t) => (Id::new(t as u64), setup),
+        None if add.is_empty() => return Ok(()),
+        None => {
+            if !OPENING.lock().unwrap().insert(g.id) {
+                let job = p.clone();
+                jobs::enqueue(
+                    &app.pool,
+                    g.guild_id,
+                    store::THREAD_JOB,
+                    job,
+                    now_secs() + 30,
+                )
+                .await?;
+                return Ok(());
+            }
+            // Another job may have made the thread between the read and the lock.
+            let made = match store::get(&app.pool, g.guild_id, g.id).await {
+                Ok(Some(n)) if n.thread_id.is_some() => {
+                    Ok(n.thread_id.map(|t| (Id::new(t as u64), setup)))
+                }
+                Ok(_) => open_thread(app, &g).await.map(|t| t.map(|t| (t, true))),
+                Err(e) => Err(e),
+            };
+            OPENING.lock().unwrap().remove(&g.id);
+            match made? {
+                Some(t) => t,
+                None => return Ok(()),
+            }
+        }
+    };
+    let r = fill_thread(app, &g, thread, &add, &out, fresh).await;
+    let tries = p["tries"].as_u64().unwrap_or(0);
+    match r {
+        Ok(()) => Ok(()),
+        // Discord says the thread is gone: forget it, and this job makes a new one.
+        Err(e) if http_err::code(&e) == Some(10003) => {
+            sqlx::query("UPDATE giveaways SET thread_id = NULL WHERE id = $1 AND thread_id = $2")
+                .bind(g.id)
+                .bind(thread.get() as i64)
+                .execute(&app.pool)
+                .await?;
+            tracing::warn!(?e, id = g.id, "the giveaway winner thread is gone");
+            if tries < 2 {
+                let mut job = p.clone();
+                job["tries"] = json!(tries + 1);
+                job["setup"] = json!(false);
+                jobs::enqueue(&app.pool, g.guild_id, store::THREAD_JOB, job, now_secs()).await?;
+            }
+            Ok(())
+        }
+        // A new thread keeps its setup for the retry, which sees the saved thread as not new.
+        Err(e) if fresh && tries < 2 => {
+            tracing::warn!(
+                ?e,
+                id = g.id,
+                "setting up the giveaway winner thread failed"
+            );
+            let mut job = p.clone();
+            job["tries"] = json!(tries + 1);
+            job["setup"] = json!(true);
+            jobs::enqueue(
+                &app.pool,
+                g.guild_id,
+                store::THREAD_JOB,
+                job,
+                now_secs() + 60,
+            )
+            .await?;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Adds and removes the thread members; a new thread also gets the host, the sponsor and the
+/// thread message. A member Discord refuses is skipped; a thread-wide failure is the error.
+async fn fill_thread(
+    app: &App,
+    g: &Giveaway,
+    thread: Id<ChannelMarker>,
+    add: &[i64],
+    out: &[i64],
+    fresh: bool,
+) -> Result<()> {
+    let gid = Id::new(g.guild_id as u64);
+    let mut people = add.to_vec();
+    if fresh {
+        people.extend(g.host_id.iter().chain(g.sponsor_id.iter()));
+    }
+    let mut opened = false;
+    for u in people {
+        loop {
+            let r = app.http.add_thread_member(thread, Id::new(u as u64)).await;
+            let Err(e) = r.map_err(anyhow::Error::from) else {
+                break;
+            };
+            match http_err::code(&e) {
+                // Discord archived the thread (a week with no message): open it once and retry.
+                Some(50083) if !opened => {
+                    opened = true;
+                    app.http.update_thread(thread).archived(false).await?;
+                }
+                Some(10003) | None => return Err(e),
+                // This member left or cannot join: the others still go in.
+                Some(_) => {
+                    tracing::warn!(?e, id = g.id, "a member did not go into the winner thread");
+                    break;
+                }
+            }
+        }
+    }
+    for &u in out {
+        http_err::best_effort(
+            app.http
+                .remove_thread_member(thread, Id::new(u as u64))
+                .await,
+            "take a replaced winner out of the giveaway thread",
+        );
+    }
+    if fresh {
+        let at = now_secs() + g.extras.thread_hours as i64 * 3600;
+        let closes = sqlx::types::chrono::DateTime::from_timestamp(at, 0).unwrap_or_default();
+        let (host, sponsor) = (
+            g.host_id.map(|h| format!("<@{h}>")).unwrap_or_default(),
+            g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default(),
+        );
+        let (names, closes) = (winners_text(add), when(closes));
+        let vars = [
+            ("winners", names.as_str()),
+            ("prize", &g.prize),
+            ("host", &host),
+            ("sponsor", &sponsor),
+            ("closes", &closes),
+        ];
+        let (text, embeds) = rendered(app, gid, "giveaway.thread", &vars).await;
+        // They are in the thread already: the message pings nobody.
+        let quiet = AllowedMentions::default();
+        let post = app
+            .http
+            .create_message(thread)
+            .content(&text)
+            .embeds(&embeds)
+            .allowed_mentions(Some(&quiet));
+        http_err::best_effort(post.await, "post the giveaway thread message");
+    }
+    Ok(())
+}
+
+/// Makes the private winner thread in the giveaway's channel, saves it and queues its close.
+/// None when Discord refuses (the issue is saved for the dashboard).
+async fn open_thread(app: &App, g: &Giveaway) -> Result<Option<Id<ChannelMarker>>> {
+    let name: String = format!("Giveaway #{}: {}", g.id, g.prize)
+        .chars()
+        .take(100)
+        .collect();
+    let r = app
+        .http
+        .create_thread(
+            Id::new(g.channel_id as u64),
+            &name,
+            ChannelType::PrivateThread,
+        )
+        .auto_archive_duration(AutoArchiveDuration::Week)
+        .invitable(false)
+        .await;
+    let thread = match r.map_err(anyhow::Error::from) {
+        Ok(r) => r.model().await?.id,
+        Err(e) if http_err::code(&e).is_some() => {
+            tracing::warn!(?e, id = g.id, "making the giveaway winner thread failed");
+            store::set_issue(&app.pool, g.guild_id, g.id, Some(NO_THREAD)).await?;
+            problem_log(app, g, NO_THREAD).await;
+            return Ok(None);
+        }
+        Err(e) => return Err(e),
+    };
+    sqlx::query("UPDATE giveaways SET thread_id = $2 WHERE id = $1 AND guild_id = $3")
+        .bind(g.id)
+        .bind(thread.get() as i64)
+        .bind(g.guild_id)
+        .execute(&app.pool)
+        .await?;
+    let at = now_secs() + g.extras.thread_hours as i64 * 3600;
+    let payload = json!({ "id": g.id, "thread": thread.get() as i64 });
+    jobs::enqueue(&app.pool, g.guild_id, store::THREAD_CLOSE_JOB, payload, at).await?;
+    Ok(Some(thread))
+}
+
+/// The `giveaway_thread_close` job: archives and locks the winner thread. A later redraw makes a
+/// new thread for its winner.
+pub(crate) async fn thread_close_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let (Some(id), Some(t)) = (
+        p["id"].as_i64(),
+        p["thread"]
+            .as_i64()
+            .and_then(|t| Id::<ChannelMarker>::new_checked(t as u64)),
+    ) else {
+        return Ok(());
+    };
+    let r = app.http.update_thread(t).archived(true).locked(true).await;
+    if let Err(e) = r.map_err(anyhow::Error::from) {
+        // Gone, or Brim lost access: nothing left to close.
+        if !matches!(http_err::code(&e), Some(10003 | 50001 | 50013)) {
+            return Err(e);
+        }
+    }
+    sqlx::query(
+        "UPDATE giveaways SET thread_id = NULL WHERE id = $1 AND guild_id = $2 AND thread_id = $3",
+    )
+    .bind(id)
+    .bind(gid.get() as i64)
+    .bind(t.get() as i64)
+    .execute(&app.pool)
+    .await?;
     Ok(())
 }
 
@@ -1777,6 +2533,8 @@ pub(crate) async fn command(
                 button_label: d.button_label.clone(),
                 button_emoji: d.button_emoji.clone(),
                 claim_hours: d.claim_hours as i64,
+                extras: Default::default(),
+                code: None,
                 post_job: false,
             };
             let made = store::create(&app.pool, &new, d.max_running as i64).await?;
@@ -2202,6 +2960,8 @@ mod tests {
             button_label: String::new(),
             button_emoji: String::new(),
             claim_hours: 48,
+            extras: Default::default(),
+            code: None,
             post_job: false,
         };
         let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
@@ -2246,5 +3006,400 @@ mod tests {
             .await
             .unwrap();
         t.cleanup().await;
+    }
+
+    fn plain(g: i64) -> store::New {
+        store::New {
+            guild_id: g,
+            channel_id: 2,
+            prize: "Nitro".into(),
+            host_id: None,
+            sponsor_id: None,
+            created_by: 9,
+            winners: 1,
+            duration_secs: 3600,
+            req: Req::default(),
+            button_label: String::new(),
+            button_emoji: String::new(),
+            claim_hours: 48,
+            extras: Default::default(),
+            code: None,
+            post_job: false,
+        }
+    }
+
+    async fn wipe(t: &crate::test_support::T, g: i64) {
+        for q in [
+            "DELETE FROM giveaways WHERE guild_id = $1",
+            "DELETE FROM scheduled_jobs WHERE guild_id = $1",
+        ] {
+            sqlx::query(q).bind(g).execute(&t.app.pool).await.unwrap();
+        }
+        t.cleanup().await;
+    }
+
+    fn reaction(gid: Id<GuildMarker>, message: u64, user: u64, emoji: &str) -> ReactionAdd {
+        ReactionAdd(
+            serde_json::from_value(json!({
+                "burst": false, "burst_colors": [], "channel_id": "2", "message_id": message.to_string(),
+                "guild_id": gid.to_string(), "user_id": user.to_string(), "emoji": {"id": null, "name": emoji},
+                "member": {"deaf": false, "mute": false, "flags": 0, "pending": false, "roles": [],
+                    "joined_at": "2026-01-01T00:00:00.000000+00:00",
+                    "user": {"id": user.to_string(), "username": "x", "discriminator": "0", "avatar": null}},
+            }))
+            .unwrap(),
+        )
+    }
+
+    /// Reaction entry under load: 10,000 members react at once (and 2,000 of them twice). Each
+    /// gets one entry, no reaction edits the message or sends anything, and one count refresh is
+    /// queued. Another emoji and another message do nothing. Times go to stderr.
+    #[tokio::test]
+    async fn ten_thousand_reactions_enter_once_each() {
+        let Some(t) = crate::test_support::T::new(302).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let mut n = plain(g);
+        n.extras.reaction = true;
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        post(&t.app, &gw).await.unwrap();
+        assert_eq!(t.calls("/reactions/"), 1, "Brim adds the entry reaction");
+        let message = t.base + 77;
+        sqlx::query("UPDATE giveaways SET message_id = $2 WHERE id = $1")
+            .bind(gw.id)
+            .bind(message as i64)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        sync_reactions(&t.app).await.unwrap();
+        let before = t.calls("");
+
+        let started = std::time::Instant::now();
+        let mut set = tokio::task::JoinSet::new();
+        for k in 0..12_000u64 {
+            let (app, user) = (t.app.clone(), (1u64 << 40) + k % 10_000);
+            set.spawn(async move { on_reaction(&app, &reaction(gid, message, user, "🎉")).await });
+        }
+        while let Some(r) = set.join_next().await {
+            r.unwrap().unwrap();
+        }
+        let took = started.elapsed();
+        eprintln!(
+            "12000 reactions (10000 members): {took:?} ({:?} each)",
+            took / 12_000
+        );
+        assert_eq!(
+            store::entry_count(&t.app.pool, gw.id).await.unwrap(),
+            10_000
+        );
+        assert_eq!(t.calls("") - before, 0, "no Discord call per reaction");
+        let refresh: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(g)
+        .bind(store::REFRESH_JOB)
+        .fetch_one(&t.app.pool)
+        .await
+        .unwrap();
+        assert_eq!(refresh, 1);
+
+        on_reaction(&t.app, &reaction(gid, message, 5, "👍"))
+            .await
+            .unwrap();
+        on_reaction(&t.app, &reaction(gid, message + 1, 6, "🎉"))
+            .await
+            .unwrap();
+        assert_eq!(
+            store::entry_count(&t.app.pool, gw.id).await.unwrap(),
+            10_000
+        );
+        wipe(&t, g).await;
+    }
+
+    /// A refused reaction gets one DM job with the reason, also after more reactions; a member
+    /// moderation caught gets none.
+    /// Reactions made while Brim was offline are entered at the end: the reaction list is read
+    /// page by page, and a member who entered already is not read again.
+    #[tokio::test]
+    async fn reactions_missed_while_offline_enter_at_the_end() {
+        let Some(t) = crate::test_support::T::new(306).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let mut n = plain(g);
+        n.extras.reaction = true;
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        store::set_posted(&t.app.pool, g, gw.id, 2, (t.base + 79) as i64)
+            .await
+            .unwrap();
+        let users: Vec<u64> = (0..150).map(|k| (1u64 << 42) + k).collect();
+        {
+            let mut m = t.mock.lock().unwrap();
+            for u in &users {
+                m.members.insert((gid.get(), *u), vec![]);
+            }
+            m.reacted = users.clone();
+        }
+        // One reacted while Brim was online.
+        remember_reactions(t.base + 79, gw.id);
+        on_reaction(&t.app, &reaction(gid, t.base + 79, users[0], "🎉"))
+            .await
+            .unwrap();
+        let before = t.calls("/members/");
+        let gw = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
+        catch_up_reactions(&t.app, &gw).await.unwrap();
+        assert_eq!(store::entry_count(&t.app.pool, gw.id).await.unwrap(), 150);
+        assert_eq!(
+            t.calls("/members/") - before,
+            149,
+            "only members with no entry are read"
+        );
+        assert_eq!(t.calls("/reactions/"), 2, "two pages of 100");
+        wipe(&t, g).await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_reaction_is_told_once() {
+        let Some(t) = crate::test_support::T::new(303).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let mut n = plain(g);
+        n.extras.reaction = true;
+        n.req.required = vec![Id::new(4242)];
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        let message = t.base + 78;
+        store::set_posted(&t.app.pool, g, gw.id, 2, message as i64)
+            .await
+            .unwrap();
+        remember_reactions(message, gw.id);
+        let (new, caught) = (1u64 << 41, (1u64 << 41) + 1);
+        sqlx::query(
+            "INSERT INTO quarantines (guild_id, user_id, saved_roles) VALUES ($1, $2, '{}')",
+        )
+        .bind(g)
+        .bind(caught as i64)
+        .execute(&t.app.pool)
+        .await
+        .unwrap();
+        for _ in 0..3 {
+            on_reaction(&t.app, &reaction(gid, message, new, "🎉"))
+                .await
+                .unwrap();
+            on_reaction(&t.app, &reaction(gid, message, caught, "🎉"))
+                .await
+                .unwrap();
+        }
+        let dms: Vec<Value> = sqlx::query_scalar(
+            "SELECT payload FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(g)
+        .bind(store::DM_JOB)
+        .fetch_all(&t.app.pool)
+        .await
+        .unwrap();
+        assert_eq!(dms.len(), 1, "{dms:?}");
+        assert_eq!(dms[0]["user"].as_i64(), Some(new as i64));
+        assert_eq!(store::entry_count(&t.app.pool, gw.id).await.unwrap(), 0);
+        sqlx::query("DELETE FROM quarantines WHERE guild_id = $1")
+            .bind(g)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        wipe(&t, g).await;
+    }
+
+    /// The button asks for the code only from a member who may enter; a wrong code counts, three
+    /// give a wait, and the right one enters.
+    #[tokio::test]
+    async fn an_entry_code_is_asked_then_checked() {
+        let Some(t) = crate::test_support::T::new(304).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let g = t.g(0).get() as i64;
+        let mut n = plain(g);
+        n.code = Some("Open Sesame".into());
+        n.req.required = vec![Id::new(4243)];
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        static ROLE: [Id<RoleMarker>; 1] = [Id::new(4243)];
+        let (no_role, role): (&[Id<RoleMarker>], &[Id<RoleMarker>]) = (&[], &ROLE);
+        let who = |user: u64, roles: &'static [Id<RoleMarker>]| Who {
+            user,
+            bot: false,
+            roles,
+            joined: None,
+            timeout: None,
+        };
+        let (a, b) = (1u64 << 42, (1u64 << 42) + 1);
+        let r = admit(&t.app, &gw, who(a, no_role), None).await.unwrap();
+        assert!(
+            matches!(r, Admit::Refused(Refusal::MissingRole)),
+            "the rules come before the code"
+        );
+        let r = admit(&t.app, &gw, who(a, no_role), Some("open sesame"))
+            .await
+            .unwrap();
+        assert!(
+            matches!(r, Admit::Refused(_)),
+            "a right code does not skip the rules"
+        );
+        assert!(matches!(
+            admit(&t.app, &gw, who(b, role), None).await.unwrap(),
+            Admit::NeedsCode
+        ));
+        assert!(matches!(
+            admit(&t.app, &gw, who(b, role), Some("x")).await.unwrap(),
+            Admit::WrongCode(2)
+        ));
+        assert!(matches!(
+            admit(&t.app, &gw, who(b, role), Some(" OPEN SESAME "))
+                .await
+                .unwrap(),
+            Admit::New(1, None)
+        ));
+        let c = b + 1;
+        for _ in 0..3 {
+            admit(&t.app, &gw, who(c, role), Some("x")).await.unwrap();
+        }
+        assert!(
+            matches!(
+                admit(&t.app, &gw, who(c, role), None).await.unwrap(),
+                Admit::Wait(10)
+            ),
+            "no form in the wait"
+        );
+        assert!(matches!(
+            admit(&t.app, &gw, who(c, role), Some("open sesame"))
+                .await
+                .unwrap(),
+            Admit::Wait(10)
+        ));
+        assert_eq!(store::entry_count(&t.app.pool, gw.id).await.unwrap(), 1);
+        wipe(&t, g).await;
+    }
+
+    /// A winner gets a safe winner role and loses it at the end of the role time; a role with
+    /// dangerous permissions is never given. The first draw makes the private winner thread with
+    /// the winners and the host, and queues its close.
+    #[tokio::test]
+    async fn winners_get_the_role_and_the_thread() {
+        let Some(t) = crate::test_support::T::new(305).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let (winner, host) = (t.base + 11, t.base + 12);
+        t.set(|m| {
+            m.roles.insert(
+                gid.get(),
+                vec![
+                    (gid.get(), false, 0, 0),
+                    (601, false, 0, 1),
+                    (602, false, 8, 2),
+                    (699, false, 0, 9),
+                ],
+            );
+            m.members.insert((gid.get(), winner), vec![]);
+            m.members
+                .insert((gid.get(), crate::test_support::ME), vec![699]);
+        });
+        // The test server starts with a seeded empty role list.
+        t.app.invalidate_guild(gid);
+        let mut n = plain(g);
+        n.host_id = Some(host as i64);
+        n.extras = store::Extras {
+            winner_role: Some(Id::new(601)),
+            thread: true,
+            ..Default::default()
+        };
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        store::claim_end(&t.app.pool, g, gw.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let w = winner as i64;
+        assert!(store::save_draw(
+            &t.app.pool,
+            g,
+            gw.id,
+            0,
+            &[w],
+            &[w],
+            "giveaway.winners",
+            false
+        )
+        .await
+        .unwrap());
+        dm_job(&t.app, gid, &json!({"id": gw.id, "draws": 1, "user": w}))
+            .await
+            .unwrap();
+        assert!(t.mock.lock().unwrap().members[&(gid.get(), winner)].contains(&601));
+        let off: i64 = sqlx::query_scalar(
+            "SELECT run_at - now() > interval '167 hours' FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(g)
+        .bind(store::ROLE_OFF_JOB)
+        .fetch_one(&t.app.pool)
+        .await
+        .map(|b: bool| b as i64)
+        .unwrap();
+        assert_eq!(off, 1, "the role goes after 7 days");
+        role_off_job(&t.app, gid, &json!({"id": gw.id, "user": w, "role": 601}))
+            .await
+            .unwrap();
+        assert!(!t.mock.lock().unwrap().members[&(gid.get(), winner)].contains(&601));
+
+        let thread: Value = sqlx::query_scalar(
+            "SELECT payload FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(g)
+        .bind(store::THREAD_JOB)
+        .fetch_one(&t.app.pool)
+        .await
+        .unwrap();
+        thread_job(&t.app, gid, &thread).await.unwrap();
+        assert_eq!(t.calls("POST /channels/2/threads"), 1);
+        assert_eq!(t.calls("/thread-members/"), 2, "the winner and the host");
+        let saved = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
+        assert_eq!(saved.thread_id, Some(880));
+        thread_close_job(&t.app, gid, &json!({"id": gw.id, "thread": 880}))
+            .await
+            .unwrap();
+        assert_eq!(
+            store::get(&t.app.pool, g, gw.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .thread_id,
+            None
+        );
+
+        // A role with Administrator is not given, and the dashboard row says why.
+        sqlx::query("UPDATE giveaways SET extras = jsonb_set(extras, '{winner_role}', '\"602\"') WHERE id = $1")
+            .bind(gw.id)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        dm_job(&t.app, gid, &json!({"id": gw.id, "draws": 1, "user": w}))
+            .await
+            .unwrap();
+        assert!(!t.mock.lock().unwrap().members[&(gid.get(), winner)].contains(&602));
+        let issue = store::get(&t.app.pool, g, gw.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .issue;
+        assert_eq!(issue.as_deref(), Some(ROLE_UNSAFE));
+        wipe(&t, g).await;
     }
 }

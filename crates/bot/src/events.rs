@@ -1114,7 +1114,12 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
             crate::voice_nuke::on_voice(app, &v.0, voice_old).await
         }
         Event::AutoModerationActionExecution(e) => crate::native::on_native_hit(app, e).await?,
-        Event::ReactionAdd(r) => crate::activity::on_reaction(app, r).await?,
+        Event::ReactionAdd(r) => {
+            if let Err(e) = crate::giveaways::on_reaction(app, r).await {
+                tracing::warn!(?e, "a giveaway reaction entry failed");
+            }
+            crate::activity::on_reaction(app, r).await?
+        }
         Event::ThreadCreate(t) => crate::activity::on_thread(app, &t.0).await?,
         Event::ThreadUpdate(t) => crate::activity::on_thread_update(app, &t.0).await?,
         Event::ThreadListSync(s) => s

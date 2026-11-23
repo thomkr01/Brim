@@ -28,6 +28,98 @@ pub const CLAIM_HOURS: (i64, i64) = (1, 720);
 pub const OLD_REROLL_DAYS: i64 = 7;
 /// Winners the public winners post names; above it, the post shows the count only.
 pub const PING_CAP: usize = 25;
+/// Hours a winner keeps the winner role (default 7 days).
+pub const ROLE_HOURS: (u32, u32) = (1, 8760);
+/// Hours until the winner thread closes (default 3 days).
+pub const THREAD_HOURS: (u32, u32) = (1, 720);
+/// Length of an entry code, in characters.
+pub const CODE_LEN: (usize, usize) = (6, 50);
+/// Wrong entry codes in a row before the member must wait.
+pub const CODE_TRIES: i16 = 3;
+/// Minutes a member waits after too many wrong entry codes.
+pub const CODE_WAIT_MINS: i64 = 10;
+
+/// The extras of one giveaway: a winner role for a time, a private thread for the winners, and
+/// entry by reaction instead of the button.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Extras {
+    /// Given to each winner and taken back after `role_hours`.
+    pub winner_role: Option<Id<RoleMarker>>,
+    pub role_hours: u32,
+    /// A private thread for the winners, the host and the sponsor; it closes after `thread_hours`.
+    pub thread: bool,
+    pub thread_hours: u32,
+    /// Members enter with a reaction (the button emoji) instead of the button.
+    pub reaction: bool,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self {
+            winner_role: None,
+            role_hours: 168,
+            thread: false,
+            thread_hours: 72,
+            reaction: false,
+        }
+    }
+}
+
+impl Extras {
+    /// The first rule this value breaks, as a sentence for the person who set it.
+    pub fn problem(&self) -> Option<String> {
+        if self.winner_role.is_some() && !(ROLE_HOURS.0..=ROLE_HOURS.1).contains(&self.role_hours) {
+            return Some(format!(
+                "Winners keep the role {} to {} hours.",
+                ROLE_HOURS.0, ROLE_HOURS.1
+            ));
+        }
+        if self.thread && !(THREAD_HOURS.0..=THREAD_HOURS.1).contains(&self.thread_hours) {
+            return Some(format!(
+                "The winner thread closes after {} to {} hours.",
+                THREAD_HOURS.0, THREAD_HOURS.1
+            ));
+        }
+        None
+    }
+}
+
+/// What an entry code is compared as: trimmed, lower case.
+fn code_text(code: &str) -> String {
+    code.trim().to_lowercase()
+}
+
+/// Why `code` cannot be the entry code of a giveaway (None: it can). `reaction`: reaction entry
+/// is on, and a reaction cannot carry a code.
+pub fn code_problem(code: &str, reaction: bool) -> Option<String> {
+    let n = code_text(code).chars().count();
+    if reaction {
+        return Some("An entry code needs the Enter button: turn reaction entry off.".into());
+    }
+    (!(CODE_LEN.0..=CODE_LEN.1).contains(&n)).then(|| {
+        format!(
+            "The entry code has {} to {} characters.",
+            CODE_LEN.0, CODE_LEN.1
+        )
+    })
+}
+
+/// The stored form of the entry code of giveaway `id`: SHA-256, salted with the id.
+pub fn code_hash(id: i64, code: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let d = Sha256::digest(format!("brim giveaway code\0{id}\0{}", code_text(code)));
+    d.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Compares two hashes in a time that does not depend on where they differ.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
+}
 
 /// A role that gives more than one entry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +313,10 @@ pub struct Giveaway {
     pub shown_entries: i32,
     pub draws: i32,
     pub created_at: DateTime<Utc>,
+    pub extras: sqlx::types::Json<Extras>,
+    pub thread_id: Option<i64>,
+    /// An entry code is set (the hash itself is never read into this row).
+    pub has_code: bool,
 }
 
 impl Giveaway {
@@ -230,7 +326,7 @@ impl Giveaway {
 }
 
 /// A giveaway to make.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct New {
     pub guild_id: i64,
     pub channel_id: i64,
@@ -244,8 +340,26 @@ pub struct New {
     pub button_label: String,
     pub button_emoji: String,
     pub claim_hours: i64,
+    pub extras: Extras,
+    /// The entry code members type after they press Enter; None: no code.
+    pub code: Option<String>,
     /// Queue the first post in the same transaction (the dashboard); the command posts at once.
     pub post_job: bool,
+}
+
+/// Never shows the entry code, so a `?new` in a log line cannot write it.
+impl std::fmt::Debug for New {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("New")
+            .field("guild_id", &self.guild_id)
+            .field("prize", &self.prize)
+            .field("winners", &self.winners)
+            .field("duration_secs", &self.duration_secs)
+            .field("req", &self.req)
+            .field("extras", &self.extras)
+            .field("code", &self.code.as_ref().map(|_| "<hidden>"))
+            .finish_non_exhaustive()
+    }
 }
 
 /// The first value of `n` outside its limit, as a sentence for the person who typed it.
@@ -277,13 +391,21 @@ pub fn new_problem(n: &New) -> Option<String> {
             CLAIM_HOURS.0, CLAIM_HOURS.1
         ));
     }
-    n.req.problem()
+    if let Some(p) = n
+        .code
+        .as_deref()
+        .and_then(|c| code_problem(c, n.extras.reaction))
+    {
+        return Some(p);
+    }
+    n.extras.problem().or_else(|| n.req.problem())
 }
 
 const COLS: &str =
     "id, guild_id, channel_id, message_id, prize, host_id, sponsor_id, created_by, winners,
     status, ends_at, ended_at, paused_at, req, button_label, button_emoji, winner_ids, past_winners,
-    claim_hours, needs_repost, issue, shown_entries, draws, created_at";
+    claim_hours, needs_repost, issue, shown_entries, draws, created_at, extras, thread_id,
+    (code_hash IS NOT NULL) AS has_code";
 
 /// Saves `n` as a running giveaway and queues its end, or says which limit it breaks. The count of
 /// running giveaways and the insert are one transaction under a per-server lock.
@@ -310,8 +432,8 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     }
     let g: Giveaway = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO giveaways (guild_id, channel_id, prize, host_id, sponsor_id, created_by,
-           winners, ends_at, req, button_label, button_emoji, claim_hours, needs_repost)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12, $13)
+           winners, ends_at, req, button_label, button_emoji, claim_hours, needs_repost, extras)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12, $13, $14)
          RETURNING {COLS}"
     )))
     .bind(n.guild_id)
@@ -327,8 +449,18 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     .bind(n.button_emoji.trim())
     .bind(n.claim_hours as i32)
     .bind(n.post_job)
+    .bind(sqlx::types::Json(&n.extras))
     .fetch_one(&mut *tx)
     .await?;
+    let mut g = g;
+    if let Some(code) = &n.code {
+        sqlx::query("UPDATE giveaways SET code_hash = $2 WHERE id = $1")
+            .bind(g.id)
+            .bind(code_hash(g.id, code))
+            .execute(&mut *tx)
+            .await?;
+        g.has_code = true;
+    }
     if n.post_job {
         let payload = serde_json::json!({"id": g.id, "first": true});
         crate::jobs::enqueue(
@@ -364,6 +496,13 @@ pub const DM_JOB: &str = "giveaway_dm";
 pub const ANNOUNCE_JOB: &str = "giveaway_announce";
 /// Job that runs a dashboard action that needs Discord: cancel, reroll or redraw.
 pub const ACTION_JOB: &str = "giveaway_action";
+/// Job that takes the winner role back from one member.
+pub const ROLE_OFF_JOB: &str = "giveaway_role_off";
+/// Job that puts new winners into the winner thread (made at the first draw) and takes replaced
+/// winners out.
+pub const THREAD_JOB: &str = "giveaway_thread";
+/// Job that closes (archives and locks) the winner thread.
+pub const THREAD_CLOSE_JOB: &str = "giveaway_thread_close";
 
 pub async fn get(pool: &PgPool, guild: i64, id: i64) -> Result<Option<Giveaway>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -437,6 +576,81 @@ pub async fn enter(pool: &PgPool, guild: i64, id: i64, user: i64, weight: u16) -
     .fetch_optional(pool)
     .await?;
     Ok(had.map_or(Entered::Closed, Entered::Already))
+}
+
+/// What a typed entry code did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CodeTry {
+    Right,
+    /// Wrong; this many tries are left before the wait.
+    Wrong(i16),
+    /// Too many wrong tries: wait this many minutes (rounded up).
+    Wait(i64),
+}
+
+/// Checks `typed` against the entry code of giveaway `id` for `user`. The try is counted before
+/// the compare, in one statement, so parallel tries cannot pass the limit: the third wrong try
+/// starts a 10 minute wait, and during the wait no try is compared at all.
+pub async fn try_code(
+    pool: &PgPool,
+    guild: i64,
+    id: i64,
+    user: i64,
+    typed: &str,
+) -> Result<CodeTry> {
+    let n: Option<i16> = sqlx::query_scalar(
+        "INSERT INTO giveaway_code_tries AS t (giveaway_id, guild_id, user_id, tries, locked_until)
+         VALUES ($1, $2, $3, 1, NULL)
+         ON CONFLICT (giveaway_id, user_id) DO UPDATE SET
+           tries = CASE WHEN t.locked_until IS NULL THEN t.tries + 1 ELSE 1 END,
+           locked_until = CASE WHEN t.locked_until IS NULL AND t.tries + 1 >= $4
+             THEN now() + make_interval(mins => $5) END
+         WHERE t.locked_until IS NULL OR t.locked_until <= now()
+         RETURNING tries",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(user)
+    .bind(CODE_TRIES)
+    .bind(CODE_WAIT_MINS as i32)
+    .fetch_optional(pool)
+    .await?;
+    let Some(n) = n else {
+        return Ok(CodeTry::Wait(code_wait(pool, id, user).await?.unwrap_or(1)));
+    };
+    let stored: Option<String> =
+        sqlx::query_scalar("SELECT code_hash FROM giveaways WHERE id = $1 AND guild_id = $2")
+            .bind(id)
+            .bind(guild)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
+    // A giveaway without a code takes no code, so nothing is right.
+    if stored.is_some_and(|h| same(&h, &code_hash(id, typed))) {
+        sqlx::query("DELETE FROM giveaway_code_tries WHERE giveaway_id = $1 AND user_id = $2")
+            .bind(id)
+            .bind(user)
+            .execute(pool)
+            .await?;
+        return Ok(CodeTry::Right);
+    }
+    Ok(match n >= CODE_TRIES {
+        true => CodeTry::Wait(CODE_WAIT_MINS),
+        false => CodeTry::Wrong(CODE_TRIES - n),
+    })
+}
+
+/// Minutes `user` still waits before the next entry code try (rounded up); None: no wait.
+pub async fn code_wait(pool: &PgPool, id: i64, user: i64) -> Result<Option<i64>> {
+    let secs: Option<f64> = sqlx::query_scalar(
+        "SELECT extract(epoch FROM locked_until - now())::float8 FROM giveaway_code_tries
+         WHERE giveaway_id = $1 AND user_id = $2 AND locked_until > now()",
+    )
+    .bind(id)
+    .bind(user)
+    .fetch_optional(pool)
+    .await?;
+    Ok(secs.map(|s| ((s / 60.0).ceil() as i64).max(1)))
 }
 
 pub async fn entry_count(pool: &PgPool, id: i64) -> Result<i64> {
@@ -549,6 +763,18 @@ pub async fn save_draw(
     auto: bool,
 ) -> Result<bool> {
     let mut tx = pool.begin().await?;
+    let old: Option<(Vec<i64>, sqlx::types::Json<Extras>)> = sqlx::query_as(
+        "SELECT winner_ids, extras FROM giveaways WHERE id = $1 AND guild_id = $2 FOR UPDATE",
+    )
+    .bind(id)
+    .bind(guild)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((old, extras)) = old else {
+        return Ok(false);
+    };
+    // Winners this draw replaced: they leave the winner thread and lose the winner role now.
+    let gone: Vec<i64> = old.into_iter().filter(|u| !winners.contains(u)).collect();
     let saved = sqlx::query(
         "UPDATE giveaways SET winner_ids = $4, past_winners = past_winners || $5, draws = draws + 1
          WHERE id = $1 AND guild_id = $2 AND draws = $3 AND status = 'ended'",
@@ -567,8 +793,19 @@ pub async fn save_draw(
     }
     sync_claims(&mut tx, guild, id, seen == 0, winners, new, auto).await?;
     let (now, draws) = (Utc::now().timestamp(), seen + 1);
-    let payload = serde_json::json!({ "id": id, "draws": draws, "key": key, "won": new });
+    let payload =
+        serde_json::json!({ "id": id, "draws": draws, "key": key, "won": new, "gone": gone });
     crate::jobs::enqueue(&mut *tx, guild, ANNOUNCE_JOB, payload, now).await?;
+    if extras.thread && (!new.is_empty() || !gone.is_empty()) {
+        let payload = serde_json::json!({ "id": id, "won": new, "gone": gone });
+        crate::jobs::enqueue(&mut *tx, guild, THREAD_JOB, payload, now).await?;
+    }
+    if let Some(role) = extras.winner_role {
+        for u in &gone {
+            let payload = serde_json::json!({ "id": id, "user": u, "role": role.get() as i64 });
+            crate::jobs::enqueue(&mut *tx, guild, ROLE_OFF_JOB, payload, now).await?;
+        }
+    }
     for u in new {
         let payload = serde_json::json!({ "id": id, "draws": draws, "user": u });
         crate::jobs::enqueue(&mut *tx, guild, DM_JOB, payload, now).await?;
@@ -1058,6 +1295,7 @@ pub async fn edit(
     prize: &str,
     winners: i64,
     req: &Req,
+    extras: &Extras,
 ) -> Result<Result<bool, String>> {
     let prize = prize.trim();
     if prize.is_empty() || prize.chars().count() > MAX_PRIZE {
@@ -1071,11 +1309,13 @@ pub async fn edit(
             WINNERS.0, WINNERS.1
         )));
     }
-    if let Some(p) = req.problem() {
+    if let Some(p) = req.problem().or_else(|| extras.problem()) {
         return Ok(Err(p));
     }
+    // Reaction entry stays as the giveaway was posted: the message has its button or its reaction.
     Ok(Ok(sqlx::query(
-        "UPDATE giveaways SET prize = $3, winners = $4, req = $5, shown_entries = -1
+        "UPDATE giveaways SET prize = $3, winners = $4, req = $5, shown_entries = -1,
+           extras = $6 || jsonb_build_object('reaction', COALESCE(extras->'reaction', 'false'))
          WHERE id = $1 AND guild_id = $2 AND status = 'running'",
     )
     .bind(id)
@@ -1083,6 +1323,7 @@ pub async fn edit(
     .bind(prize)
     .bind(winners as i16)
     .bind(sqlx::types::Json(req))
+    .bind(sqlx::types::Json(extras))
     .execute(pool)
     .await?
     .rows_affected()
@@ -1118,8 +1359,18 @@ pub async fn queue_post(
     Ok(n == 1)
 }
 
-/// A role that a restore made again: the rules of the running giveaways name the new id.
+/// A role that a restore made again: the rules and the winner role of the running giveaways name
+/// the new id.
 pub async fn relink_roles(pool: &PgPool, guild: i64, old: i64, new: i64) -> Result<u64> {
+    sqlx::query(
+        "UPDATE giveaways SET extras = jsonb_set(extras, '{winner_role}', to_jsonb($3::text))
+         WHERE guild_id = $1 AND status = 'running' AND extras->>'winner_role' = $2::text",
+    )
+    .bind(guild)
+    .bind(old.to_string())
+    .bind(new.to_string())
+    .execute(pool)
+    .await?;
     Ok(sqlx::query(
         "UPDATE giveaways SET req = req
            || jsonb_build_object('required', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
@@ -1338,6 +1589,8 @@ mod tests {
             button_label: String::new(),
             button_emoji: String::new(),
             claim_hours: 48,
+            extras: Default::default(),
+            code: None,
             post_job: false,
         };
         assert_eq!(new_problem(&n), None);
@@ -1412,6 +1665,8 @@ mod tests {
             button_label: String::new(),
             button_emoji: String::new(),
             claim_hours: 48,
+            extras: Default::default(),
+            code: None,
             post_job: false,
         }
     }
@@ -1928,5 +2183,185 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn extras_and_codes_have_limits() {
+        assert_eq!(Extras::default().problem(), None);
+        let role = Extras {
+            winner_role: Some(r(4)),
+            role_hours: 0,
+            ..Extras::default()
+        };
+        assert!(role.problem().is_some(), "a winner role needs a time");
+        let thread = Extras {
+            thread: true,
+            thread_hours: 721,
+            ..Extras::default()
+        };
+        assert!(thread.problem().is_some());
+        assert_eq!(code_problem(" Pizza Party ", false), None);
+        assert!(code_problem("abcde", false).is_some(), "too short");
+        assert!(code_problem(&"a".repeat(51), false).is_some(), "too long");
+        assert!(
+            code_problem("pizza", true).is_some(),
+            "a reaction cannot carry a code"
+        );
+        // Trimmed and in any case; the id is the salt.
+        assert_eq!(code_hash(5, " PIZZA "), code_hash(5, "pizza"));
+        assert_ne!(code_hash(5, "pizza"), code_hash(6, "pizza"));
+        assert_eq!(code_hash(5, "pizza").len(), 64);
+        assert!(same("ab", "ab") && !same("ab", "ac") && !same("ab", "abc"));
+    }
+
+    /// Three wrong codes give a 10 minute wait in which even the right code does nothing; a right
+    /// code before that enters and clears the count. Parallel tries cannot pass the limit.
+    #[tokio::test]
+    async fn entry_codes_allow_three_wrong_tries_then_a_wait() {
+        let Some((pool, gid)) = db(9).await else {
+            return;
+        };
+        let n = New {
+            code: Some("Pizza Party".into()),
+            ..new(gid)
+        };
+        let g = create(&pool, &n, 25).await.unwrap().unwrap();
+        assert!(g.has_code);
+        let stored: String = sqlx::query_scalar("SELECT code_hash FROM giveaways WHERE id = $1")
+            .bind(g.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(!stored.contains("pizza"), "only the hash is kept");
+        let t = |u: i64, c: &'static str| try_code(&pool, gid, g.id, u, c);
+        assert_eq!(t(1, "nope").await.unwrap(), CodeTry::Wrong(2));
+        assert_eq!(t(1, " pizza party ").await.unwrap(), CodeTry::Right);
+        assert_eq!(
+            t(1, "nope").await.unwrap(),
+            CodeTry::Wrong(2),
+            "a right code clears the count"
+        );
+        assert_eq!(t(2, "a").await.unwrap(), CodeTry::Wrong(2));
+        assert_eq!(t(2, "b").await.unwrap(), CodeTry::Wrong(1));
+        assert_eq!(t(2, "c").await.unwrap(), CodeTry::Wait(CODE_WAIT_MINS));
+        assert_eq!(
+            t(2, "pizza party").await.unwrap(),
+            CodeTry::Wait(10),
+            "no compare in the wait"
+        );
+        assert_eq!(code_wait(&pool, g.id, 2).await.unwrap(), Some(10));
+        assert_eq!(code_wait(&pool, g.id, 1).await.unwrap(), None);
+        sqlx::query("UPDATE giveaway_code_tries SET locked_until = now() WHERE user_id = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            t(2, "pizza party").await.unwrap(),
+            CodeTry::Right,
+            "the wait is over"
+        );
+
+        // 20 tries at once by one member: at most 3 are compared.
+        let runs: Vec<_> = (0..20)
+            .map(|_| {
+                let pool = pool.clone();
+                tokio::spawn(async move { try_code(&pool, gid, g.id, 3, "wrong").await.unwrap() })
+            })
+            .collect();
+        let mut compared = 0;
+        for r in runs {
+            if !matches!(r.await.unwrap(), CodeTry::Wait(_)) {
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 2, "the third try starts the wait");
+        clean(&pool, gid).await;
+    }
+
+    /// A redraw that replaces a winner queues the winner role removal for them, and the
+    /// announcement lists them, so they leave the winner thread.
+    #[tokio::test]
+    async fn a_replaced_winner_loses_the_role() {
+        let Some((pool, gid)) = db(8).await else {
+            return;
+        };
+        let n = New {
+            winners: 2,
+            extras: Extras {
+                winner_role: Some(r(44)),
+                ..Extras::default()
+            },
+            ..new(gid)
+        };
+        let g = create(&pool, &n, 25).await.unwrap().unwrap();
+        claim_end(&pool, gid, g.id).await.unwrap().unwrap();
+        assert!(save_draw(
+            &pool,
+            gid,
+            g.id,
+            0,
+            &[5, 6],
+            &[5, 6],
+            "giveaway.winners",
+            false
+        )
+        .await
+        .unwrap());
+        assert!(
+            save_draw(&pool, gid, g.id, 1, &[5, 7], &[7], "giveaway.reroll", false)
+                .await
+                .unwrap()
+        );
+        let off: Vec<serde_json::Value> = sqlx::query_scalar(
+            "SELECT payload FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(gid)
+        .bind(ROLE_OFF_JOB)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(off.len(), 1);
+        assert_eq!(
+            (off[0]["user"].as_i64(), off[0]["role"].as_i64()),
+            (Some(6), Some(44))
+        );
+        let gone: Vec<serde_json::Value> = sqlx::query_scalar(
+            "SELECT payload->'gone' FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2
+             ORDER BY id",
+        )
+        .bind(gid)
+        .bind(ANNOUNCE_JOB)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(gone, [serde_json::json!([]), serde_json::json!([6])]);
+
+        // A remade winner role moves into the extras; an edit keeps reaction entry as posted.
+        let n = New {
+            extras: Extras {
+                winner_role: Some(r(11)),
+                reaction: true,
+                ..Extras::default()
+            },
+            ..new(gid)
+        };
+        let h = create(&pool, &n, 25).await.unwrap().unwrap();
+        relink_roles(&pool, gid, 11, 21).await.unwrap();
+        let x = get(&pool, gid, h.id).await.unwrap().unwrap().extras.0;
+        assert_eq!(x.winner_role, Some(r(21)));
+        let off = Extras {
+            reaction: false,
+            thread: true,
+            ..x
+        };
+        assert_eq!(
+            edit(&pool, gid, h.id, "Nitro", 1, &Req::default(), &off)
+                .await
+                .unwrap(),
+            Ok(true)
+        );
+        let x = get(&pool, gid, h.id).await.unwrap().unwrap().extras.0;
+        assert!(x.reaction && x.thread, "{x:?}");
+        clean(&pool, gid).await;
     }
 }

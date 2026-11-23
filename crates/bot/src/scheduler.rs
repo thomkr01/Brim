@@ -246,6 +246,15 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
             crate::giveaways::action_job(app, gid, &job.payload).await?
         }
         brim_core::giveaways::DM_JOB => crate::giveaways::dm_job(app, gid, &job.payload).await?,
+        brim_core::giveaways::ROLE_OFF_JOB => {
+            crate::giveaways::role_off_job(app, gid, &job.payload).await?
+        }
+        brim_core::giveaways::THREAD_JOB => {
+            crate::giveaways::thread_job(app, gid, &job.payload).await?
+        }
+        brim_core::giveaways::THREAD_CLOSE_JOB => {
+            crate::giveaways::thread_close_job(app, gid, &job.payload).await?
+        }
         brim_core::giveaways::CLAIM_JOB => {
             crate::giveaways::claim_job(app, gid, &job.payload).await?
         }
@@ -487,9 +496,11 @@ async fn round(app: &Arc<App>, lane: jobs::Lane) {
     }
 }
 
-const SPAWNED: [&str; 4] = [
+const SPAWNED: [&str; 5] = [
     // A DM can wait up to 3 s: 100 winner DMs must not hold back unbans and unlocks.
     brim_core::giveaways::DM_JOB,
+    // Up to 100 winners go into a thread one call at a time.
+    brim_core::giveaways::THREAD_JOB,
     crate::joingate::MISSED_REJOINS,
     crate::verify::given::CATCH_UP,
     "permit_sync",
@@ -540,6 +551,9 @@ pub async fn run(app: Arc<App>) {
             tokio::spawn(async move {
                 if let Err(e) = crate::giveaways::sync_pauses(&app).await {
                     tracing::warn!(?e, "the giveaway pause check failed");
+                }
+                if let Err(e) = crate::giveaways::sync_reactions(&app).await {
+                    tracing::warn!(?e, "reading the reaction giveaways failed");
                 }
             });
         }

@@ -140,7 +140,10 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         let claim = data
             .with_untracked(|v| v.as_ref().map(|v| v["limits"]["claim_default"].clone()))
             .unwrap_or_else(|| json!(48));
-        open_form(json!({"id": null, "channel": "", "prize": "", "winners": 1, "req": defaults, "claim_hours": claim}));
+        let extras = data
+            .with_untracked(|v| v.as_ref().map(|v| v["extras"].clone()))
+            .unwrap_or_else(|| json!({}));
+        open_form(json!({"id": null, "channel": "", "prize": "", "winners": 1, "req": defaults, "claim_hours": claim, "extras": extras, "code": ""}));
     };
     let save_form = move || {
         let mut v = d.get_untracked();
@@ -180,11 +183,20 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                 if new && parse_duration(&length.get()).is_none() {
                     return Some("Type how long it runs, for example 2d or 1h 30m.");
                 }
+                if new && v["extras"]["reaction"] == true && !s(&v["code"]).trim().is_empty() {
+                    return Some("An entry code needs the Enter button: turn reaction entry off.");
+                }
                 None
             };
             let num = move |key: &'static str| move |e: leptos::ev::Event| {
                 let n: i64 = event_target_value(&e).parse().unwrap_or(0);
-                d.update(|v| if key == "winners" || key == "claim_hours" { v[key] = json!(n) } else { v["req"][key] = json!(n.max(0)) })
+                d.update(|v| match key {
+                    "winners" | "claim_hours" => v[key] = json!(n),
+                    // An emptied field goes back to the default, not to 1 hour.
+                    "role_hours" => v["extras"][key] = json!(if n < 1 { 168 } else { n }),
+                    "thread_hours" => v["extras"][key] = json!(if n < 1 { 72 } else { n }),
+                    _ => v["req"][key] = json!(n.max(0)),
+                })
             };
             let r = NodeRef::<leptos::html::Div>::new();
             focus_on_open(r);
@@ -221,6 +233,24 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                             <input id="gw-raid" type="checkbox" class="sw" role="switch" prop:checked=move || d.with(|v| v["req"]["block_raid_joiners"] == true) on:change=move |e| { let c = event_target_checked(&e); d.update(|v| v["req"]["block_raid_joiners"] = json!(c)) } /></div>
                         <p class="muted small hint">"Quarantined members, Raider List entries and members the Join Gate caught can never enter."</p>
                         <Extra dc d max=limits["extra"].as_i64().unwrap_or(50) />
+                    </details>
+                    <details class="more"><summary>"Extras"</summary>
+                        <div class="row"><label>"Winner role"</label>
+                            <ListPick items=Signal::derive(move || items(&dc.get(), "roles")) get=Signal::derive(move || d.with(|v| s(&v["extras"]["winner_role"]))) set=Callback::new(move |x: String| d.update(|v| v["extras"]["winner_role"] = if x.is_empty() { Value::Null } else { json!(x) })) none="no role" label="winner role" /></div>
+                        <div class="row"><label for="gw-rolehours">"Keep the role for (hours)"</label>
+                            <input id="gw-rolehours" type="number" min="1" max="8760" prop:value=move || d.with(|v| v["extras"]["role_hours"].as_i64().unwrap_or(168).to_string()) on:change=num("role_hours") /></div>
+                        <div class="row"><label for="gw-thread">"Winner thread"</label>
+                            <input id="gw-thread" type="checkbox" class="sw" role="switch" prop:checked=move || d.with(|v| v["extras"]["thread"] == true) on:change=move |e| { let c = event_target_checked(&e); d.update(|v| v["extras"]["thread"] = json!(c)) } /></div>
+                        <div class="row"><label for="gw-threadhours">"Close the thread after (hours)"</label>
+                            <input id="gw-threadhours" type="number" min="1" max="720" prop:value=move || d.with(|v| v["extras"]["thread_hours"].as_i64().unwrap_or(72).to_string()) on:change=num("thread_hours") /></div>
+                        <p class="muted small hint">"Winners get the role at the draw and lose it after this time. The winner thread is private: the winners, the host and the sponsor. Brim closes it after this time."</p>
+                        {new.then(|| view! {
+                            <div class="row"><label for="gw-react">"Enter by reaction"</label>
+                                <input id="gw-react" type="checkbox" class="sw" role="switch" prop:checked=move || d.with(|v| v["extras"]["reaction"] == true) on:change=move |e| { let c = event_target_checked(&e); d.update(|v| v["extras"]["reaction"] = json!(c)) } /></div>
+                            <div class="row"><label for="gw-code">"Entry code"</label>
+                                <input id="gw-code" maxlength="50" prop:value=move || d.with(|v| s(&v["code"])) on:input=move |e| { let t = event_target_value(&e); d.update(|v| v["code"] = json!(t)) } placeholder="optional" /></div>
+                            <p class="muted small hint">"Reaction: members react with the button emoji instead of the button, and get no private answer. Entry code: members press Enter and type it; 3 wrong codes give a 10 minute wait. Brim keeps only a hash, so you cannot see the code again. Both stay as set once the giveaway starts."</p>
+                        })}
                     </details>
                     <div class="acts">
                         <button class="ghost" on:click=move |_| close()>"Cancel"</button>
@@ -299,6 +329,12 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         });
         if x["paused"] == true {
             line.push("paused".into());
+        }
+        if x["has_code"] == true {
+            line.push("entry code".into());
+        }
+        if x["extras"]["reaction"] == true {
+            line.push("reaction entry".into());
         }
         if running && x["message"].is_null() && x["issue"].is_null() {
             line.push("not posted yet".into());

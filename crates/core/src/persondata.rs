@@ -84,6 +84,7 @@ pub const PLACES: &[Place] = &[
     p("raid_log", "user_id", &[]),
     p("giveaway_entries", "user_id", &[]),
     p("giveaway_claims", "user_id", &[]),
+    p("giveaway_code_tries", "user_id", &[]),
     p("verify_ips", "user_id", &["ip_hash"]),
     p("verify_timeouts", "user_id", &[]),
     Place {

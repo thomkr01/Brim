@@ -452,6 +452,16 @@ pub async fn purge_left(app: std::sync::Arc<App>) {
         if let Err(e) = old {
             tracing::warn!(?e, "pruning old giveaway entries failed");
         }
+        // Wrong entry codes only matter while a giveaway runs.
+        let old = sqlx::query(
+            "DELETE FROM giveaway_code_tries t USING giveaways g
+             WHERE g.id = t.giveaway_id AND g.status <> 'running'",
+        )
+        .execute(&app.pool)
+        .await;
+        if let Err(e) = old {
+            tracing::warn!(?e, "pruning old giveaway code tries failed");
+        }
         let old = sqlx::query(
             "DELETE FROM giveaways WHERE status <> 'running' AND ended_at < now() - interval '90 days'",
         )
