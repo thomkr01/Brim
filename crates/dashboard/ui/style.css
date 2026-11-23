@@ -925,3 +925,5 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 
 /* The front page main box starts exactly at the left edge of the buttons, and the page-wide `main { overflow-x:clip }` cut their focus ring there. The hero clips the page edge itself. */
 .land .hero-body { overflow:visible; }
+/* A field value in a scene is shown as it is typed, as in the editor. */
+.land .pane .tog .chip { text-transform:none; white-space:normal; }
