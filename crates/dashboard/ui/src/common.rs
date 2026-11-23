@@ -1090,6 +1090,25 @@ pub fn AddButton(label: &'static str, #[prop(optional)] class: &'static str) -> 
     view! { <button class=format!("add {class}")><span class="plus" aria-hidden="true">"+"</span>{label}</button> }
 }
 
+/// The row that opens and closes a group (Default messages areas, saved message categories): a card row with
+/// an optional icon and line, the count and the arrow. Other attributes (`on:keydown`, `attr:...`) go to the button.
+#[component]
+pub fn HubRow(
+    #[prop(into)] label: String,
+    n: usize,
+    #[prop(into)] open: Signal<bool>,
+    #[prop(into)] flip: Callback<()>,
+    #[prop(optional)] line: Option<&'static str>,
+    #[prop(optional)] ico: Option<&'static str>,
+) -> impl IntoView {
+    view! { <button class="card hub" class:sub=ico.is_none() class:on=open aria-expanded=move || open.get().to_string() on:click=move |_| flip.run(())>
+        {ico.map(|i| view! { <span class="ico">{crate::icons::icon(i)}</span> })}
+        <span class="txt"><b>{label}</b>{line.map(|l| view! { <span class="muted">{l}</span> })}</span>
+        <span class="chip">{n.to_string()}</span>
+        <span class="chev">{crate::icons::icon("chevron_right")}</span>
+    </button> }
+}
+
 /// The three grey lines on a sortable row (design rule "Sortable list"). A mouse drags the whole row (native drag
 /// on the row); a finger drags from these lines only, so the rest of the row still scrolls the page.
 /// shortcut: the finger drag is provisional (owner decision 2026-11-20); to remove it, delete the pointer handlers and `.touch-grip`.

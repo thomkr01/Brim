@@ -566,6 +566,7 @@ One backup opened inside the Backups page from a signal: the page drew a second 
 The dashboard used fixed pixel sizes, so on a 2560 px monitor the page was a small column of 14 px text.
 
 **Rule:** the screen scale is one `zoom` on `#app` (`--z` is set on `:root`), stepped by window width through `--z` (`design/README.md`, "Screen scale"). Chrome and Firefox do not zoom `vw` and `vh`, so a bare `100vh` is `--z` times too tall; use `calc(N * var(--vh))` / `var(--vw)`. Window coordinates (`getBoundingClientRect`, `client_x`, `scroll_y`, `inner_width`) are real pixels while a `left`, `top` or `--dx` set from them is a zoomed length: divide by `screen_zoom` (`common.rs`) or the popup lands `--z` times too far (tooltips, the message editor's emoji and variable menus). Ratios inside one rectangle (the colour picker) are fine. `tools/ui-sizes.mjs` fails on a bare `vw`/`vh` and on a second `zoom` in `style.css`.
+
 ## Each list drew its own hover and drag look (sortable list, 2026-11-20)
 
 The saved messages list had an orange outline on hover, Channel Setup a background only, and Permits up and down buttons: three looks for one idea, and orange on hover said "selected" when nothing was. Native HTML drag also does nothing on a touch screen, so a whole-row drag can not be the phone way.
@@ -581,6 +582,7 @@ Four faults from one screenshot, three root causes.
 3. **A grey "Type the YouTube channel." line read like an error and moved the buttons.** A missing field is said once, on the field's own hint line and on the disabled button's tooltip, never as a line between the form and its buttons.
 
 **Also:** the add form asks for one link. `guess_kind` (`feeds.rs`) names the source from it (YouTube @handle, channel id or youtube.com page; github.com; gitlab.com; else RSS). YouTube's own `/feeds/` links are RSS. A self-hosted GitLab cannot be told from a website, so "More options" keeps a Source list (Detect from the link, RSS or Atom, YouTube, GitHub, GitLab). The server still gets an explicit `kind`, so no safety rule changed.
+
 ## Fields that a password manager takes for a login
 
 1Password (and LastPass, Bitwarden, Dashlane) guess a login form from field names, search boxes and code fields, with no password field present. It then offered "Sign in" on most pages (Bot Profile has a "Bot name" field and a search box). The dashboard has no login form: sign-in is Discord OAuth.
@@ -830,6 +832,11 @@ The owner saw the new scene sit a little to the right while it moved, with no re
 The white layer of a pressed front page button (`::before`, `z-index:-1`) lay over the button's own fill, because the press transform makes the button a stacking context. Light labels became white on white. Fixed by removing the layer.
 
 **Rule:** a state that changes a button's fill sets the label colour with it. Look at the pressed, hover and focus still of every button style in both browsers before reporting.
+
 ## A list that redraws on every change (2026-11-23)
 
 **After a keyboard move the open categories closed and the focus was lost.** The page's `list` closure read the row count, so each change of the rows built the list component again, with new state. Read only what decides the layout (a `Memo` of "any rows"), keep the screen reader's live region outside the redrawn part, and after a move put the focus back on the moved row. Fixed in `ui/src/embeds.rs` and `ui/src/msgcats.rs`.
+
+## A copy of a shared part (2026-11-23)
+
+**The saved message categories got their own copy of the Default messages group opener.** The markup and class names matched, but it was a second copy with a grip and a row of labeled pill buttons added, so the owner saw a new design for a job that already had one. Before a new row, opener, list or button, find the page that already does the job and use its component; if it is a local closure there, move it to `common.rs` first (as `HubRow`) and use it on both pages. Extra controls on a shared part stay as quiet as the page's existing ones (icon buttons with a title, like the message row actions).

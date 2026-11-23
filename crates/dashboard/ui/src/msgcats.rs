@@ -67,6 +67,33 @@ pub fn moved(
     Some((order, cats))
 }
 
+/// An arrow key on message `from`: one place up or down inside its category; past the edge it goes
+/// to the end (up) or the start (down) of the next category on the page, also an empty one.
+pub fn step(mut order: Vec<(String, String)>, cats: Vec<String>, from: usize, down: bool) -> Option<Order> {
+    let mut m = order.get(from)?.clone();
+    let seq: Vec<String> = cats.iter().cloned().chain([String::new()]).collect();
+    let same: Vec<usize> = (0..order.len()).filter(|&i| order[i].1 == m.1).collect();
+    let k = same.iter().position(|&i| i == from)?;
+    let next = if down { same.get(k + 1) } else { k.checked_sub(1).and_then(|k| same.get(k)) };
+    if let Some(&to) = next {
+        order.swap(from, to);
+        return Some((order, cats));
+    }
+    let c = seq.iter().position(|c| *c == m.1)?;
+    let c = if down { c + 1 } else { c.checked_sub(1)? };
+    m.1 = seq.get(c)?.clone();
+    order.remove(from);
+    let at = if down {
+        order.iter().position(|o| o.1 == m.1).unwrap_or(order.len())
+    } else {
+        order.iter().rposition(|o| o.1 == m.1).map_or(order.len(), |i| i + 1)
+    };
+    order.insert(at, m);
+    // Keep the list grouped as the page shows it (an empty category had no place yet).
+    order.sort_by_key(|o| seq.iter().position(|c| *c == o.1));
+    Some((order, cats))
+}
+
 /// The grouped list. `row` draws one message row; `changed` reloads the page's lists.
 #[component]
 pub fn Grouped(
@@ -84,13 +111,17 @@ pub fn Grouped(
     // What a screen reader hears after a move.
     let said = RwSignal::new(String::new());
     let base = move || format!("/api/guilds/{}/message-categories", guild.get_value());
-    let place = move |(from, to): (usize, usize)| {
+    // `key`: an arrow key on a message (Some(down)), else a drop of `from` on `to`.
+    let go = move |from: usize, to: usize, key: Option<bool>| {
         let ids = cats.with_untracked(|c| c.iter().map(|x| x["id"].as_str().unwrap_or("").to_string()).collect());
         let order = rows.with_untracked(|r| cats.with_untracked(|c| flat(r, c)));
         let n = order.len();
         let who = order.get(from).map(|m| m.0.clone());
-        let Some((order, ids)) = moved(order, ids, (from, to)) else { return };
-        // The place a person sees: among the categories, or inside the message's category.
+        let new = match key {
+            Some(down) => step(order, ids, from, down),
+            None => moved(order, ids, (from, to)),
+        };
+        let Some((order, ids)) = new else { return };
         let new_i = match &who {
             Some(w) if from < n => order.iter().position(|m| &m.0 == w).unwrap_or(0),
             _ => to,
@@ -145,6 +176,7 @@ pub fn Grouped(
             }
         });
     };
+    let place = move |(from, to): (usize, usize)| go(from, to, None);
     let rename = move |id: String, name: String| {
         ask(Ask::new("Rename category").yes("Rename").input(name), move |to| {
             spawn_local(async move {
@@ -193,9 +225,9 @@ pub fn Grouped(
                     on:drop=move |e| { e.prevent_default(); if let Some(d) = drag.get_untracked() { place((d, i)) } drag.set(None); over.set(None) }
                     on:keydown=move |e| {
                         if e.target() != e.current_target() { return; }
-                        let to = match e.key().as_str() { "ArrowUp" if i > 0 => i - 1, "ArrowDown" if i + 1 < n => i + 1, _ => return };
+                        let down = match e.key().as_str() { "ArrowUp" => false, "ArrowDown" => true, _ => return };
                         e.prevent_default();
-                        place((i, to));
+                        go(i, i, Some(down));
                     }
                     tabindex="0" aria-describedby="msort-hint">
                     <Grip i drag over drop=Callback::new(place) />
@@ -238,26 +270,22 @@ pub fn Grouped(
                         on:dragend=move |_| { drag.set(None); over.set(None) }
                         on:drop=move |e| { e.prevent_default(); if let (Some(d), Some(h)) = (drag.get_untracked(), head_i) { place((d, h)) } drag.set(None); over.set(None) }>
                         {head_i.map(|h| view! { <Grip i=h drag over drop=Callback::new(place) /> })}
-                        <button class="card hub sub" class:on=open aria-expanded=move || open().to_string()
-                            aria-describedby=head_i.map(|_| "msort-hint")
-                            on:keydown=move |e| if let Some(h) = head_i {
+                        <HubRow label=name n=count open=Signal::derive(open)
+                            flip=Callback::new(move |_| opened.update(|o| if !o.remove(&key2) { o.insert(key2.clone()); }))
+                            attr:aria-describedby=head_i.map(|_| "msort-hint")
+                            on:keydown=move |e: web_sys::KeyboardEvent| if let Some(h) = head_i {
                                 let to = match e.key().as_str() { "ArrowUp" if h > n => h - 1, "ArrowDown" if h + 1 < n + ncats => h + 1, _ => return };
                                 e.prevent_default();
                                 place((h, to));
-                            }
-                            on:click=move |_| opened.update(|o| if !o.remove(&key2) { o.insert(key2.clone()); })>
-                            <span class="txt"><b>{name}</b></span>
-                            <span class="chip">{count.to_string()}</span>
-                            <span class="chev">{crate::icons::icon("chevron_right")}</span>
-                        </button>
+                            } />
                     </div>
                     <Show when=open>
                         {k.map(|_| { let (a, b, c, d) = (id2.clone(), name2.clone(), id3.clone(), name3.clone()); view! { <div class="mcattools">
-                            <button class="ghost" on:click=move |_| rename(a.clone(), b.clone())>{crate::icons::icon("edit")}"Rename"</button>
-                            <button class="ghost" on:click=move |_| delete(c.clone(), d.clone())>{crate::icons::icon("trash")}"Delete category"</button>
+                            <button class="ghost" title="Rename category" aria-label="Rename category" on:click=move |_| rename(a.clone(), b.clone())>{crate::icons::icon("edit")}</button>
+                            <button class="ghost" title="Delete category" aria-label="Delete category" on:click=move |_| delete(c.clone(), d.clone())>{crate::icons::icon("trash")}</button>
                         </div> } })}
                         <div class="mlist msorted">{items.clone().into_iter().map(|(i, m)| line(i, m)).collect_view()}</div>
-                        {items.is_empty().then(|| view! { <p class="muted">"No messages here yet. Drag a message onto this row to move it here."</p> })}
+                        {items.is_empty().then(|| view! { <p class="muted">"No messages here yet. Drag one here, or move one with the arrow keys."</p> })}
                     </Show>
                 </div>
             })
@@ -297,7 +325,7 @@ pub fn tools(guild: StoredValue<String>, rows: RwSignal<Vec<Value>>, cats: RwSig
 
 #[cfg(test)]
 mod tests {
-    use super::moved;
+    use super::{moved, step};
 
     fn o(v: &[(&str, &str)]) -> Vec<(String, String)> {
         v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
@@ -324,5 +352,25 @@ mod tests {
         assert_eq!(c, ["b", "a"]);
         assert!(moved(order.clone(), cats.clone(), (3, 0)).is_none());
         assert!(moved(order, cats, (1, 1)).is_none());
+    }
+
+    #[test]
+    fn arrow_keys_reach_every_category() {
+        let order = o(&[("1", "a"), ("2", "a"), ("3", "")]);
+        let cats = vec!["a".to_string(), "b".to_string()];
+        // Inside a category: a swap.
+        let (r, _) = step(order.clone(), cats.clone(), 0, true).unwrap();
+        assert_eq!(r, o(&[("2", "a"), ("1", "a"), ("3", "")]));
+        // Down past the end of a: into the empty b.
+        let (r, _) = step(order.clone(), cats.clone(), 1, true).unwrap();
+        assert_eq!(r, o(&[("1", "a"), ("2", "b"), ("3", "")]));
+        // Up from the top of Uncategorized: into the empty b, then to the end of a.
+        let (r, c) = step(order.clone(), cats.clone(), 2, false).unwrap();
+        assert_eq!(r, o(&[("1", "a"), ("2", "a"), ("3", "b")]));
+        let (r, _) = step(r, c, 2, false).unwrap();
+        assert_eq!(r, o(&[("1", "a"), ("2", "a"), ("3", "a")]));
+        // Down past the last category: Uncategorized; past that, nothing.
+        assert!(step(order.clone(), cats.clone(), 2, true).is_none());
+        assert!(step(order, cats, 0, false).is_none());
     }
 }

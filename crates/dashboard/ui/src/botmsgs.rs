@@ -574,16 +574,15 @@ pub fn BotMessages(
                             </div>
                         }
                 };
-                // A card row that opens and closes its part, like the hub rows on the Messages page.
+                // The shared group opener (`HubRow`), also used by the saved message categories.
                 let head = move |id: String, label: String, n: usize, line: Option<&'static str>, ico: Option<&'static str>| {
                     let id = StoredValue::new(id);
-                    let open_now = move || id.with_value(|i| is_open(i));
-                    view! { <button class="card hub" class:sub=ico.is_none() class:on=open_now aria-expanded=move || open_now().to_string() on:click=move |_| id.with_value(|i| flip(i))>
-                        {ico.map(|i| view! { <span class="ico">{crate::icons::icon(i)}</span> })}
-                        <span class="txt"><b>{label}</b>{line.map(|l| view! { <span class="muted">{l}</span> })}</span>
-                        <span class="chip">{n.to_string()}</span>
-                        <span class="chev">{crate::icons::icon("chevron_right")}</span>
-                    </button> }
+                    let open = Signal::derive(move || id.with_value(|i| is_open(i)));
+                    let flip = Callback::new(move |_| id.with_value(|i| flip(i)));
+                    match (line, ico) {
+                        (Some(line), Some(ico)) => view! { <HubRow label n open flip line ico /> }.into_any(),
+                        _ => view! { <HubRow label n open flip /> }.into_any(),
+                    }
                 };
                 shown.into_iter().map(|(area, subs)| {
                     let n: usize = subs.iter().map(|s| s.1.len()).sum();
