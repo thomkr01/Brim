@@ -4594,6 +4594,7 @@ fn giveaways(out: &mut Vec<Def>) {
             "host",
             "sponsor",
             "sponsor_picture",
+            "banner",
             "entries",
             "winners",
             "note",
@@ -4601,7 +4602,7 @@ fn giveaways(out: &mut Vec<Def>) {
         ],
         &["prize", "winners"],
         pictures(
-            false,
+            true,
             card(
                 "{prize}",
                 GREY,
@@ -7245,7 +7246,7 @@ mod tests {
         // A picture link that is not a web link is never sent.
         let m = render("giveaway.running", None, &vars("javascript:x", ""));
         assert!(m["embeds"][0]["thumbnail"].is_null());
-        // Ended and cancelled cards keep the sponsor's picture and have no banner.
+        // The ended card has its own banner slot (empty here); the cancelled card has none.
         let m = render(
             "giveaway.ended",
             None,

@@ -326,15 +326,17 @@ async fn sponsor_picture(app: &App, sponsor: Option<i64>) -> String {
 }
 
 /// The banner link for the server's choice (`a`, `b`, `c`; anything else, none), served by the
-/// dashboard like its other pictures. Empty (no picture) without an https dashboard address.
-fn banner(choice: &str) -> String {
-    banner_at(choice, crate::general::dashboard())
+/// dashboard like its other pictures; the ended message has the matching ended banner. Empty (no
+/// picture) without an https dashboard address.
+fn banner(choice: &str, ended: bool) -> String {
+    banner_at(choice, crate::general::dashboard(), ended)
 }
 
-fn banner_at(choice: &str, base: Option<String>) -> String {
+fn banner_at(choice: &str, base: Option<String>, ended: bool) -> String {
+    let part = if ended { "ended-" } else { "" };
     match (choice, base) {
         ("a" | "b" | "c", Some(d)) if d.starts_with("https://") => {
-            format!("{}/giveaway-{choice}.png", d.trim_end_matches('/'))
+            format!("{}/giveaway-{part}{choice}.png", d.trim_end_matches('/'))
         }
         _ => String::new(),
     }
@@ -348,12 +350,17 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let entries = entries.to_string();
     let picture = sponsor_picture(app, g.sponsor_id).await;
+    let choice = match g.status.as_str() {
+        "running" | "ended" => app
+            .cfg(g.guild_id as u64)
+            .await
+            .map(|c| c.giveaways.banner.clone()),
+        _ => Ok(String::new()),
+    }
+    .unwrap_or_default();
     match g.status.as_str() {
         "running" => {
-            let banner = match app.cfg(g.guild_id as u64).await {
-                Ok(c) => banner(&c.giveaways.banner),
-                Err(_) => String::new(),
-            };
+            let banner = banner(&choice, false);
             let (winners, req) = (g.winners.to_string(), requirements(g));
             let vars = [
                 ("prize", g.prize.as_str()),
@@ -381,12 +388,14 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 false => winners_text(&g.winner_ids),
             };
             let note = ended_note(g);
+            let banner = banner(&choice, true);
             let vars = [
                 ("prize", g.prize.as_str()),
                 ("ended", &ended),
                 ("host", &host),
                 ("sponsor", &sponsor),
                 ("sponsor_picture", &picture),
+                ("banner", &banner),
                 ("entries", &entries),
                 ("winners", &winners),
                 ("note", &note),
@@ -2988,13 +2997,20 @@ mod tests {
     fn banner_link_needs_a_choice_and_an_https_dashboard() {
         let site = || Some("https://brim.example/".to_string());
         assert_eq!(
-            banner_at("b", site()),
+            banner_at("b", site(), false),
             "https://brim.example/giveaway-b.png"
         );
-        assert_eq!(banner_at("none", site()), "");
-        assert_eq!(banner_at("../x", site()), "");
-        assert_eq!(banner_at("a", None), "");
-        assert_eq!(banner_at("a", Some("http://brim.example".into())), "");
+        assert_eq!(banner_at("none", site(), false), "");
+        assert_eq!(banner_at("../x", site(), false), "");
+        assert_eq!(
+            banner_at("c", site(), true),
+            "https://brim.example/giveaway-ended-c.png"
+        );
+        assert_eq!(banner_at("a", None, false), "");
+        assert_eq!(
+            banner_at("a", Some("http://brim.example".into()), false),
+            ""
+        );
     }
     use super::*;
 

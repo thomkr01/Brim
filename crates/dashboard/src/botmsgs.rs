@@ -99,7 +99,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         .map(|p| format!("**{}**\n{}", p.name, p.description))
         .collect::<Vec<_>>()
         .join("\n\n");
-    let banner = banner_example(&cfg, &std::env::var("DASHBOARD_URL").unwrap_or_default());
+    let site = std::env::var("DASHBOARD_URL").unwrap_or_default();
     let added = added_buttons(&st, guild, &tickets).await?;
     let rows: Vec<Value> = botmsg::defs()
         .iter()
@@ -113,6 +113,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                     let (label, example) = botmsg::var_info(&d.key, v);
                     let example = if is_log_type(d, v) { &d.name } else { example };
                     let example = if d.key == "ticket.panel" && *v == "text" && !panel_text.is_empty() { panel_text.as_str() } else { example };
+                    let banner = banner_example(&cfg, &site, &d.key);
                     let example = if *v == "banner" { banner.as_str() } else { example };
                     json!({"name": v, "label": label, "example": example})
                 })
@@ -218,7 +219,11 @@ async fn shown(
     let mut ex = examples(d, &server);
     // The giveaway banner the server chose (none: no picture), as members see it.
     if let Some(b) = ex.iter_mut().find(|(k, _)| *k == "banner") {
-        b.1 = banner_example(&cfg, &std::env::var("DASHBOARD_URL").unwrap_or_default());
+        b.1 = banner_example(
+            &cfg,
+            &std::env::var("DASHBOARD_URL").unwrap_or_default(),
+            &key,
+        );
     }
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = botmsg::render(&key, stored.as_ref(), &vars);
@@ -665,10 +670,15 @@ fn is_log_type(d: &botmsg::Def, var: &str) -> bool {
 
 /// The link of the banner the server chose, for the examples in the editor and the preview;
 /// empty when it chose none (or the dashboard has no address).
-fn banner_example(cfg: &Value, site: &str) -> String {
+fn banner_example(cfg: &Value, site: &str, key: &str) -> String {
+    let part = if key == "giveaway.ended" {
+        "ended-"
+    } else {
+        ""
+    };
     match cfg["giveaways"]["banner"].as_str().unwrap_or("a") {
         p @ ("a" | "b" | "c") if !site.is_empty() => {
-            format!("{}/giveaway-{p}.png", site.trim_end_matches('/'))
+            format!("{}/giveaway-{part}{p}.png", site.trim_end_matches('/'))
         }
         _ => String::new(),
     }
@@ -787,11 +797,25 @@ mod tests {
     #[test]
     fn the_banner_example_follows_the_server_choice() {
         let site = "https://brim.example/";
-        let b = |v: Value| banner_example(&json!({"giveaways": {"banner": v}}), site);
+        let b = |v: Value| {
+            banner_example(
+                &json!({"giveaways": {"banner": v}}),
+                site,
+                "giveaway.running",
+            )
+        };
         assert_eq!(b(json!("c")), "https://brim.example/giveaway-c.png");
         assert_eq!(b(json!("none")), "");
         assert_eq!(
-            banner_example(&json!({}), site),
+            banner_example(
+                &json!({"giveaways": {"banner": "b"}}),
+                site,
+                "giveaway.ended"
+            ),
+            "https://brim.example/giveaway-ended-b.png"
+        );
+        assert_eq!(
+            banner_example(&json!({}), site, "giveaway.running"),
             "https://brim.example/giveaway-a.png"
         );
     }
