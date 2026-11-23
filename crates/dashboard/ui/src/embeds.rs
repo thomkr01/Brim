@@ -68,15 +68,27 @@ fn blank() -> Value {
 }
 
 /// An embed with nothing but a colour is left out on save, so a text-only message stays text only.
+fn has_content(e: &Value) -> bool {
+    e.as_object().is_some_and(|o| o.keys().any(|k| k != "color"))
+}
+
 fn body_to_save(c: &Value) -> Value {
     let mut b = c["body"].clone();
     if let Some(a) = b["embeds"].as_array_mut() {
-        a.retain(|e| {
-            e.as_object()
-                .is_some_and(|o| o.keys().any(|k| k != "color"))
-        });
+        a.retain(has_content);
     }
     b
+}
+
+/// The preview of the editor's own message: each embed knows its place in the editor (`_i`, as
+/// colour-only embeds are left out) and the preview marks its parts as click-to-edit.
+fn editable(c: &Value, mut msg: Value) -> Value {
+    let kept = c["body"]["embeds"].as_array().into_iter().flatten().enumerate().filter(|(_, e)| has_content(e)).map(|(i, _)| i);
+    for (e, i) in msg["embeds"].as_array_mut().into_iter().flatten().zip(kept) {
+        e["_i"] = json!(i);
+    }
+    msg["_edit"] = json!(true);
+    msg
 }
 
 /// `msg` with the buttons Brim adds itself (`c["added"]`, rows as Discord takes them), marked so
@@ -126,6 +138,9 @@ pub fn split(
         </div>
     }.into_any()
 }
+
+/// The preview card is this wide (px) or more: the phone preview sits beside the desktop one.
+const BOTH_WIDTH: i32 = 940;
 
 /// What a save compares: the parts the user edits.
 fn snapshot(c: &Value) -> Value {
@@ -380,6 +395,7 @@ fn Ed(
     answer: bool,
 ) -> impl IntoView {
     let el = NodeRef::<leptos::html::Div>::new();
+    let at = ptr.clone();
     let p = StoredValue::new(ptr);
     let parts = use_context::<Parts>();
     let seen = StoredValue::new(0u32);
@@ -443,7 +459,7 @@ fn Ed(
     let over = move || val.with(|v| v.chars().count() > max);
     let title = move || over().then(|| format!("Longer than {max} characters"));
     view! {
-        <div node_ref=el class="ed" contenteditable="true" spellcheck="false" role="textbox" aria-label=ph data-ph=ph
+        <div node_ref=el class="ed" contenteditable="true" spellcheck="false" role="textbox" aria-label=ph data-ph=ph data-ptr=at
             aria-multiline=multi.to_string() data-md=md.then_some("") data-answer=answer.then_some("")
             class:need=move || over() || (req && val.with(|v| v.trim().is_empty())) title=title
             on:input=input on:keydown=key on:paste=paste
@@ -512,6 +528,46 @@ fn preview_click(e: ev::MouseEvent) {
         e.prevent_default();
         open_link(url);
     }
+}
+
+/// Click-to-edit: a click on a part of the preview (marked `data-p` or `data-b`) opens the editor
+/// on that part, the same text box or button popup the editor has. Links in the text, spoilers and
+/// menus keep working as in Discord. Returns true when the click was taken.
+fn preview_edit(e: &ev::MouseEvent, ed: Editor) -> bool {
+    let Some(t) = e.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()) else { return false };
+    let near = |s: &str| t.closest(s).ok().flatten();
+    if ed.edit.get_untracked().is_none() || near(".spoiler, a[href], .dmenu, [data-dismiss]").is_some() {
+        return false;
+    }
+    let Some(sel) = near("[data-p]")
+        .and_then(|p| p.get_attribute("data-p"))
+        .map(|k| ("data-ptr", k))
+        .or_else(|| near("[data-b]").and_then(|b| b.get_attribute("data-b")).map(|k| ("data-b", k)))
+        .filter(|(_, k)| k.bytes().all(|b| b.is_ascii_alphanumeric() || b"/:_-".contains(&b)))
+        .map(|(a, k)| format!(".live [{a}=\"{k}\"]"))
+    else {
+        return false;
+    };
+    e.prevent_default();
+    ed.json_view.set(false);
+    ed.pop.set(None);
+    ed.edit.set(Some(true));
+    request_animation_frame(move || {
+        let Some(el) = document().query_selector(&sel).ok().flatten() else { return };
+        let o = web_sys::ScrollIntoViewOptions::new();
+        o.set_behavior(web_sys::ScrollBehavior::Smooth);
+        o.set_block(web_sys::ScrollLogicalPosition::Center);
+        el.scroll_into_view_with_scroll_into_view_options(&o);
+        match el.dyn_into::<web_sys::HtmlElement>() {
+            Ok(h) if h.tag_name() == "BUTTON" => h.click(),
+            Ok(h) => {
+                let _ = h.focus();
+                cursor_to_end(&h);
+            }
+            Err(_) => {}
+        }
+    });
+    true
 }
 
 /// The preview's menus act as in Discord: a click opens one, a pick shows its answer only to the
@@ -1330,7 +1386,7 @@ impl Editor {
                     let emo = move || cur.with(|c| c.pointer(&format!("/body/components/{r}/components/{b}/emoji")).cloned()).filter(|e| !e.is_null());
                     let ready = move || !get("action").is_empty();
                     let style = move || cur.with(|c| c.pointer(&format!("/body/components/{r}/components/{b}/style")).and_then(Value::as_u64));
-                    view! { <button class="dbtn link-b" class:primary=move || style() == Some(1) class:success=move || style() == Some(3) class:need=move || get("label").trim().is_empty() || (!ready() && !https(&get("url"))) on:click=move |e| open_pop(e, Pop::Button(r, b))>
+                    view! { <button class="dbtn link-b" data-b=format!("{r}:{b}") class:primary=move || style() == Some(1) class:success=move || style() == Some(3) class:need=move || get("label").trim().is_empty() || (!ready() && !https(&get("url"))) on:click=move |e| open_pop(e, Pop::Button(r, b))>
                         {move || emo().map(|e| crate::msgparts::face(Some(e)))}
                         {move || { let l = get("label"); if l.is_empty() { "Button".to_string() } else { l } }}{move || (!ready()).then_some(" ↗")}</button> }
                 }).collect_view()}
@@ -1401,20 +1457,37 @@ impl Editor {
             }
         };
         let preview_tab = move || {
+            // Wide enough for both: the phone preview sits beside the desktop one and the toggle goes.
+            let card = NodeRef::<leptos::html::Div>::new();
+            let both = RwSignal::new(false);
+            let measure = move || if let Some(c) = card.get_untracked() { both.set(c.client_width() >= BOTH_WIDTH) };
+            Effect::new(move |_| {
+                edit.track();
+                request_animation_frame(measure);
+            });
+            let resize = window_event_listener(ev::resize, move |_| measure());
+            on_cleanup(move || resize.remove());
+            let pane = move |phone: bool, note: bool| view! {
+                <div class="pvwrap" class:phone=phone class:can=move || edit.get().is_some()
+                    on:click=move |e| if !preview_edit(&e, self) { preview_menu(e, answer) }>
+                    {move || cur.with(|c| crate::discord::bot(&with_added(c, editable(c, crate::msgparts::examples(&body_to_save(c))))))}
+                    {move || note.then(|| cur.with(added_notice))}
+                    {move || answer.get().and_then(|(r, o)| cur.with(|c| c.pointer(&format!("/body/components/{r}/components/0/options/{o}/answer")).cloned()))
+                        .map(|a| crate::discord::bot(&json!({"content": crate::msgparts::examples(&a), "flags": 64})))}
+                </div>
+            };
             view! {
-                <div class="card mcard">
-                    <div class="pvtop"><h2>"As members see it"</h2><span class="muted small">"Links, menus and spoilers work here. Variables show example values."</span><span class="sp"></span>
+                <div node_ref=card class="card mcard pvcard">
+                    <div class="pvtop"><h2>"As members see it"</h2><span class="muted small">"Click a part to edit it. Links in the text, menus and spoilers work here. Variables show example values."</span><span class="sp"></span>
                         {move || (edit.get() == Some(false)).then(|| view! { <button class="editbtn" on:click=move |_| edit.set(Some(true))>{crate::icons::icon("edit")}"Edit message"</button> })}
-                        <div class="seg" role="group" aria-label="preview width">
+                        {move || (!both.get()).then(|| view! { <div class="seg" role="group" aria-label="preview width">
                             <button class:on=move || !phone.get() on:click=move |_| phone.set(false)>"Desktop"</button>
                             <button class:on=move || phone.get() on:click=move |_| phone.set(true)>"Phone"</button>
-                        </div>
+                        </div> })}
                     </div>
-                    <div class="pvwrap" class:phone=move || phone.get() on:click=move |e| preview_menu(e, answer)>
-                        {move || cur.with(|c| crate::discord::bot(&with_added(c, crate::msgparts::examples(&body_to_save(c)))))}
-                        {move || cur.with(added_notice)}
-                        {move || answer.get().and_then(|(r, o)| cur.with(|c| c.pointer(&format!("/body/components/{r}/components/0/options/{o}/answer")).cloned()))
-                            .map(|a| crate::discord::bot(&json!({"content": crate::msgparts::examples(&a), "flags": 64})))}
+                    <div class:pvboth=move || both.get()>
+                        {move || { let ph = !both.get() && phone.get(); pane(ph, true) }}
+                        {move || both.get().then(|| view! { <div class="pvside">{pane(true, false)}</div> })}
                     </div>
                 </div>
             }

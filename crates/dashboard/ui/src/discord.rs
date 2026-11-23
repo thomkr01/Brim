@@ -178,7 +178,7 @@ pub fn chat(author: &str, body: AnyView) -> AnyView {
     view! { <div class="dmsg"><i class="user">{first}</i><div><b>{author.to_string()}</b>" "<small class="muted">{now()}</small><div class="blk">{body}</div></div></div> }.into_any()
 }
 
-fn button(b: &Value) -> AnyView {
+fn button(b: &Value, at: Option<(usize, usize)>) -> AnyView {
     let style = match b["style"].as_u64() {
         Some(1) => "primary",
         Some(3) => "success",
@@ -191,7 +191,9 @@ fn button(b: &Value) -> AnyView {
     let url = b["url"].as_str().filter(|_| b["added"] != true).map(String::from);
     let added = b["added"] == true;
     let id = b["custom_id"].as_str().filter(|_| !added).map(String::from);
-    view! { <span class=format!("dbtn blk {style}") class:added=added data-url=url data-id=id><span inner_html=emoji />{b["label"].as_str().unwrap_or("").to_string()}{link.then_some(" ↗")}</span> }.into_any()
+    // `data-b`: the button's row and place, for click-to-edit (never on a button Brim adds).
+    let at = at.filter(|_| !added).map(|(r, i)| format!("{r}:{i}"));
+    view! { <span class=format!("dbtn blk {style}") class:added=added data-url=url data-id=id data-b=at><span inner_html=emoji />{b["label"].as_str().unwrap_or("").to_string()}{link.then_some(" ↗")}</span> }.into_any()
 }
 
 /// A button's or menu option's emoji as HTML: the image of a custom one, else the character.
@@ -227,6 +229,8 @@ fn menu(r: usize, m: &Value) -> AnyView {
 }
 
 fn embed(e: &Value) -> AnyView {
+    // `_i`: the embed's place in the editor's message; it makes each part click-to-edit (`data-p`).
+    let dp = |part: &str| e["_i"].as_u64().map(|k| format!("/body/embeds/{k}{part}"));
     let s = |p: &str| {
         p.split('.')
             .fold(e, |v, k| &v[k])
@@ -257,19 +261,19 @@ fn embed(e: &Value) -> AnyView {
             {(!img("thumbnail.url").is_empty()).then(|| view! { <span class="thumbslot"><img class="thumbimg" src=img("thumbnail.url") alt="" /></span> })}
             {(!s("author.name").is_empty()).then(|| view! { <small class="author blk">
                 {(!img("author.icon_url").is_empty()).then(|| view! { <img class="ico" src=img("author.icon_url") alt="" /> })}
-                <b class:link=!s("author.url").is_empty() data-url=Some(s("author.url")).filter(|u| !u.is_empty())>{s("author.name")}</b></small> })}
-            {(!s("title").is_empty()).then(|| view! { <b class="blk" class:link=!s("url").is_empty() data-url=Some(s("url")).filter(|u| !u.is_empty()) inner_html=crate::icons::fill_tags(&inline(&esc(&s("title")))) /> })}
-            {(!s("description").is_empty()).then(|| view! { <div class="md" inner_html=md(&s("description")) /> })}
+                <b class:link=!s("author.url").is_empty() data-url=Some(s("author.url")).filter(|u| !u.is_empty()) data-p=dp("/author/name")>{s("author.name")}</b></small> })}
+            {(!s("title").is_empty()).then(|| view! { <b class="blk" class:link=!s("url").is_empty() data-url=Some(s("url")).filter(|u| !u.is_empty()) data-p=dp("/title") inner_html=crate::icons::fill_tags(&inline(&esc(&s("title")))) /> })}
+            {(!s("description").is_empty()).then(|| view! { <div class="md" data-p=dp("/description") inner_html=md(&s("description")) /> })}
             {e["fields"].as_array().filter(|f| !f.is_empty()).map(|fs| {
                 let inl: Vec<bool> = fs.iter().map(|f| f["inline"] == true).collect();
                 view! { <div class="fields">{field_rows(&inl, !img("thumbnail.url").is_empty()).into_iter().flat_map(|r| {
                     let span = 12 / r.len();
                     r.into_iter().map(move |i| (i, span))
                 }).map(|(i, span)| { let f = &fs[i]; view! {
-                    <div class="blk" style=format!("grid-column:span {span}")><b inner_html=crate::icons::fill_tags(&inline(&esc(f["name"].as_str().unwrap_or("")))) /><div class="md" inner_html=md(f["value"].as_str().unwrap_or("")) /></div> } }).collect_view()}</div> }
+                    <div class="blk" style=format!("grid-column:span {span}")><b data-p=dp(&format!("/fields/{i}/name")) inner_html=crate::icons::fill_tags(&inline(&esc(f["name"].as_str().unwrap_or("")))) /><div class="md" data-p=dp(&format!("/fields/{i}/value")) inner_html=md(f["value"].as_str().unwrap_or("")) /></div> } }).collect_view()}</div> }
             })}
             {(!image.is_empty()).then(|| view! { <img src=image alt="" /> })}
-            {(!footer.is_empty()).then(|| view! { <small class="muted author blk">
+            {(!footer.is_empty()).then(|| view! { <small class="muted author blk" data-p=dp("/footer/text")>
                 {(!img("footer.icon_url").is_empty()).then(|| view! { <img class="ico" src=img("footer.icon_url") alt="" /> })}{footer}</small> })}
         </div>
     }.into_any()
@@ -283,14 +287,16 @@ pub fn preview_box(m: &Value, edit: &str) -> AnyView {
 /// A message the bot sends: content, embeds, button rows; flag 64 marks it "only you can see this".
 pub fn bot(m: &Value) -> AnyView {
     let content = m["content"].as_str().unwrap_or("");
+    // `_edit`: the editor's own preview, where a click on a part opens that part for editing.
+    let edit = m["_edit"] == true;
     view! {
         <div class="dmsg">
             <img class="avatar" src="/logo.svg" alt="" />
             <div>
                 <b>"Brim "</b><span class="chip">"APP"</span>" "<small class="muted">{now()}</small>
-                {(!content.is_empty()).then(|| view! { <div class="md" inner_html=md(content) /> })}
+                {(!content.is_empty()).then(|| view! { <div class="md" data-p=edit.then_some("/body/content") inner_html=md(content) /> })}
                 {m["embeds"].as_array().into_iter().flatten().map(embed).collect_view()}
-                {m["components"].as_array().into_iter().flatten().enumerate().map(|(i, r)| view! { <div class="drow">{r["components"].as_array().into_iter().flatten().map(|c| if c["type"] == 3 { menu(i, c) } else { button(c) }).collect_view()}</div> }).collect_view()}
+                {m["components"].as_array().into_iter().flatten().enumerate().map(|(i, r)| view! { <div class="drow">{r["components"].as_array().into_iter().flatten().enumerate().map(|(j, c)| if c["type"] == 3 { menu(i, c) } else { button(c, edit.then_some((i, j))) }).collect_view()}</div> }).collect_view()}
                 {(m["flags"] == 64).then(|| view! { <small class="muted eph">"Only you can see this • "<span class="dismiss" data-dismiss="">"Dismiss message"</span></small> })}
             </div>
         </div>
