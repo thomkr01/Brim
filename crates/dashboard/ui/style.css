@@ -679,6 +679,10 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
   .land .scene:has(> .win:not(.pane):not(.lcard):not(.tbl)) > :is(.pane, .lcard, .tbl):nth-of-type(3) { width:max-content; max-width:calc(var(--space-56) * 5.5); padding-right:calc(var(--space-56) + var(--space-24)); }
   .land .scene > .win.xs { width:calc(var(--space-56) * 6.4); }
 }
+.land .win.dash { text-align:left; } @media (min-width:761px) { .land .scene > .win.dash:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 11.5); } } .land .scene > .win.dash { padding:var(--space-20); background:var(--b1); box-shadow:0 var(--space-24) var(--space-48) #0008; }
+.land .win.dash .head { margin:0 0 var(--space-16); text-align:left; } .land .win.dash .chip { white-space:nowrap; } .land .scene.l-dash > .co { position:absolute; left:62%; top:80%; z-index:7; } .land .win.dash .cards { align-items:flex-start; gap:var(--space-16); } .land .win.dash .card { padding:var(--space-16); }
+.land .win.dash .row label { flex:1 1 auto; min-width:0; } .land .win.dash .row.tog { flex-wrap:nowrap; } .land .win.dash .row:not(.tog) label { flex:0 0 100%; }
+.land .win.dash .col { min-width:0; width:100%; } .land .win.dash .lp, .land .win.dash input { min-width:0; max-width:100%; } .land .win.dash .pick { flex:1; } .land .win.dash input[readonly], .land .win.dash select { pointer-events:none; }
 .land .embed .fields > .blk[style*="span 4"] { grid-column:span 6 !important; }
 .land .embed .fields .blk > b { font-size:.88em; }
 .land .dmsg, .land .dmsg * { word-break:normal; overflow-wrap:normal; }
