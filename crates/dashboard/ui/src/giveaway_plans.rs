@@ -2,6 +2,7 @@
 //! form (a schedule written like a message schedule, with the same time lines). The form itself is
 //! the Start form (`giveaways.rs`).
 use crate::common::*;
+use crate::form::ListPick;
 use crate::giveaways::{now, s};
 use crate::msgrules::{browser_zone, line_view, new_line, zones};
 use leptos::{prelude::*, task::spawn_local};
@@ -47,10 +48,11 @@ pub fn When(d: RwSignal<Value>, url: String) -> impl IntoView {
     let count = move || d.with(|v| v["spec"]["lines"].as_array().map_or(0, Vec::len));
     view! {
         <h3>"When"</h3>
-        <div class="row"><label for="gw-tz">"Time zone"</label>
-            <input id="gw-tz" list="tzlist" prop:value=move || d.with(|v| s(&v["spec"]["tz"]))
-                on:change=move |e| { let z = event_target_value(&e); d.update(|v| v["spec"]["tz"] = json!(z)) } />
-            <datalist id="tzlist">{zone_list.get_value().into_iter().map(|z| view! { <option value=z.clone()></option> }).collect_view()}</datalist></div>
+        <div class="row"><label>"Time zone"</label>
+            <ListPick items=Signal::derive(move || zone_list.get_value().into_iter().map(|z| (z.clone(), z)).collect())
+                get=Signal::derive(move || d.with(|v| s(&v["spec"]["tz"])))
+                set=Callback::new(move |z: String| d.update(|v| v["spec"]["tz"] = json!(z)))
+                none="choose a time zone" label="time zone" /></div>
         <div class="rlines">{move || (0..count()).map(|i| line_view(d, i, next, Signal::derive(|| false), false)).collect_view()}</div>
         <div class="row"><AddButton label="Add time" attr:disabled=move || { count() >= 10 }
             on:click=move |_| d.update(|v| if let Some(a) = v["spec"]["lines"].as_array_mut() { a.push(new_line("daily")) }) /></div>
