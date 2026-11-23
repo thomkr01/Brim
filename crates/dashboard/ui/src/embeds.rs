@@ -1460,7 +1460,7 @@ impl Editor {
             // Wide enough for both: the phone preview sits beside the desktop one and the toggle goes.
             let card = NodeRef::<leptos::html::Div>::new();
             let both = RwSignal::new(false);
-            let measure = move || if let Some(c) = card.get_untracked() { both.set(c.client_width() >= BOTH_WIDTH) };
+            let measure = move || if let Some(c) = card.try_get_untracked().flatten() { both.set(c.client_width() >= BOTH_WIDTH) };
             Effect::new(move |_| {
                 edit.track();
                 request_animation_frame(measure);

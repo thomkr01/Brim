@@ -181,7 +181,7 @@ fs.mkdirSync(out, { recursive: true });
   if ((await page.locator('input[aria-label="button label"]').inputValue()) !== 'Rules') failed.push('embeds: a click on the preview button did not open its settings');
   await page.keyboard.press('Escape');
   await page.locator('.pvwrap .embed [data-p$="/title"]').first().click();
-  if (!(await page.evaluate(() => document.activeElement?.getAttribute('data-ptr')?.endsWith('/title')))) failed.push('embeds: a click on the preview title did not focus the title');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-ptr')?.endsWith('/title'), null, { timeout: 3000 }).catch(() => failed.push('embeds: a click on the preview title did not focus the title'));
   await page.click('.pvwrap .dmenu .dsel');
   await page.click('.pvwrap .dopt');
   if (!(await page.locator('.pvwrap', { hasText: 'Thanks for picking' }).locator('.eph').count())) failed.push('embeds: menu pick shows no private answer');
