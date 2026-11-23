@@ -6417,7 +6417,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     (
         "note",
         "A note under the winners (ended late, fewer winners)",
-        "Only 2 members could win.",
+        "Ended late: Brim was offline at the end time.",
     ),
     (
         "why",

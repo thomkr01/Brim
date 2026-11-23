@@ -84,15 +84,19 @@ pub fn fill(text: &str) -> String {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
         let end = rest.find('}').map_or(rest.len(), |i| i + 1);
+        let mut skip = end;
         match tag_name(&rest[..end]) {
             Some(n) => {
                 if let Some(id) = id_of(n) {
                     out.push_str(&format!("<:{n}:{id}>"));
+                } else if rest[end..].starts_with(' ') {
+                    // Left out with its space, so a line does not start with a stray one.
+                    skip += 1;
                 }
             }
             None => out.push_str(&rest[..end]),
         }
-        rest = &rest[end..];
+        rest = &rest[skip..];
     }
     out.push_str(rest);
     out
@@ -293,8 +297,10 @@ mod tests {
         // Tags in server text: one load per process, so checked here.
         assert_eq!(
             fill("{e:success} Open {e:nope} {x} {e:Bad} {e:"),
-            "<:success:5> Open  {x} {e:Bad} {e:"
+            "<:success:5> Open {x} {e:Bad} {e:"
         );
+        // A tag that is not uploaded takes its space, so a line never starts with a stray one.
+        assert_eq!(fill("a\n{e:nope} B"), "a\nB");
         assert_eq!(tag_name("{e:success}"), Some("success"));
         assert_eq!(tag_name("🎫"), None);
         assert_eq!(NO.to_string(), "❌");
