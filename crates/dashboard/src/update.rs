@@ -56,33 +56,120 @@ async fn owner(st: &AppState, s: &Sess) -> Result<(), ApiError> {
     }
 }
 
-/// A GET to GitHub or the registry, as JSON; None on any failure.
+/// Why the last GitHub or registry call failed, for the Update page (None after a success).
+static WHY: Mutex<Option<String>> = Mutex::new(None);
+
+/// What a failed answer says to the owner: the hourly limit by name, else the status.
+fn why(
+    status: Option<reqwest::StatusCode>,
+    reset: Option<i64>,
+    left: Option<&str>,
+    token: bool,
+) -> String {
+    match status {
+        Some(s) if s.as_u16() == 401 && token => {
+            "GitHub does not accept GITHUB_TOKEN in .env; fix or remove it".into()
+        }
+        None => "the server could not connect to GitHub".into(),
+        Some(s) if s.as_u16() == 429 || (s.as_u16() == 403 && left == Some("0")) => {
+            let at = reset
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map_or(String::new(), |t| {
+                    format!(" until {} UTC", t.format("%H:%M"))
+                });
+            format!(
+                "GitHub's hourly limit for this server is used up{at}{}",
+                if token {
+                    ""
+                } else {
+                    "; set GITHUB_TOKEN in .env to raise it"
+                }
+            )
+        }
+        Some(s) => format!("GitHub answered {}", s.as_u16()),
+    }
+}
+
+fn has_token() -> bool {
+    std::env::var("GITHUB_TOKEN").is_ok_and(|t| !t.trim().is_empty())
+}
+
+/// GITHUB_TOKEN (public read only) on a request to api.github.com, and on no other host.
+fn with_token(r: reqwest::RequestBuilder, url: &str) -> reqwest::RequestBuilder {
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(t) if !t.trim().is_empty() && url.starts_with("https://api.github.com/") => {
+            r.bearer_auth(t.trim())
+        }
+        _ => r,
+    }
+}
+
+/// A GET to GitHub or the registry, as JSON; None on any failure, which is logged and kept in
+/// `WHY`.
 async fn get_json(st: &AppState, url: &str) -> Option<Value> {
-    let r = st.discord.http.get(url).header("User-Agent", UA);
-    r.send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json()
-        .await
-        .ok()
+    let r = with_token(st.discord.http.get(url).header("User-Agent", UA), url);
+    let out = async {
+        let resp = r
+            .send()
+            .await
+            .map_err(|_| why(None, None, None, has_token()))?;
+        let h = |k: &str| {
+            resp.headers()
+                .get(k)
+                .and_then(|v| v.to_str().ok())
+                .map(String::from)
+        };
+        let (reset, left) = (
+            h("x-ratelimit-reset").and_then(|v| v.parse().ok()),
+            h("x-ratelimit-remaining"),
+        );
+        if !resp.status().is_success() {
+            return Err(why(
+                Some(resp.status()),
+                reset,
+                left.as_deref(),
+                has_token(),
+            ));
+        }
+        resp.json::<Value>()
+            .await
+            .map_err(|_| "GitHub sent an answer Brim could not read".to_string())
+    }
+    .await;
+    match out {
+        Ok(v) => {
+            *WHY.lock().unwrap() = None;
+            Some(v)
+        }
+        Err(e) => {
+            tracing::warn!(url, reason = %e, "update page: call failed");
+            *WHY.lock().unwrap() = Some(e);
+            None
+        }
+    }
 }
 
 /// The published releases, newest first ({sha, version, at}), cached for a minute (GitHub allows 60 calls an
-/// hour without a token). Empty when GitHub cannot be reached; a failure is not cached.
+/// hour without a token). On a failure the last good list stays (a failed refresh is not tried again
+/// for 30 s, so the page does not use up the hourly limit); empty when there never was one.
 async fn builds(st: &AppState) -> Vec<Value> {
-    static CACHE: Mutex<Option<(Instant, Vec<Value>)>> = Mutex::new(None);
-    if let Some((at, v)) = CACHE.lock().unwrap().clone() {
-        if at.elapsed() < Duration::from_secs(60) {
-            return v;
+    type Cache = Option<(Instant, Vec<Value>, Option<Instant>)>;
+    static CACHE: Mutex<Cache> = Mutex::new(None);
+    let old = CACHE.lock().unwrap().clone();
+    if let Some((at, v, failed)) = &old {
+        let fresh = failed.unwrap_or(*at).elapsed()
+            < Duration::from_secs(if failed.is_some() { 30 } else { 60 });
+        if fresh {
+            return v.clone();
         }
     }
     let Some(r) = get_json(st, &api(LATEST_PATH)).await else {
-        return vec![];
+        let (at, v) = old.map_or((Instant::now(), vec![]), |(a, v, _)| (a, v));
+        *CACHE.lock().unwrap() = Some((at, v.clone(), Some(Instant::now())));
+        return v;
     };
     let v = runs_to_builds(&r);
-    *CACHE.lock().unwrap() = Some((Instant::now(), v.clone()));
+    *CACHE.lock().unwrap() = Some((Instant::now(), v.clone(), None));
     v
 }
 
@@ -226,11 +313,8 @@ async fn approved(st: &AppState, version: &str) -> Result<Value, String> {
             .ok_or_else(|| unreachable("the image registry"))?;
         // shortcut: trusts GitHub's list of this repository's attestations, without checking the
         // Sigstore signature itself; check the bundle when the GitHub account is the threat.
-        let r = st
-            .discord
-            .http
-            .get(api(&format!("attestations/{digest}")))
-            .header("User-Agent", UA)
+        let url = api(&format!("attestations/{digest}"));
+        let r = with_token(st.discord.http.get(&url).header("User-Agent", UA), &url)
             .send()
             .await
             .map_err(|_| unreachable("GitHub"))?;
@@ -240,7 +324,17 @@ async fn approved(st: &AppState, version: &str) -> Result<Value, String> {
                 .json::<Value>()
                 .await
                 .is_ok_and(|v| attests(&v, &format!("ghcr.io/{repo}"), &digest)),
-            _ => return Err(unreachable("GitHub")),
+            code => {
+                let left = r
+                    .headers()
+                    .get("x-ratelimit-remaining")
+                    .and_then(|v| v.to_str().ok());
+                return Err(format!(
+                    "{} ({})",
+                    unreachable("GitHub"),
+                    why(Some(code), None, left, has_token())
+                ));
+            }
         };
         if !signed {
             return Err(format!("The {img} image of release {short} has no signed build record on GitHub, so it is not installed."));
@@ -524,6 +618,8 @@ async fn status(State(st): State<AppState>, s: Sess) -> Res {
         "behind": behind,
         // The published releases to install, newest first: {sha, version, at}.
         "builds": builds,
+        // Why GitHub could not be asked, when the last call failed.
+        "error": WHY.lock().unwrap().clone(),
         "run": run,
         "estimate": estimate(&done),
     })))
@@ -565,7 +661,7 @@ async fn start(State(st): State<AppState>, s: Sess, Json(b): Json<Start>) -> Res
     let builds = builds(&st).await;
     if builds.is_empty() {
         return Err(ApiError::BadRequest(
-            "Could not reach GitHub to list the published releases. Nothing was started; try again in a minute.".into(),
+            format!("Could not list the published releases: {}. Nothing was started; try again in a minute.", WHY.lock().unwrap().clone().unwrap_or_else(|| "GitHub gave no answer".into())),
         ));
     }
     let Some(version) = builds
@@ -695,7 +791,7 @@ mod tests {
         // before any lookup.
         let r = start(s.clone()).await;
         assert!(
-            matches!(&r, Err(ApiError::BadRequest(m)) if m.contains("10 most recent") || m.contains("Could not reach GitHub"))
+            matches!(&r, Err(ApiError::BadRequest(m)) if m.contains("10 most recent") || m.contains("Could not list"))
         );
         let d = json!({"bot": format!("sha256:{}", "0".repeat(64))});
         assert!(queue(&st, me, &sha, &d).await.is_ok());
@@ -731,6 +827,23 @@ mod tests {
             .execute(&st.db)
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn a_failed_github_call_says_why() {
+        use reqwest::StatusCode as S;
+        let limit = why(Some(S::FORBIDDEN), Some(1_700_000_000), Some("0"), false);
+        assert!(
+            limit.contains("hourly limit")
+                && limit.contains("22:13 UTC")
+                && limit.contains("GITHUB_TOKEN")
+        );
+        assert!(why(Some(S::TOO_MANY_REQUESTS), None, None, false).contains("hourly limit"));
+        assert_eq!(
+            why(Some(S::FORBIDDEN), None, Some("12"), false),
+            "GitHub answered 403"
+        );
+        assert!(why(None, None, None, has_token()).contains("could not connect"));
     }
 
     #[test]

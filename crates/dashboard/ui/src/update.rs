@@ -209,7 +209,8 @@ pub fn Update() -> impl IntoView {
         view! {
             <div class="card">
                 <p><b>"Running: "</b><code>{name(&d, &d["current"])}</code></p>
-                <p><b>"Newest: "</b>{if d["latest"].is_null() { view! { <span class="muted">"Could not reach GitHub right now."</span> }.into_any() } else { view! { <code>{name(&d, newest)}</code>" "{news} }.into_any() }}</p>
+                <p><b>"Newest: "</b>{if d["latest"].is_null() { view! { <span class="muted">{format!("Could not ask GitHub: {}.", d["error"].as_str().unwrap_or("no answer"))}</span> }.into_any() } else { view! { <code>{name(&d, newest)}</code>" "{news} }.into_any() }}</p>
+                {d["error"].as_str().filter(|_| !d["latest"].is_null()).map(|e| view! { <p class="warn">{format!("GitHub could not be asked just now ({e}); the list may be out of date.")}</p> })}
                 {changes}
                 {side}
                 {if updater_down(&d) {
