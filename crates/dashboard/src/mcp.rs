@@ -150,7 +150,7 @@ async fn token_create(State(st): State<AppState>, s: Sess, Json(b): Json<NewToke
     .fetch_one(&mut *tx)
     .await?;
     let by = s.user_id;
-    let what = format!("{{e:key}} MCP token {id} (\"{name}\") was made on the dashboard by <@{by}> ({by}). It can read every server and propose changes.");
+    let what = format!("{} MCP token {id} (\"{name}\") was made on the dashboard by <@{by}> ({by}). It can read every server and propose changes.", brim_logging::emoji::KEY);
     crate::raiders::alert_owner(&mut *tx, by, "mcp", &what).await?;
     tx.commit().await?;
     tracing::info!(id, name, "mcp token created");
@@ -176,7 +176,10 @@ async fn token_revoke(State(st): State<AppState>, s: Sess, Path(id): Path<i64>) 
         .execute(&mut *tx)
         .await?;
     let by = s.user_id;
-    let what = format!("{{e:key}} MCP token {id} was revoked on the dashboard by <@{by}> ({by}).");
+    let what = format!(
+        "{} MCP token {id} was revoked on the dashboard by <@{by}> ({by}).",
+        brim_logging::emoji::KEY
+    );
     crate::raiders::alert_owner(&mut *tx, by, "mcp", &what).await?;
     tx.commit().await?;
     tracing::info!(id, "mcp token revoked");
@@ -1060,7 +1063,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            alert.starts_with("{e:key} MCP token")
+            alert.starts_with("🔑 MCP token")
                 && alert.contains(&format!("by <@{owner}> ({owner})"))
                 && alert.contains("Not you?"),
             "{alert}"

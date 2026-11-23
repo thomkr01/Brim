@@ -195,7 +195,8 @@ async fn press(
     .rows_affected();
     let by = s.user_id;
     let mut what = format!(
-        "{{e:shield_check}} Secure my account was pressed on the dashboard by <@{by}> ({by}), with the Rescue Key of server {guild}. It logged out {sessions} dashboard sessions, cancelled {updates} queued updates, revoked {tokens} MCP tokens and closed {writes} changes waiting for a code."
+        "{} Secure my account was pressed on the dashboard by <@{by}> ({by}), with the Rescue Key of server {guild}. It logged out {sessions} dashboard sessions, cancelled {updates} queued updates, revoked {tokens} MCP tokens and closed {writes} changes waiting for a code.",
+        brim_logging::emoji::SHIELD
     );
     if running {
         what.push_str(

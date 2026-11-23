@@ -292,7 +292,7 @@ fn alert_job(to: i64, what: &str, fixed: Option<&str>) -> Value {
     } else {
         NOT_YOU
     };
-    json!({"user": to.to_string(), "text": format!("{what}\n\n-# {{e:fingerprint}} {line}"), "fixed": fixed, "secure_url": url})
+    json!({"user": to.to_string(), "text": format!("{what}\n\n-# {} {line}", brim_logging::emoji::FINGERPRINT), "fixed": fixed, "secure_url": url})
 }
 
 /// A security alert DM to the bot owner (owner decision 2026-11-17): `what` plus the stolen account line,
@@ -324,7 +324,8 @@ pub(crate) async fn alert_update(
     build: &str,
 ) -> Result<(), ApiError> {
     let what = format!(
-        "{{e:refresh}} Brim is updating to build **{build}**, started on the dashboard by <@{owner}> ({owner}). It is back in about a minute."
+        "{} Brim is updating to build **{build}**, started on the dashboard by <@{owner}> ({owner}). It is back in about a minute.",
+        brim_logging::emoji::REFRESH
     );
     alert_owner(db, owner, "update", &what).await
 }
