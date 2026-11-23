@@ -2,7 +2,7 @@
 
 # Brim
 
-Brim is a fast, all-in-one Discord security and moderation bot written in Rust. It stops raids, nukes and spam within seconds, puts back what an attacker broke, and keeps a full record of everything that happens on your server. Every setting lives in a clean web dashboard, so you never have to memorise a command. Every feature is free: no premium tier and no paywall.
+[Brim](https://brim.thomkr.com/#/front) is a fast, all-in-one Discord security and moderation bot written in Rust. It stops raids, nukes and spam within seconds, puts back what an attacker broke, and keeps a full record of everything that happens on your server. Every setting lives in a clean web dashboard, so you never have to memorise a command. Every feature is free: no premium tier and no paywall.
 
 ## Why Brim
 
