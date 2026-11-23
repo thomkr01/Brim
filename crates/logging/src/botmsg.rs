@@ -4544,6 +4544,15 @@ fn giveaways(out: &mut Vec<Def>) {
             &lines.iter().map(|l| l.to_string()).collect::<Vec<_>>(),
         )
     };
+    // The sponsor's picture in the top right (empty without a sponsor: no picture) and, on the
+    // running message, Brim's banner at the bottom (empty when the server chose none).
+    let pictures = |banner: bool, mut m: Value| {
+        m["embeds"][0]["thumbnail"] = json!({"url": "{sponsor_picture}"});
+        if banner {
+            m["embeds"][0]["image"] = json!({"url": "{banner}"});
+        }
+        m
+    };
     out.push(msg(
         "giveaway.running",
         "Giveaway message (running)",
@@ -4552,58 +4561,77 @@ fn giveaways(out: &mut Vec<Def>) {
             "ends",
             "host",
             "sponsor",
+            "sponsor_picture",
+            "banner",
             "entries",
             "winners",
             "requirements",
             "id",
         ],
         &["prize", "ends"],
-        card(
-            "{prize}",
-            ORANGE,
-            &[
-                "{e:clock} **Ends:** {ends}",
-                "{e:user_id} **Hosted by:** {host}",
-                "{e:star} **Sponsored by:** {sponsor}",
-                "{e:members} **Entries:** {entries}",
-                "{e:trophy} **Winners:** {winners}",
-                "{requirements}",
-            ],
+        pictures(
+            true,
+            card(
+                "{prize}",
+                ORANGE,
+                &[
+                    "{e:clock} **Ends:** {ends}",
+                    "{e:user_id} **Hosted by:** {host}",
+                    "{e:star} **Sponsored by:** {sponsor}",
+                    "{e:members} **Entries:** {entries}",
+                    "{e:trophy} **Winners:** {winners}",
+                    "{requirements}",
+                ],
+            ),
         ),
     ));
     out.push(msg(
         "giveaway.ended",
         "Giveaway message (ended)",
         &[
-            "prize", "ended", "host", "sponsor", "entries", "winners", "note", "id",
+            "prize",
+            "ended",
+            "host",
+            "sponsor",
+            "sponsor_picture",
+            "entries",
+            "winners",
+            "note",
+            "id",
         ],
         &["prize", "winners"],
-        card(
-            "{prize}",
-            GREY,
-            &[
-                "{e:clock} **Ended:** {ended}",
-                "{e:user_id} **Hosted by:** {host}",
-                "{e:star} **Sponsored by:** {sponsor}",
-                "{e:members} **Entries:** {entries}",
-                "{e:trophy} **Winners:** {winners}",
-                "{note}",
-            ],
+        pictures(
+            false,
+            card(
+                "{prize}",
+                GREY,
+                &[
+                    "{e:clock} **Ended:** {ended}",
+                    "{e:user_id} **Hosted by:** {host}",
+                    "{e:star} **Sponsored by:** {sponsor}",
+                    "{e:members} **Entries:** {entries}",
+                    "{e:trophy} **Winners:** {winners}",
+                    "{note}",
+                ],
+            ),
         ),
     ));
     out.push(msg(
         "giveaway.cancelled",
         "Giveaway message (cancelled)",
-        &["prize", "host", "sponsor", "id"],
+        &["prize", "host", "sponsor", "sponsor_picture", "id"],
         &["prize"],
-        card(
-            "{prize}",
-            GREY,
-            &[
-                "This giveaway was cancelled. Nobody won.",
-                "{e:user_id} **Hosted by:** {host}",
-                "{e:star} **Sponsored by:** {sponsor}",
-            ],
+        pictures(
+            false,
+            card(
+                "{prize}",
+                GREY,
+                &[
+                    "This giveaway was cancelled. Nobody won.",
+                    "{e:user_id} **Hosted by:** {host}",
+                    "{e:star} **Sponsored by:** {sponsor}",
+                ],
+            ),
         ),
     ));
     out.push(msg(
@@ -6342,6 +6370,16 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "Who the giveaway is on behalf of (mention); empty without one",
         "@sam",
     ),
+    (
+        "sponsor_picture",
+        "The sponsor's profile picture (a picture link for the thumbnail); empty without a sponsor",
+        "https://cdn.discordapp.com/embed/avatars/1.png",
+    ),
+    (
+        "banner",
+        "The server's chosen giveaway banner (a picture link for the big image); empty when it chose none",
+        "/giveaway-a.png",
+    ),
     ("entries", "Number of entries", "42"),
     (
         "winners",
@@ -6669,7 +6707,14 @@ fn fill_value(v: &mut Value, vars: &[(&str, &str)]) {
 /// variables, which the sender checked are web links. Other text never becomes a link, and a field
 /// left without a web link is emptied (then dropped): Discord refuses the whole message for one.
 fn fill_links(v: &mut Value, vars: &[(&str, &str)]) {
-    const LINKS: &[&str] = &["link", "image", "author_link", "author_icon"];
+    const LINKS: &[&str] = &[
+        "link",
+        "image",
+        "author_link",
+        "author_icon",
+        "sponsor_picture",
+        "banner",
+    ];
     match v {
         Value::Array(a) => a.iter_mut().for_each(|x| fill_links(x, vars)),
         Value::Object(o) => {
@@ -6712,7 +6757,7 @@ pub fn render(key: &str, stored: Option<&Value>, vars: &[(&str, &str)]) -> Value
     // A copy made before the facts had placeholders: `{text}` holds them all.
     let framed = used.is_some_and(|u| is_frame(d, u));
     fill_value(&mut m, vars);
-    if key.starts_with("feed.") {
+    if key.starts_with("feed.") || key.starts_with("giveaway.") {
         fill_links(&mut m, vars);
     }
     let whole = m.clone();
@@ -7174,6 +7219,44 @@ mod tests {
             // A security text never lands outside the Security area, where it is marked as such.
             assert_eq!(d.security, a == "Security", "{}", d.key);
         }
+    }
+
+    /// The giveaway card shows the sponsor's picture and the banner, and leaves a slot out when its
+    /// variable is empty (no sponsor, banner off): Discord refuses an empty picture link.
+    #[test]
+    fn giveaway_card_pictures_follow_their_variables() {
+        let vars = |pic: &'static str, banner: &'static str| {
+            vec![
+                ("prize", "P"),
+                ("ends", "soon"),
+                ("sponsor_picture", pic),
+                ("banner", banner),
+            ]
+        };
+        let m = render(
+            "giveaway.running",
+            None,
+            &vars("https://cdn/a.png", "https://b/x.png"),
+        );
+        assert_eq!(m["embeds"][0]["thumbnail"]["url"], "https://cdn/a.png");
+        assert_eq!(m["embeds"][0]["image"]["url"], "https://b/x.png");
+        let m = render("giveaway.running", None, &vars("", ""));
+        assert!(m["embeds"][0]["thumbnail"].is_null() && m["embeds"][0]["image"].is_null());
+        // A picture link that is not a web link is never sent.
+        let m = render("giveaway.running", None, &vars("javascript:x", ""));
+        assert!(m["embeds"][0]["thumbnail"].is_null());
+        // Ended and cancelled cards keep the sponsor's picture and have no banner.
+        let m = render(
+            "giveaway.ended",
+            None,
+            &[
+                ("prize", "P"),
+                ("winners", "W"),
+                ("sponsor_picture", "https://cdn/a.png"),
+            ],
+        );
+        assert_eq!(m["embeds"][0]["thumbnail"]["url"], "https://cdn/a.png");
+        assert!(m["embeds"][0]["image"].is_null());
     }
 
     #[test]

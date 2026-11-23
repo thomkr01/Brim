@@ -99,6 +99,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         .map(|p| format!("**{}**\n{}", p.name, p.description))
         .collect::<Vec<_>>()
         .join("\n\n");
+    let banner = banner_example(&cfg, &std::env::var("DASHBOARD_URL").unwrap_or_default());
     let added = added_buttons(&st, guild, &tickets).await?;
     let rows: Vec<Value> = botmsg::defs()
         .iter()
@@ -112,6 +113,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                     let (label, example) = botmsg::var_info(&d.key, v);
                     let example = if is_log_type(d, v) { &d.name } else { example };
                     let example = if d.key == "ticket.panel" && *v == "text" && !panel_text.is_empty() { panel_text.as_str() } else { example };
+                    let example = if *v == "banner" { banner.as_str() } else { example };
                     json!({"name": v, "label": label, "example": example})
                 })
                 .collect();
@@ -212,7 +214,12 @@ async fn shown(
         .ok()
         .flatten()
         .unwrap_or_default();
-    let ex = examples(d, &server);
+    let (_, cfg) = crate::store::current(&st.db, guild).await?;
+    let mut ex = examples(d, &server);
+    // The giveaway banner the server chose (none: no picture), as members see it.
+    if let Some(b) = ex.iter_mut().find(|(k, _)| *k == "banner") {
+        b.1 = banner_example(&cfg, &std::env::var("DASHBOARD_URL").unwrap_or_default());
+    }
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = botmsg::render(&key, stored.as_ref(), &vars);
     // Brim emoji tags (`{e:name}`) in the texts, as `panel_message` fills them.
@@ -225,7 +232,6 @@ async fn shown(
             }
         }
     }
-    let (_, cfg) = crate::store::current(&st.db, guild).await?;
     let tickets: brim_core::sections::TicketsCfg =
         serde_json::from_value(cfg["tickets"].clone()).unwrap_or_default();
     let added = added_buttons(&st, guild, &tickets).await?;
@@ -657,6 +663,17 @@ fn is_log_type(d: &botmsg::Def, var: &str) -> bool {
     var == "title" && d.key.matches('.').count() == 2 && d.key.starts_with("log.")
 }
 
+/// The link of the banner the server chose, for the examples in the editor and the preview;
+/// empty when it chose none (or the dashboard has no address).
+fn banner_example(cfg: &Value, site: &str) -> String {
+    match cfg["giveaways"]["banner"].as_str().unwrap_or("a") {
+        p @ ("a" | "b" | "c") if !site.is_empty() => {
+            format!("{}/giveaway-{p}.png", site.trim_end_matches('/'))
+        }
+        _ => String::new(),
+    }
+}
+
 /// The examples for `key`'s variables; `{server}` and `{name}` get the real server name.
 fn examples(d: &botmsg::Def, server: &str) -> Vec<(&'static str, String)> {
     d.vars
@@ -665,6 +682,14 @@ fn examples(d: &botmsg::Def, server: &str) -> Vec<(&'static str, String)> {
             let ex = match *v {
                 "server" | "name" => server.to_string(),
                 "title" if is_log_type(d, v) => d.name.clone(),
+                // Discord needs the full link; the editor's own preview uses the short one.
+                "banner" => format!(
+                    "{}{}",
+                    std::env::var("DASHBOARD_URL")
+                        .unwrap_or_default()
+                        .trim_end_matches('/'),
+                    botmsg::var_info(&d.key, v).1
+                ),
                 _ => botmsg::var_info(&d.key, v).1.replace("\\n", "\n"),
             };
             (*v, ex)
@@ -758,6 +783,18 @@ async fn test(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_banner_example_follows_the_server_choice() {
+        let site = "https://brim.example/";
+        let b = |v: Value| banner_example(&json!({"giveaways": {"banner": v}}), site);
+        assert_eq!(b(json!("c")), "https://brim.example/giveaway-c.png");
+        assert_eq!(b(json!("none")), "");
+        assert_eq!(
+            banner_example(&json!({}), site),
+            "https://brim.example/giveaway-a.png"
+        );
+    }
     use super::*;
 
     /// Every route that changes a security text needs the 2FA step-up for this server, a call made

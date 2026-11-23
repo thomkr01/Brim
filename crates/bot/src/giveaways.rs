@@ -11,6 +11,11 @@ use brim_core::{
 };
 use brim_logging::{botmsg, embed::ORANGE, Log, LogKind};
 use serde_json::{json, Value};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 use twilight_model::{
     application::interaction::{
         application_command::{CommandDataOption, CommandOptionValue},
@@ -268,6 +273,73 @@ pub(crate) fn enter_row(id: i64, label: &str, emoji: &str) -> Component {
     })
 }
 
+/// How long a looked-up sponsor picture is kept, and how long a failed look-up is not retried.
+const PICTURE_KEEP: Duration = Duration::from_secs(6 * 3600);
+const PICTURE_RETRY: Duration = Duration::from_secs(600);
+
+/// The sponsor's profile picture link, or empty without a sponsor or when Discord did not answer.
+/// Looked up once per sponsor and kept for hours, so a giveaway with 100,000 entries that refreshes
+/// all day does not ask Discord each time. The link is built here from the id and the picture hash
+/// Discord sent (Discord's own picture for no picture), never copied from member text.
+async fn sponsor_picture(app: &App, sponsor: Option<i64>) -> String {
+    static KEPT: LazyLock<Mutex<HashMap<i64, (Instant, String)>>> = LazyLock::new(Default::default);
+    let Some(id) = sponsor else {
+        return String::new();
+    };
+    let fresh = |t: Instant, s: &str| {
+        t.elapsed()
+            < if s.is_empty() {
+                PICTURE_RETRY
+            } else {
+                PICTURE_KEEP
+            }
+    };
+    let old = KEPT.lock().ok().and_then(|k| k.get(&id).cloned());
+    if let Some((t, s)) = &old {
+        if fresh(*t, s) {
+            return s.clone();
+        }
+    }
+    let found = match app.http.user(Id::new(id as u64)).await {
+        Ok(r) => r.model().await.ok().map(|u| {
+            brim_logging::embed::avatar_url(id as u64, u.avatar.map(|h| h.to_string()).as_deref())
+        }),
+        Err(_) => None,
+    };
+    // A failed look-up keeps the old picture and asks again in a few minutes.
+    let (url, at) = match (found, old) {
+        (Some(u), _) => (u, Instant::now()),
+        (None, Some((_, s))) if !s.is_empty() => (
+            s,
+            Instant::now()
+                .checked_sub(PICTURE_KEEP - PICTURE_RETRY)
+                .unwrap_or_else(Instant::now),
+        ),
+        (None, _) => (String::new(), Instant::now()),
+    };
+    if let Ok(mut k) = KEPT.lock() {
+        // One entry per sponsor: bounded by the sponsors of the last hours.
+        k.retain(|_, (t, s)| fresh(*t, s));
+        k.insert(id, (at, url.clone()));
+    }
+    url
+}
+
+/// The banner link for the server's choice (`a`, `b`, `c`; anything else, none), served by the
+/// dashboard like its other pictures. Empty (no picture) without an https dashboard address.
+fn banner(choice: &str) -> String {
+    banner_at(choice, crate::general::dashboard())
+}
+
+fn banner_at(choice: &str, base: Option<String>) -> String {
+    match (choice, base) {
+        ("a" | "b" | "c", Some(d)) if d.starts_with("https://") => {
+            format!("{}/giveaway-{choice}.png", d.trim_end_matches('/'))
+        }
+        _ => String::new(),
+    }
+}
+
 /// The message for the giveaway's state: the running one has the Enter button.
 async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, Vec<Component>) {
     let gid = Id::new(g.guild_id as u64);
@@ -275,14 +347,21 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
     let host = g.host_id.map(|h| format!("<@{h}>")).unwrap_or_default();
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let entries = entries.to_string();
+    let picture = sponsor_picture(app, g.sponsor_id).await;
     match g.status.as_str() {
         "running" => {
+            let banner = match app.cfg(g.guild_id as u64).await {
+                Ok(c) => banner(&c.giveaways.banner),
+                Err(_) => String::new(),
+            };
             let (winners, req) = (g.winners.to_string(), requirements(g));
             let vars = [
                 ("prize", g.prize.as_str()),
                 ("ends", &when(g.ends_at)),
                 ("host", &host),
                 ("sponsor", &sponsor),
+                ("sponsor_picture", &picture),
+                ("banner", &banner),
                 ("entries", &entries),
                 ("winners", &winners),
                 ("requirements", &req),
@@ -307,6 +386,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 ("ended", &ended),
                 ("host", &host),
                 ("sponsor", &sponsor),
+                ("sponsor_picture", &picture),
                 ("entries", &entries),
                 ("winners", &winners),
                 ("note", &note),
@@ -320,6 +400,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 ("prize", g.prize.as_str()),
                 ("host", &host),
                 ("sponsor", &sponsor),
+                ("sponsor_picture", &picture),
                 ("id", &id),
             ];
             let (t, e) = rendered(app, gid, "giveaway.cancelled", &vars).await;
@@ -2902,6 +2983,19 @@ async fn answer(app: &App, i: &Interaction, rest: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn banner_link_needs_a_choice_and_an_https_dashboard() {
+        let site = || Some("https://brim.example/".to_string());
+        assert_eq!(
+            banner_at("b", site()),
+            "https://brim.example/giveaway-b.png"
+        );
+        assert_eq!(banner_at("none", site()), "");
+        assert_eq!(banner_at("../x", site()), "");
+        assert_eq!(banner_at("a", None), "");
+        assert_eq!(banner_at("a", Some("http://brim.example".into())), "");
+    }
     use super::*;
 
     #[test]

@@ -673,6 +673,16 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
             </div></div> }.into_any()
         }
         "color" => view! { <input type="color" prop:value=move || show(&get()) on:change=move |e| set(json!(event_target_value(&e))) /> }.into_any(),
+        // Pictures to click (the giveaway banner): each option is a picture, "none" has no picture.
+        "choice" if f["pictures"] == true => {
+            let opts = f["options"].as_array().cloned().unwrap_or_default();
+            view! { <div class="pics" role="radiogroup" aria-label="Banner">
+                {opts.iter().map(|o| { let v = show(o); let on = { let v = v.clone(); move || show(&get()) == v };
+                    let (c, n) = (v.clone(), v.clone());
+                    let inner = if v == "none" { view! { <span>"No banner"</span> }.into_any() } else { view! { <img src=format!("/giveaway-{n}.png") alt=format!("Banner {}", n.to_uppercase()) loading="lazy" /> }.into_any() };
+                    view! { <button type="button" class="pic" role="radio" aria-checked={ let on = on.clone(); move || on().to_string() } class:on=on on:click=move |_| set(json!(c))>{inner}</button> } }).collect_view()}
+            </div> }.into_any()
+        }
         "choice" => {
             let opts = f["options"].as_array().cloned().unwrap_or_default();
             let none = f["none_label"].as_str().unwrap_or("Off").to_string();

@@ -170,6 +170,13 @@ fn choice(group: &str, path: &str, opts: &[&str]) -> Value {
     v
 }
 
+/// The giveaway banner: Brim's three pictures or none, shown as small pictures to click.
+fn banner(group: &str, path: &str) -> Value {
+    let mut v = choice(group, path, &["a", "b", "c", "none"]);
+    v["pictures"] = json!(true);
+    v
+}
+
 /// Ticks several of `opts`; stored as an array of the ticked ones.
 fn multi(group: &str, path: &str, opts: &[&str]) -> Value {
     let mut v = fg(group, path, "multi");
@@ -1513,6 +1520,10 @@ pub fn schema() -> Vec<Value> {
                 hp(
                     ti(dv(fg("New giveaways", "claim_hours", "int"), 48), "Claim time (hours)"),
                     "How long a winner has to claim the prize.",
+                ),
+                hp(
+                    ti(dv(banner("New giveaways", "banner"), "a"), "Banner"),
+                    "The picture at the bottom of the giveaway message. To use your own picture, change the image in the Message Builder.",
                 ),
                 ti(dv(fg("Limits", "max_running", "int"), 25), "Running giveaways at once"),
             ],

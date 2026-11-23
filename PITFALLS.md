@@ -1692,3 +1692,8 @@ The first check only remembers items, and Check now on a webhook feed did nothin
 Default messages can carry buttons that code adds (`giveaway.running`, `ticket.confirm`, link buttons under logs). The editor and the preview drew only the stored message. The bot now saves the real button rows with its samples (`previews.rs`, `added_buttons`, key to rows), and `added_buttons_belong_to_real_messages` fails when a key is not a message. Label and emoji come from the same builders and constants the bot posts with (`enter_row`, `claim_row`, `link_row`, `GO_MESSAGE`, `GO_POLL`, `GO_CHANNEL`).
 
 **Rule:** a new button under a default message is added to that table in the same change. The preview of a message must never show an example that the bot cannot post (a running giveaway shows a count of winners).
+
+## Giveaway card pictures (2026-11-23)
+
+**A picture variable stayed as typed text in the link slot.** `fill_value` skips every `url` key, so only `fill_links` fills a link. A new link variable (`{sponsor_picture}`, `{banner}`) must be in the `LINKS` list of `fill_links` in `botmsg.rs`, and the message key must be one that calls it (`feed.*` and `giveaway.*`). An empty or non-web value then drops the slot, so Discord never gets an empty link.
+**A failed look-up replaced a good cached value with an empty one.** The sponsor picture is kept in memory for hours. A Discord error (5xx, 429, timeout) must keep the old picture and ask again in a few minutes. Only a first look-up that fails stays empty. *Avoid:* never store the result of a failed fetch over a good cache entry.
