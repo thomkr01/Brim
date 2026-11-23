@@ -80,9 +80,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: crates/dashboard/ui
-      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
-        with:
-          tool: trunk@0.21.14
       - name: Design tokens match tokens.json
         run: node ../../../tools/design-tokens.mjs --check
       - name: Sizes come from the tokens
@@ -91,14 +88,6 @@ jobs:
         run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
       - name: Test
         run: cargo test --locked
-      # The e2e job runs for a tag, and a tag reads only main's caches. This job runs on main
-      # too, so it keeps the built web app of each commit for the e2e job of a tag on that commit.
-      - name: Release build
-        run: trunk build --release
-      - uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
-        with:
-          path: crates/dashboard/ui/dist
-          key: dashboard-ui-dist-${{ github.sha }}
 
   # Says if a push changed the dashboard, its web app or the browser test. A push whose range cannot
   # be read counts as changed.
@@ -122,11 +111,39 @@ jobs:
             echo dashboard=false >> "$GITHUB_OUTPUT"
           fi
 
+  # Builds the web app once. The e2e job takes it as an artifact, so it does not build it again.
+  # Same condition as e2e: a skipped job counts as passed.
+  web-app:
+    needs: changes
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.dashboard == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          # Pinned by commit, the action no longer reads the toolchain from its ref name.
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: crates/dashboard/ui
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
+        with:
+          tool: trunk@0.21.14
+      - name: Release build
+        run: trunk build --release
+        working-directory: crates/dashboard/ui
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dashboard-ui-dist
+          path: crates/dashboard/ui/dist
+          retention-days: 1
+
   # Slow, so it runs for a release tag, on request, and on a push that changed the dashboard, its web
   # app or the browser test. On any other push it is skipped, and a skipped job counts as passed. The
   # Images workflow builds a release only when this job passed on its tag.
   e2e:
-    needs: changes
+    needs: [changes, web-app]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.dashboard == 'true'
     runs-on: ubuntu-latest
     services:
@@ -150,17 +167,12 @@ jobs:
         with:
           # Pinned by commit, the action no longer reads the toolchain from its ref name.
           toolchain: stable
-          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
+      # The web app of the web-app job. tests/e2e/run.sh builds it only when it is missing.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          tool: trunk@0.21.14
-      # The web app the dashboard-ui job built for this commit (about 3 minutes to build here).
-      # tests/e2e/run.sh builds it only when it is missing.
-      - uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
-        with:
+          name: dashboard-ui-dist
           path: crates/dashboard/ui/dist
-          key: dashboard-ui-dist-${{ github.sha }}
       - run: mkdir -p "$E2E_OUT" && npm i --no-save playwright@1.64.1 && npx playwright install --with-deps chromium
       # Both at once: the updater test needs only Docker, the sweep the Postgres service and cargo.
       # Together they took about 20 minutes one after the other, the updater test 7 of them.
