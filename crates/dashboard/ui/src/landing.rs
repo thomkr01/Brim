@@ -18,8 +18,11 @@ enum Item {
     C(&'static str),
     /// The Cases page: rows of (number, kind, open or closed, grey text).
     K(&'static [(&'static str, &'static str, &'static str, &'static str)]),
+    /// A dashboard settings page, built from the page's own classes: breadcrumb, title and cards of (card title, fields of (kind, label, value)).
+    /// Kinds: s switch (on), c choice, p channel picker, r role picker with chips, n text field.
+    D(&'static str, &'static str, &'static [(&'static str, &'static [(char, &'static str, &'static str)])]),
 }
-use Item::{C, E, K, L, M, P, T};
+use Item::{C, D, E, K, L, M, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -32,7 +35,9 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
         ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
-        ("Set up in the dashboard", "base", &[P("General", &["Use the verification module", "Verification mode|Captcha ▾", "Verification channel|#verify ▾", "Verification roles|@Member", "Fail action|Kick ▾", "Verification targets|Everyone ▾"]), C("Settings")])]),
+        ("Set up in the dashboard", "dash", &[D("Verification \u{203a} General Settings", "Verification", &[
+            ("General", &[('s', "Use the verification module", ""), ('c', "Verification mode", "Captcha"), ('p', "Verification channel", "#verify"), ('c', "Fail action", "Kick"), ('c', "Verification targets", "Everyone")]),
+            ("Captcha", &[('n', "Captcha answer length", "6"), ('s', "Show a colored trace that follows the captcha characters", ""), ('s', "Show small spread-around characters to trick scripts", "")])]), C("Settings")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
         ("Every raid gets a report", "base", &[T("Raid report", &[("8 joins in 10 s", "paused"), ("6 accounts without avatar", "flagged"), ("Joins resumed", "ok")]), E("raid_report"), M("Mika", "Joined 3 minutes ago, no avatar"), C("Report")]),
@@ -127,9 +132,11 @@ fn fit() {
         let max = |f: fn(&(f64, f64, f64, f64)) -> f64| all.iter().map(|(_, g)| f(g)).fold(0.0, f64::max);
         let (mgw, mgh, mw1, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.2), max(|g| g.3));
         let mnw1 = all.iter().map(|(_, g)| g.2).fold(f64::MAX, f64::min);
-        let bh = mgh + 96.0;
+        // The bottom stars sit 72 px under the first piece, so a first piece that is the tallest gets more room below.
+        let pad = (mh1 + 72.0 - mgh).max(48.0);
+        let bh = mgh + 2.0 * pad;
         let k = (w / bw).min(0.85);
-        let (l, t) = ((bw - mgw) / 2.0, (bh - mgh) / 2.0);
+        let (l, t) = ((bw - mgw) / 2.0, pad);
         // Every scene starts at the same corner (the union of all groups is centred), so the stars stay clear of each one.
         for (s, _) in &all {
             let _ = s.style().set_property("--k", &k.to_string());
@@ -145,7 +152,7 @@ fn fit() {
             [(l + 22.0, t - 22.0), (l + 52.0, t - 30.0), (l + mgw - 24.0, t - 20.0), (l + mgw - 52.0, t - 28.0), (l + 24.0, t + mgh + 22.0), (l + 54.0, t + mgh + 30.0)]
         } else {
             let bx = l + 0.115 * mnw1; // left of the third piece, which starts 23% into the first
-            [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + mw1 + 14.0, t + 10.0), (l + mw1 + 40.0, t + 30.0), (bx, t + mh1 + 22.0), (bx - 6.0, t + mh1 + 56.0)]
+            [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + mnw1 + 14.0, t + 10.0), (l + mnw1 + 40.0, t + 30.0), (bx, t + mh1 + 22.0), (bx - 6.0, t + mh1 + 56.0)]
         };
         let Ok(stars) = b.query_selector_all(".fx > i") else { continue };
         for n in 0..stars.length().min(6) {
@@ -305,6 +312,13 @@ pub fn Landing(
                                     C(text) => view! { <div class="co">{text}</div> }.into_any(),
                                     M(name, text) => view! { <div class="win mm"><i class="mmav" aria-hidden="true"></i><div><b>{name}</b><p>{text}</p></div></div> }.into_any(),
                                     K(rows) => view! { <div class="win tbl caselist stack">{rows.iter().map(|(no, kind, state, meta)| view! { <div class="card link"><b class="no">{*no}</b><span class="what"><span><b>{*kind}</b>" "<span class="chip" class:ok=(*state == "open")>{*state}</span></span><span class="muted">{*meta}</span></span></div> }).collect_view()}</div> }.into_any(),
+                                    D(crumb, title, cards) => view! { <div class="win dash" inert=true><div class="head"><small>{crumb}</small><h1>{title}</h1></div><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|(k, label, v)| match k {
+                                        's' => view! { <div class="row tog"><label>{*label}</label><input type="checkbox" class="sw" prop:checked=true /></div> }.into_any(),
+                                        'c' => view! { <div class="row"><label>{*label}</label><select><option>{*v}</option></select></div> }.into_any(),
+                                        'p' => view! { <div class="row"><label>{*label}</label><div class="lp"><input readonly value=*v /></div></div> }.into_any(),
+                                        'r' => view! { <div class="row"><label>{*label}</label><div class="pick"><span class="chip">{*v}" "<button class="link" tabindex="-1">"\u{d7}"</button></span><div class="lp"><input readonly placeholder="Search" /></div></div></div> }.into_any(),
+                                        _ => view! { <div class="row"><label>{*label}</label><input readonly value=*v /></div> }.into_any(),
+                                    }).collect_view()}</div></div> }).collect_view()}</div></div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                 }).collect_view()}</div> }).collect_view()}
                             </div>
@@ -407,6 +421,7 @@ mod tests {
                             }
                         }
                         Item::L(title, btn, _) => { check(title); check(btn) }
+                        Item::D(_, title, cards) => { check(title); for (name, fields) in cards.iter() { check(name); for (_, label, _) in fields.iter() { check(label) } } }
                         _ => {}
                     }
                 }
