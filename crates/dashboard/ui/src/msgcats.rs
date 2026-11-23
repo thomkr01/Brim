@@ -1,6 +1,6 @@
 //! Saved messages in the server's own categories: one card row per category (closed at first, as
 //! the Bot messages areas), "Uncategorized" last. Rows and categories sort A to Z until someone
-//! drags one (the shared `Grip`); "Sort A to Z" goes back. A message dragged onto another category's
+//! drags one (the whole row) or moves it with the arrow keys; "Sort A to Z" goes back. A message dragged onto another category's
 //! row, or onto its title, moves there.
 use crate::common::*;
 use leptos::{prelude::*, task::spawn_local};
@@ -230,7 +230,6 @@ pub fn Grouped(
                         go(i, i, Some(down));
                     }
                     tabindex="0" aria-describedby="msort-hint">
-                    <Grip i drag over drop=Callback::new(place) />
                     {row.run(m)}
                 </div>
             }
@@ -269,7 +268,6 @@ pub fn Grouped(
                         on:dragover=move |e| if let (Some(h), true) = (head_i, drag.get_untracked().is_some()) { e.prevent_default(); over.set(Some(h)) }
                         on:dragend=move |_| { drag.set(None); over.set(None) }
                         on:drop=move |e| { e.prevent_default(); if let (Some(d), Some(h)) = (drag.get_untracked(), head_i) { place((d, h)) } drag.set(None); over.set(None) }>
-                        {head_i.map(|h| view! { <Grip i=h drag over drop=Callback::new(place) /> })}
                         <HubRow label=name n=count open=Signal::derive(open)
                             flip=Callback::new(move |_| opened.update(|o| if !o.remove(&key2) { o.insert(key2.clone()); }))
                             attr:aria-describedby=head_i.map(|_| "msort-hint")
@@ -278,14 +276,19 @@ pub fn Grouped(
                                 e.prevent_default();
                                 place((h, to));
                             } />
-                    </div>
-                    <Show when=open>
+                        // Rename and Delete sit on the open row, left of the count, like the actions on a message row.
+                        <Show when=open>
                         {k.map(|_| { let (a, b, c, d) = (id2.clone(), name2.clone(), id3.clone(), name3.clone()); view! { <div class="mcattools">
                             <button class="ghost" title="Rename category" aria-label="Rename category" on:click=move |_| rename(a.clone(), b.clone())>{crate::icons::icon("edit")}</button>
                             <button class="ghost" title="Delete category" aria-label="Delete category" on:click=move |_| delete(c.clone(), d.clone())>{crate::icons::icon("trash")}</button>
                         </div> } })}
-                        <div class="mlist msorted">{items.clone().into_iter().map(|(i, m)| line(i, m)).collect_view()}</div>
-                        {items.is_empty().then(|| view! { <p class="muted">"No messages here yet. Drag one here, or move one with the arrow keys."</p> })}
+                        </Show>
+                    </div>
+                    <Show when=open>
+                        <div class="hubsubs">
+                            <div class="mlist msorted">{items.clone().into_iter().map(|(i, m)| line(i, m)).collect_view()}</div>
+                            {items.is_empty().then(|| view! { <p class="muted">"No messages here yet. Drag one here, or move one with the arrow keys."</p> })}
+                        </div>
                     </Show>
                 </div>
             })
