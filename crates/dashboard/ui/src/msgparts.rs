@@ -516,6 +516,8 @@ pub struct Parts {
     custom: RwSignal<Option<Value>>,
     standard: RwSignal<Option<Value>>,
     recent: RwSignal<Vec<Value>>,
+    /// Counts undo and redo steps: every text box draws itself again, the focused one too.
+    pub redraw: RwSignal<u32>,
 }
 
 impl Parts {
@@ -529,6 +531,7 @@ impl Parts {
             custom: RwSignal::new(None),
             standard: RwSignal::new(None),
             recent: RwSignal::new(vec![]),
+            redraw: RwSignal::new(0),
         };
         Effect::new(move |_| ROLES.with(|r| *r.borrow_mut() = p.roles.get()));
         p

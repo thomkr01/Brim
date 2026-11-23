@@ -774,3 +774,9 @@ The revert path replaced the whole editor value with `{"body": ..}`. The `added`
 A message line with a long link had no break point, so on a phone it ran outside the box. Discord breaks such a link.
 
 **Rule:** the text column of `.dmsg` has `overflow-wrap:anywhere`. Check a preview at 390 px with a long link in it.
+
+## The browser's own undo does not know the message
+
+Ctrl+Z in a text box only undoes typing. An added field, a changed colour or a removed embed changes the message, not the box, so the browser skipped it. A box that was drawn again (a different message loaded) also lost its undo steps.
+
+**Rule:** undo and redo go through `Editor::step` in `embeds.rs` (steps of the message body). Keys and the browser's own undo (`beforeinput`) both end there. A place that loads another message into the editor calls `Editor::reset`, or Undo would bring back the old message. Leave Alt out of shortcut checks: AltGr is Ctrl+Alt on many keyboards.

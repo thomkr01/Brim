@@ -373,6 +373,7 @@ pub fn BotMessages(
                         let d = open.with_untracked(|o| o.as_ref().map(|o| o["default"].clone())).unwrap_or_default();
                         orig.set(d.clone());
                         cur.update(|c| c["body"] = d);
+                        ed.reset();
                     }
                     msg.done("Reverted to the default.");
                     load();

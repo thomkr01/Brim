@@ -137,14 +137,14 @@ fn https(u: &str) -> bool {
         .is_some_and(|r| !r.trim().is_empty())
 }
 
-/// Toolbar wraps: (label, tooltip, open, close, shortcut key, needs Shift). Keys follow Discord and Word.
+/// Toolbar wraps: (label, name, open, close, shortcut key, needs Shift). Keys follow Discord and Word.
 const WRAPS: [(&str, &str, &str, &str, &str, bool); 6] = [
-    ("B", "Bold (Ctrl+B)", "**", "**", "b", false),
-    ("I", "Italic (Ctrl+I)", "*", "*", "i", false),
-    ("U", "Underline (Ctrl+U)", "__", "__", "u", false),
-    ("S", "Strikethrough (Ctrl+Shift+X)", "~~", "~~", "x", true),
-    ("▒", "Spoiler (Ctrl+Shift+P)", "||", "||", "p", true),
-    ("</>", "Code (Ctrl+E)", "`", "`", "e", false),
+    ("B", "Bold", "**", "**", "b", false),
+    ("I", "Italic", "*", "*", "i", false),
+    ("U", "Underline", "__", "__", "u", false),
+    ("S", "Strikethrough", "~~", "~~", "x", true),
+    ("▒", "Spoiler", "||", "||", "p", true),
+    ("</>", "Code", "`", "`", "e", false),
 ];
 const LINES: [(&str, &str, &str); 4] = [
     ("H", "Heading", "## "),
@@ -167,20 +167,91 @@ fn md_box() -> Option<web_sys::HtmlElement> {
         .and_then(|e| e.dyn_into().ok())
 }
 
+/// Mac keyboards use Cmd where others use Ctrl.
+fn is_mac() -> bool {
+    window().navigator().platform().is_ok_and(|p| p.contains("Mac"))
+}
+
+/// A toolbar tooltip with the shortcut in the user's own key names.
+fn tip(name: &str, key: &str, shift: bool) -> String {
+    let m = if is_mac() { "Cmd" } else { "Ctrl" };
+    let s = if shift { "+Shift" } else { "" };
+    format!("{name} ({m}{s}+{})", key.to_uppercase())
+}
+
+/// UTF-16 length of `s`, the unit of a text node's offsets.
+fn u16len(s: &str) -> u32 {
+    s.encode_utf16().count() as u32
+}
+
+/// A `*` next to another `*` is part of `**`, not an italic marker.
+fn lone(o: &str, before: Option<char>, after: Option<char>) -> bool {
+    o != "*" || (before != Some('*') && after != Some('*'))
+}
+
+/// With the cursor between `l` and `r`: how far the cursor moves right to leave the pair `o`…`c`
+/// it sits in on this line (None when it is not inside one).
+fn way_out(l: &str, r: &str, o: &str, c: &str) -> Option<usize> {
+    let (l, r) = (l.rsplit('\n').next()?, r.split('\n').next()?);
+    // An odd number of marks before the cursor means one is open.
+    let open = l
+        .match_indices(o)
+        .filter(|&(i, _)| lone(o, l[..i].chars().last(), l[i + o.len()..].chars().next()))
+        .count();
+    (open % 2 == 1).then_some(())?;
+    r.match_indices(c)
+        .find(|&(i, _)| {
+            let before = r[..i].chars().last().or(l.chars().last());
+            lone(c, before, r[i + c.len()..].chars().next())
+        })
+        .map(|(i, _)| i + c.len())
+}
+
+/// No selection: puts in the pair with the cursor between the marks, or, when the cursor is already
+/// inside such a pair, moves it out to the right of the closing mark.
+fn pair_at_cursor(sel: &web_sys::Selection, o: &str, c: &str) {
+    if let Some(n) = sel.anchor_node().and_then(|n| n.dyn_into::<web_sys::Text>().ok()) {
+        let s = n.data();
+        let off = sel.anchor_offset();
+        let at = s
+            .char_indices()
+            .map(|(i, _)| i)
+            .chain([s.len()])
+            .find(|&i| u16len(&s[..i]) >= off)
+            .unwrap_or(s.len());
+        if let Some(k) = way_out(&s[..at], &s[at..], o, c) {
+            let _ = sel.collapse_with_offset(Some(&n), u16len(&s[..at + k]));
+            return;
+        }
+    }
+    exec("insertText", &format!("{o}{c}"));
+    for _ in 0..c.len() {
+        let _ = sel.modify("move", "backward", "character");
+    }
+}
+
 /// Wraps the selection in `o`…`c`, or unwraps it when it already is. `insertText` keeps Ctrl+Z working.
 fn wrap_sel(o: &str, c: &str) {
     let (Some(_), Some(sel)) = (md_box(), window().get_selection().ok().flatten()) else {
         return;
     };
+    if sel.is_collapsed() {
+        return pair_at_cursor(&sel, o, c);
+    }
     let t = String::from(sel.to_string());
     let inner = t
         .strip_prefix(o)
         .and_then(|r| r.strip_suffix(c))
         .filter(|_| t.len() >= o.len() + c.len());
-    exec(
-        "insertText",
-        &inner.map_or_else(|| format!("{o}{t}{c}"), String::from),
-    );
+    let out = inner.map_or_else(|| format!("{o}{t}{c}"), String::from);
+    exec("insertText", &out);
+    // The new text stays selected, so the same key again undoes the wrap.
+    if let Some(n) = sel.anchor_node().and_then(|n| n.dyn_into::<web_sys::Text>().ok()) {
+        let end = sel.anchor_offset();
+        if let Some(start) = end.checked_sub(u16len(&out)) {
+            let _ = sel.set_base_and_extent(&n, start, &n, end);
+        }
+    }
 }
 
 /// Puts `p` at the start of the line with the cursor.
@@ -223,7 +294,8 @@ fn link() {
 }
 
 fn on_key(e: ev::KeyboardEvent) {
-    if !(e.ctrl_key() || e.meta_key()) {
+    // Alt is left alone: AltGr (Ctrl+Alt) types characters on many keyboards.
+    if !(e.ctrl_key() || e.meta_key()) || e.alt_key() {
         return;
     }
     let k = e.key().to_lowercase();
@@ -271,6 +343,24 @@ fn serialize(el: &web_sys::Element) -> String {
         .to_string()
 }
 
+fn cursor_to_end(e: &web_sys::Element) {
+    if let (Ok(r), Some(sel)) = (document().create_range(), window().get_selection().ok().flatten()) {
+        let _ = r.select_node_contents(e);
+        r.collapse_with_to_start(false);
+        let _ = sel.remove_all_ranges();
+        let _ = sel.add_range(&r);
+    }
+}
+
+/// The steps back and forward through the message: the body as it was before each burst of edits.
+#[derive(Default)]
+struct Hist {
+    past: Vec<Value>,
+    future: Vec<Value>,
+    last: Value,
+    at: f64,
+}
+
 /// One text part of the message, typed in place (contenteditable). It is only redrawn while it does
 /// not have the focus, so typing never moves the cursor.
 #[component]
@@ -292,19 +382,27 @@ fn Ed(
     let el = NodeRef::<leptos::html::Div>::new();
     let p = StoredValue::new(ptr);
     let parts = use_context::<Parts>();
+    let seen = StoredValue::new(0u32);
     let val = Memo::new(move |_| cur.with(|c| get_str(c, &p.read_value())));
     Effect::new(move |_| {
         let v = val.get();
         if let Some(p) = parts {
             p.roles.track(); // role chips show the role's name
         }
+        // An undo or redo step draws the focused box too, as typing never does.
+        let step = parts.map_or(0, |p| p.redraw.get());
+        let forced = step != seen.get_value();
+        seen.set_value(step);
         let Some(e) = el.get() else { return };
         let focused = document()
             .active_element()
             .is_some_and(|a| a.is_same_node(Some(&e)));
         let html = chips(&v);
-        if !focused && e.inner_html() != html {
+        if (forced || !focused) && e.inner_html() != html {
             e.set_inner_html(&html);
+            if focused {
+                cursor_to_end(&e);
+            }
         }
     });
     let input = move |_| {
@@ -877,6 +975,7 @@ pub(crate) struct Editor {
     /// The preview's open menu answer: (row, option).
     pub answer: RwSignal<Option<(usize, usize)>>,
     pub parts: Parts,
+    hist: StoredValue<Hist>,
     /// A built-in bot message: no buttons, menus or embed times (Brim adds its own buttons).
     plain: bool,
     /// None: this message cannot be edited. Some(open): the editor is open (Edit message opens it).
@@ -907,9 +1006,30 @@ impl Editor {
             }
         });
         on_cleanup(move || esc_key.remove());
+        let hist = StoredValue::new(Hist::default());
+        // Every change of the body is a step; edits less than 0.7 s apart are one step.
+        Effect::new(move |_| {
+            let b = cur.with(|c| c["body"].clone());
+            hist.update_value(|h| {
+                if h.last.is_null() {
+                    h.last = b;
+                } else if h.last != b {
+                    let now = js_sys::Date::now();
+                    if now - h.at > 700.0 {
+                        let before = std::mem::replace(&mut h.last, b);
+                        h.past.push(before);
+                        h.past.drain(..h.past.len().saturating_sub(100));
+                    } else {
+                        h.last = b;
+                    }
+                    h.at = now;
+                    h.future.clear();
+                }
+            });
+        });
         // The preview's open menu answer: (row, option).
         let answer = RwSignal::new(None::<(usize, usize)>);
-        Editor {
+        let ed = Editor {
             cur,
             pop,
             recent,
@@ -919,8 +1039,61 @@ impl Editor {
             phone,
             answer,
             parts,
+            hist,
             plain,
             edit: RwSignal::new(None),
+        };
+        // Undo and redo in a message text box, from the keys or from the browser's own menu.
+        // Also with no focus (a box that undo just removed had it).
+        let in_box = || {
+            document().active_element().is_none_or(|a| {
+                a.get_attribute("contenteditable").as_deref() == Some("true")
+                    || (a.tag_name() == "BODY"
+                        && document().query_selector(".live .ed").ok().flatten().is_some())
+            })
+        };
+        let keys = window_event_listener(ev::keydown, move |e| {
+            let k = e.key().to_lowercase();
+            if !(e.ctrl_key() || e.meta_key()) || e.alt_key() || e.is_composing() || !in_box() {
+                return;
+            }
+            match (k.as_str(), e.shift_key()) {
+                ("z", false) => ed.step(true),
+                ("z", true) | ("y", false) => ed.step(false),
+                _ => return,
+            }
+            e.prevent_default();
+        });
+        let menu = window_event_listener(ev::beforeinput, move |e| {
+            let undo = match e.input_type().as_str() {
+                "historyUndo" => true,
+                "historyRedo" => false,
+                _ => return,
+            };
+            if in_box() {
+                e.prevent_default();
+                ed.step(undo);
+            }
+        });
+        on_cleanup(move || {
+            keys.remove();
+            menu.remove()
+        });
+        ed
+    }
+
+    /// One step back (`undo`) or forward through the message, whatever changed it.
+    fn step(self, undo: bool) {
+        let to = self.hist.try_update_value(|h| {
+            let (from, to) = if undo { (&mut h.past, &mut h.future) } else { (&mut h.future, &mut h.past) };
+            let t = from.pop()?;
+            to.push(std::mem::replace(&mut h.last, t.clone()));
+            h.at = 0.0;
+            Some(t)
+        });
+        if let Some(Some(t)) = to {
+            self.cur.update(|c| c["body"] = t);
+            self.parts.redraw.update(|n| *n += 1);
         }
     }
 
@@ -930,6 +1103,8 @@ impl Editor {
         self.pop.set(None);
         self.parts.sub.set(None);
         self.answer.set(None);
+        let b = self.cur.with_untracked(|c| c["body"].clone());
+        self.hist.set_value(Hist { last: b, ..Hist::default() });
     }
 
     /// (Message tab, Preview tab, the popup layer).
@@ -953,6 +1128,7 @@ impl Editor {
             parts,
             plain,
             edit,
+            ..
         } = self;
         // Opens a popup under the control that was clicked (where it was clicked, for an embed's tall edge).
         let open_pop = move |e: ev::MouseEvent, p: Pop| {
@@ -1214,8 +1390,8 @@ impl Editor {
                         {move || match jerr.get() { Some(e) => view! { <p class="err small">{e}</p> }.into_any(), None => view! { <p class="muted small">"Text, embeds and link buttons, as Discord's JSON. Saving checks every key and Discord's limits and says what is wrong."</p> }.into_any() }}
                     }.into_any() } else { view! {
                         <div class="tools">
-                            {WRAPS.map(|(l, tip, o, c, ..)| view! { <button class="ghost" title=tip aria-label=tip on:mousedown=move |e| { e.prevent_default(); wrap_sel(o, c) }>{l}</button> }).collect_view()}
-                            <button class="ghost" title="Link (Ctrl+K)" aria-label="Link (Ctrl+K)" on:mousedown=|e| { e.prevent_default(); link() }>{crate::icons::icon("link")}</button>
+                            {WRAPS.map(|(l, name, o, c, k, sh)| { let t = tip(name, k, sh); view! { <button class="ghost" title=t.clone() aria-label=t on:mousedown=move |e| { e.prevent_default(); wrap_sel(o, c) }>{l}</button> } }).collect_view()}
+                            <button class="ghost" title=tip("Link", "k", false) aria-label=tip("Link", "k", false) on:mousedown=|e| { e.prevent_default(); link() }>{crate::icons::icon("link")}</button>
                             {LINES.map(|(l, tip, p)| view! { <button class="ghost" title=tip aria-label=tip on:mousedown=move |e| { e.prevent_default(); line_sel(p) }>{l}</button> }).collect_view()}
                             {crate::msgparts::tool_buttons(parts)}
                         </div>
@@ -1401,10 +1577,7 @@ pub fn Embeds(
         cur.set(m);
         tab.set("message");
         ed.edit.set(Some(true));
-        json_view.set(false);
-        pop.set(None);
-        parts.sub.set(None);
-        answer.set(None);
+        ed.reset();
         picking.set(false);
         sends.set(vec![]);
         opened.update_value(|n| *n += 1);
@@ -2059,6 +2232,19 @@ mod tests {
             )
             .is_empty());
         }
+    }
+
+    #[test]
+    fn way_out_leaves_the_pair() {
+        assert_eq!(way_out("a **", "** b", "**", "**"), Some(2));
+        // Between two spans, not inside one.
+        assert_eq!(way_out("**a** ", "**b**", "**", "**"), None);
+        assert_eq!(way_out("a **bo", "ld** b", "**", "**"), Some(4));
+        assert_eq!(way_out("a ", " b", "**", "**"), None);
+        assert_eq!(way_out("**x**\n", "y**", "**", "**"), None);
+        // Inside bold, italic is not "already inside".
+        assert_eq!(way_out("**x", "**", "*", "*"), None);
+        assert_eq!(way_out("*x", "*", "*", "*"), Some(1));
     }
 
     #[test]
