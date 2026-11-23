@@ -817,10 +817,10 @@ The owner saw the new scene sit a little to the right while it moved, with no re
 
 **Rule:** a motion ends exactly at the resting layout. A moved piece keeps its layer when it rests (`will-change:transform,opacity` on `.feat-shot > .scene`), so the first resting frame is the last animated frame. The cross-fade is linear, so the two scenes always add up to one. Check a motion by recording (pause it at 0, 25, 50, 75 and 99.9% and compare the pictures; the page at 99.9% must equal the rested page), never from still screenshots or from rectangle numbers alone.
 
-**Update (2026-11-23):** the owner removed the hover highlight of the big front page buttons; the edge line now shows only while the button is pressed (`:active`). Do not add a hover highlight to them again. The rule above still holds for any other outline.
+**Update (2026-11-23):** the owner removed the hover line of the big front page buttons and then the white pressed look. They now show nothing on hover or when pressed except the 97 % press-down; the `::before` layer is gone. Do not add a hover or pressed highlight to them again. The rule above still holds for any other outline.
 
-## White pressed button hid its own label (front page, 2026-11-23)
+## A pressed button turned white under its label (front page, 2026-11-23)
 
-A pressed front page button is covered by a white layer (`::before`, `z-index:-1`; the press transform makes the button its own stacking context, so the layer lies over the button's fill). The grey "Go to dashboard" and the top bar button have light text, so the pressed label was white on white. The orange buttons already have dark text. Only a still of each pressed button showed it.
+The white layer of a pressed front page button (`::before`, `z-index:-1`) lay over the button's own fill, because the press transform makes the button a stacking context. Light labels became white on white. Fixed by removing the layer.
 
-**Rule:** a state that changes the fill of a button sets the label colour with it (`.land .tb-btn:active` sets `color:var(--on-accent)`). Look at the pressed, hover and focus still of every button style in both browsers before reporting.
+**Rule:** a state that changes a button's fill sets the label colour with it. Look at the pressed, hover and focus still of every button style in both browsers before reporting.
