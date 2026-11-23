@@ -156,11 +156,13 @@ Going back to a build from before this: **Install** on the Update page fails and
 
 ### Emojis
 
-The icons in `assets/icons` are the bot's custom emojis. After a change to them, upload them as application emojis (they get new ids, so restart the bot right after: the Update button does it). The upload needs `DISCORD_TOKEN` and `DISCORD_CLIENT_ID`, Node 18 or newer, and Playwright with Chromium to draw the PNGs. On the server, with Docker and the token in `.env`:
+The icons in `assets/icons` are the bot's custom emojis. After a change to them, upload them as application emojis (they get new ids, so restart the bot right after: the Update button does it). The upload needs `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` in `.env`. It draws the PNGs with Playwright's own Docker image (Node and Chromium inside). The image stays on the server, so a later upload downloads nothing. On the server, from `~/brim`:
 
 ```
-cd ~/brim && git pull && docker run --rm --env-file .env -v "$PWD":/app -w /app node:22-bookworm sh -c 'npm install --no-save playwright && npx playwright install --with-deps chromium && node tools/emojis.mjs upload --replace; rm -rf node_modules'
+cd ~/brim && git pull && docker run --rm --env-file .env -v "$PWD":/app -v brim-emoji-npm:/root/.npm -w /app mcr.microsoft.com/playwright:v1.64.1-noble sh -c 'npm install --no-save --prefer-offline playwright@1.64.1 && node tools/emojis.mjs "$@"; rm -rf node_modules' sh upload --replace
 ```
+
+For one emoji, replace the last words with its name: `sh upload mailbox`. The image is about 3.6 GB on disk. To remove it and the npm cache: `docker image rm mcr.microsoft.com/playwright:v1.64.1-noble && docker volume rm brim-emoji-npm`. The next upload pulls the image again.
 
 The tool retries a Discord 429, 502, 503, 504 or network error and ends with the counts (replaced, created, failed). If some failed, it prints the one command that does only those; run it again after a short wait. An old emoji is deleted only after its new PNG is drawn, but a delete followed by a failed create leaves that emoji missing until the rerun.
 
