@@ -4,8 +4,8 @@
 //! `{variables}`. Locked messages (security texts) never take an override.
 use crate::embed::{label_head, ALERT, BLUE, DONE, GREEN, ORANGE, RED};
 use crate::emoji::{
-    APPEAL, BAN, CAPTCHA, CHAIN, FINGERPRINT, KICK, LOCK, NO, PURGE, QUESTION, REPLY, TIMEOUT,
-    WARNING, WHITELIST, YES,
+    APPEAL, BAN, CAPTCHA, CHAIN, FINGERPRINT, KICK, LOCK, MAILBOX, NO, PURGE, QUESTION, REPLY,
+    TIMEOUT, WARNING, WHITELIST, YES,
 };
 use serde_json::{json, Value};
 use std::sync::OnceLock;
@@ -5588,7 +5588,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
             &format!("{TICKET_CLOSE} Ticket Closed"),
             BLUE,
             &[
-                format!("{TICKET_CLOSE} Your ticket in `{{server}}` was closed."),
+                format!("{MAILBOX} Your ticket in `{{server}}` was closed."),
                 format!("{} {{reason}}", label_head("Reason")),
             ],
         ),

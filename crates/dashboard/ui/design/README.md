@@ -99,7 +99,7 @@ Below the hero, each feature block (`SECTIONS` in `landing.rs`, rules in `style.
 
 ## Emojis and icons (owner decision, 2026-11-22)
 
-- The 305 emoji pictures (`assets/icons/<name>.svg`, 128x128, checked by `node tools/emojis.mjs check`) are static, with one orange gradient from left to right (`x1=16`, `x2=112`, one `<name>-grad` per file). The 29 pass, fail and caution pictures run from orange into green, red or amber instead of rust. No animation, no second effect. Why: one calm look in Discord and in the dashboard, and the colour says the result before the word does.
+- The 306 emoji pictures (`assets/icons/<name>.svg`, 128x128, checked by `node tools/emojis.mjs check`) are static, with one orange gradient from left to right (`x1=16`, `x2=112`, one `<name>-grad` per file). The 29 pass, fail and caution pictures run from orange into green, red or amber instead of rust. No animation, no second effect. Why: one calm look in Discord and in the dashboard, and the colour says the result before the word does.
 - The dashboard draws the same pictures through `icon` in `icons.rs`. An icon on a coloured button (a green Load, a red Delete) must stay readable: draw it in the button's text colour, not in its own gradient, so orange on green or red never happens. Check the real button in the browser, in both a green and a red state, when you add an icon to a coloured button.
 
 ## Overview (owner decision, 2026-11-22)

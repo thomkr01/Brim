@@ -176,6 +176,7 @@ pub const REFRESH: Emoji = e("refresh", "🔄");
 pub const TICKET: Emoji = e("modmail", "📨");
 pub const TICKET_NEW: Emoji = e("modmail_new", "📬");
 pub const TICKET_REPLY: Emoji = e("modmail_reply", "💬");
+pub const MAILBOX: Emoji = e("mailbox", "📪");
 pub const TICKET_CLOSE: Emoji = e("modmail_close", "📪");
 pub const TICKET_BLOCK: Emoji = e("modmail_block", "⛔");
 
@@ -385,6 +386,7 @@ mod tests {
             TICKET_REPLY,
             TICKET_CLOSE,
             TICKET_BLOCK,
+            MAILBOX,
             KICK,
             PURGE,
             BAN,
