@@ -282,6 +282,11 @@ pub const CATALOG: &[PermSection] = &[
                 "Manage Giveaways",
                 "Start, end, cancel, reroll and redraw giveaways",
             ),
+            perm(
+                "forms",
+                "Manage Forms",
+                "Make forms, panels and templates, and read and decide responses",
+            ),
         ],
     },
     PermSection {

@@ -259,6 +259,9 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
             crate::giveaways::claim_job(app, gid, &job.payload).await?
         }
         "ticket_close_check" => crate::tickets::close_check(app, gid, &job.payload).await?,
+        k @ (brim_core::forms::OPEN_JOB | brim_core::forms::CLOSE_JOB) => {
+            brim_core::forms::time_job(&app.pool, gid.get() as i64, k, &job.payload).await?
+        }
         other => tracing::warn!(kind = other, "unknown job kind"),
     }
     Ok(())

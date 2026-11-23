@@ -46,6 +46,11 @@ fn delete_for(field: &str) -> Option<&'static str> {
             "DELETE FROM guild_config WHERE guild_id = $1 AND created_at < now() - make_interval(days => $2)
                AND version < (SELECT max(version) FROM guild_config WHERE guild_id = $1)"
         }
+        // Through the form: the unique (form_id, number) index finds the rows of one server.
+        "forms_days" => {
+            "DELETE FROM form_responses WHERE form_id IN (SELECT id FROM forms WHERE guild_id = $1)
+               AND status <> 'open' AND COALESCE(decided_at, submitted_at) < now() - make_interval(days => $2)"
+        }
         _ => return None,
     })
 }
@@ -119,6 +124,64 @@ mod tests {
         for (f, _) in RetentionCfg::default().days() {
             assert!(delete_for(f).is_some(), "{f}");
         }
+    }
+
+    /// Decided and collected form responses go after the limit; open ones and other servers stay.
+    #[tokio::test]
+    async fn old_form_responses_go() {
+        let Ok(url) = brim_core::db::test_url() else {
+            return;
+        };
+        let pool = brim_core::db::connect(&url).await.unwrap();
+        let g = 7_400_000_000 + std::process::id() as i64 * 2;
+        sqlx::query("DELETE FROM forms WHERE guild_id IN ($1, $1 + 1)")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
+        for guild in [g, g + 1] {
+            sqlx::query(
+                "WITH f AS (INSERT INTO forms (guild_id, kind, name, body, created_by)
+                            VALUES ($1, 'application', 'F', '{}', 1) RETURNING id)
+                 INSERT INTO form_responses (form_id, guild_id, number, user_id, status, answers, via, submitted_at, decided_at)
+                 SELECT f.id, $1, n, n, s, '{}', 'web', now() - interval '400 days', d
+                 FROM f, (VALUES (1, 'open', NULL::timestamptz), (2, 'denied', now() - interval '400 days'),
+                                 (3, 'denied', now()), (4, 'collected', NULL)) v(n, s, d)",
+            )
+            .bind(guild)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query(delete_for("forms_days").unwrap())
+            .bind(g)
+            .bind(365)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let left: Vec<(i64, i32)> = sqlx::query_as(
+            "SELECT guild_id, number FROM form_responses WHERE guild_id IN ($1, $1 + 1) ORDER BY 1, 2",
+        )
+        .bind(g)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            left,
+            [
+                (g, 1),
+                (g, 3),
+                (g + 1, 1),
+                (g + 1, 2),
+                (g + 1, 3),
+                (g + 1, 4)
+            ]
+        );
+        sqlx::query("DELETE FROM forms WHERE guild_id IN ($1, $1 + 1)")
+            .bind(g)
+            .execute(&pool)
+            .await
+            .unwrap();
     }
 
     /// Old closed rows go, open ones and the newest numbered rows stay; 0 keeps.

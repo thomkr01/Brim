@@ -64,6 +64,8 @@ services:
       MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:-}
       # Lets the dashboard's own database role log in (not a superuser; DEPLOY.md "Dashboard database role").
       DASHBOARD_DB_PASSWORD: ${DASHBOARD_DB_PASSWORD:-}
+      # Key of anonymous form answers; bot and dashboard only, never MCP (DEPLOY.md "Forms key").
+      FORMS_KEY: ${FORMS_KEY:-}
       # Links in the welcome message.
       DASHBOARD_URL: ${DASHBOARD_URL:-}
       SUPPORT_URL: ${SUPPORT_URL:-}
@@ -100,6 +102,7 @@ services:
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:?set DISCORD_CLIENT_SECRET in .env}
       # Optional: raises GitHub's limit for followed repositories from 60 to 5000 requests an hour.
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      FORMS_KEY: ${FORMS_KEY:-}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       SUPPORT_URL: ${SUPPORT_URL:-}

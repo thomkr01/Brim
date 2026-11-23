@@ -1189,6 +1189,13 @@ pub fn schema() -> Vec<Value> {
                 RETENTION_HELP,
             ),
         ),
+        sx(
+            "retention",
+            hp(
+                ti(dv(fg("Data kept", "forms_days", "int"), 365), "Form answers kept for (days)"),
+                "Counted from when staff accept or deny it, or from when it was sent on a form that only collects answers. Answers that wait for a decision always stay. 0 keeps them until staff delete them; otherwise at least 30 days. Changing this needs the owner or an Extra Owner and 2FA.",
+            ),
+        ),
     ];
     let verification = vec![
         ti(

@@ -4,6 +4,7 @@ pub mod cmdcfg;
 pub mod config;
 pub mod db;
 pub mod duration;
+pub mod forms;
 pub mod giveaway_plans;
 pub mod giveaways;
 pub mod invites;

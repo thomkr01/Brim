@@ -53,7 +53,7 @@ pub const INVITE_MAX_USES: (i64, i64) = (0, 100);
 
 /// Numbers at a fixed path whose 0 or out-of-range value would quietly switch their feature off:
 /// (section, path, range). `panic.executors` may be 0: that turns panic mode off.
-const FIXED: [(&str, &str, (i64, i64)); 37] = [
+const FIXED: [(&str, &str, (i64, i64)); 38] = [
     ("automod", "strike.cap", STRIKE_CAP),
     ("automod", "strike.multiplier_pct", STRIKE_MULTIPLIER),
     (
@@ -112,6 +112,7 @@ const FIXED: [(&str, &str, (i64, i64)); 37] = [
     ("retention", "appeals_days", (0, 3650)),
     ("retention", "tickets_days", (0, 3650)),
     ("retention", "config_history_days", (0, 3650)),
+    ("retention", "forms_days", (0, 3650)),
     // Defaults for new giveaways; 0 turns an age rule off.
     (
         "giveaways",

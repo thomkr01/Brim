@@ -470,6 +470,10 @@ pub async fn purge_left(app: std::sync::Arc<App>) {
         if let Err(e) = old {
             tracing::warn!(?e, "pruning old giveaways failed");
         }
+        // Form drafts after their 30 minutes, and the response cap per form.
+        if let Err(e) = brim_core::forms::prune(&app.pool).await {
+            tracing::warn!(?e, "pruning form drafts and responses failed");
+        }
         // Moderator stats keep one year (owner decision 2026-11-11).
         let old = prune_batched(
             &app.pool,

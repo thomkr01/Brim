@@ -154,6 +154,18 @@ Check (optional): `docker compose exec postgres psql -U brim brim -c "select use
 
 Going back to a build from before this: **Install** on the Update page fails and puts the running version back (that bot looks for the token in its environment, and that dashboard cannot start on the new role). By hand, take the compose file of that build as well, then pin it: `git checkout <sha> -- docker-compose.yml`, add `BRIM_TAG=<sha>` to `.env`, `docker compose pull && docker compose up -d`. Forward again: remove the `BRIM_TAG` line, `git checkout HEAD -- docker-compose.yml`, `docker compose pull && docker compose up -d`.
 
+### Forms key
+
+An anonymous form stores no user ID, only a keyed hash, so Brim can still keep "answer once" and the cooldown. The key is `FORMS_KEY` in `.env`. Only the bot and the dashboard get it, never the MCP server, and it is never in the database or a dump. So someone with a dump or the dashboard's database role cannot tie an anonymous answer to a member. Without the key, a form cannot be set to anonymous. Never change the key: every member would count as new on anonymous forms.
+
+Once, on the server (the Update button does not change `.env` or `docker-compose.yml`):
+
+```bash
+cd ~/brim && grep -q '^FORMS_KEY=.' .env || { k=$(openssl rand -hex 32) && [ -n "$k" ] && printf '\nFORMS_KEY=%s\n' "$k" >> .env; }
+git pull && docker compose pull && docker compose up -d && docker image prune -f
+docker compose ps
+```
+
 ### Emojis
 
 The icons in `assets/icons` are the bot's custom emojis. After a change to them, upload them as application emojis (they get new ids, so restart the bot right after: the Update button does it). The upload needs `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` in `.env`. It draws the PNGs with Playwright's own Docker image (Node and Chromium inside). The image stays on the server, so a later upload downloads nothing. On the server, from `~/brim`:
