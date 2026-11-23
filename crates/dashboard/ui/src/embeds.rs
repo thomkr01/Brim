@@ -98,15 +98,10 @@ pub(crate) fn with_added(c: &Value, mut msg: Value) -> Value {
 pub fn added_notice(c: &Value) -> Option<AnyView> {
     // A panel built from the live settings: Brim adds its controls, the preview does not draw them.
     if c["added"] == "panel" {
-        return Some(view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds this panel's controls itself."</b>" They are not shown here."</span></p> }.into_any());
+        return Some(view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds the controls itself."</b></span></p> }.into_any());
     }
-    let names: Vec<String> = c["added"]
-        .as_array()?
-        .iter()
-        .flat_map(|r| r["components"].as_array().into_iter().flatten())
-        .filter_map(|b| b["label"].as_str().map(String::from))
-        .collect();
-    (!names.is_empty()).then(|| view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds these buttons itself: "</b>{names.join(", ")}". What they do is fixed."</span></p> }.into_any())
+    let any = c["added"].as_array()?.iter().any(|r| r["components"].as_array().is_some_and(|b| !b.is_empty()));
+    any.then(|| view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds the buttons itself."</b></span></p> }.into_any())
 }
 
 /// The message preview on the right, as members see it, and the editor on the left behind an
