@@ -665,6 +665,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
   .land .scene > div:nth-of-type(2) { position:absolute; left:84%; top:31%; z-index:2; }
   .land .scene > div:nth-of-type(3) { position:absolute; left:23%; top:88%; z-index:4; }
   .land .scene > .win:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 7); z-index:5; }
+  .land .scene > .mm { z-index:1; }
   .land .scene:has(> .win:not(.pane):not(.lcard):not(.tbl)) > :is(.pane, .lcard, .tbl):nth-of-type(3) { width:max-content; max-width:calc(var(--space-56) * 5.5); padding-right:calc(var(--space-56) + var(--space-24)); }
   .land .scene > .win.xs { width:calc(var(--space-56) * 6.4); }
 }
@@ -865,3 +866,24 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .win.xs { display:flex; flex-direction:column; background:none; box-shadow:none; gap:var(--space-8); overflow:visible; }
 .land .win.xs > * { transform:scale(.98); }
 @media (max-width:760px) { .land .scene { padding:0; } .land .lcard { min-width:0; } .land [class*="l-base"] > .pane:nth-of-type(2) .tog { flex-wrap:wrap; white-space:normal; } .land .lrow { flex-wrap:wrap; } }
+
+/* A member's message in a scene: avatar, name, text. */
+.land .mm { display:flex; gap:var(--space-12); align-items:flex-start; padding:var(--space-16); font-size:1.25em; }
+.land .mm .mmav { width:2.2em; height:2.2em; flex:none; border-radius:50%; background:var(--line); }
+.land .mm b { display:block; } .land .mm p { margin:0; color:#dbdee1; }
+@media (min-width:761px) { .land .scene > .mm:nth-of-type(1) { padding-right:calc(var(--space-56) + var(--space-8)); } }
+
+/* The big orange label of a scene: sits on the top right of the second piece (desktop); a phone leaves it out. */
+.land .co { display:none; }
+@media (min-width:761px) { .land .scene > .co { display:block; position:absolute; z-index:7; left:calc(84% + var(--space-56) * 3.6); top:calc(31% - var(--space-48)); padding:var(--space-4) var(--space-24); border-radius:var(--radius-button); background:var(--orange-grad); color:var(--on-accent); font-size:2.2em; font-weight:800; line-height:1.3; box-shadow:0 var(--space-8) var(--space-24) #0008; } }
+/* Real dashboard views in scenes (logs, cases): one line per row, wide enough to read. */
+.land .tbl td, .land .caselist .muted { white-space:nowrap; }
+.land .caselist.tbl { padding:var(--space-12); }
+.land .caselist .card.link { display:flex; align-items:center; box-shadow:none; }
+@media (min-width:761px) {
+  .land .scene > .tbl:nth-of-type(3) { max-width:none; padding-right:var(--space-56); }
+  .land .scene > .win.xs { z-index:2; }
+}
+@media (min-width:761px) { .land .scene > .win.mm.mm.mm.mm:nth-of-type(3) { z-index:1; } }
+@media (min-width:761px) { .land .scene > .win.mm.mm.mm.mm:nth-of-type(3) { width:calc(var(--space-56) * 4.4); } }
+.land .pane .tog > label { flex:none; }

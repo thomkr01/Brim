@@ -8,16 +8,18 @@ use leptos::{html, prelude::*};
 enum Item {
     E(&'static str),
     P(&'static str, &'static [&'static str]),
-    /// The same sample three times, each with its own edit from EDITS.
-    X(&'static str),
-    /// The Channel Setup grid: role columns, rows of (channel or category name, one mark per role).
-    G(&'static [&'static str], &'static [(&'static str, &'static [&'static str])]),
     /// A dashboard list card: title, header button, rows of (name, grey text, action pills joined by |).
     L(&'static str, &'static str, &'static [(&'static str, &'static str, &'static str)]),
     /// A dashboard table: title and (name, state) rows.
     T(&'static str, &'static [(&'static str, &'static str)]),
+    /// A member's message in the channel: name and text.
+    M(&'static str, &'static str),
+    /// A big orange label on the scene, like the action a rule takes.
+    C(&'static str),
+    /// The Cases page: rows of (number, kind, open or closed, grey text).
+    K(&'static [(&'static str, &'static str, &'static str, &'static str)]),
 }
-use Item::{E, G, L, P, T, X};
+use Item::{C, E, K, L, M, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -28,39 +30,39 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Switch on the protection you want", "stk", &[P("Automod status", &["?Do you want Brim to monitor messages?", "Enable Automod", "Moderate invite links posted", "Filter out NSFW links", ">Next step"]), P("Antinuke status", &["?Do you want Brim to monitor moderation actions made by your staff members?", "Enable Antinuke"]), P("Quarantine", &["?Do you want the quarantine system that keeps your server safe from being destroyed?", "Use the auto quarantine module", "Guard the server's vanity url", "Quarantine role|@Quarantine"])]),
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
-        ("Members solve a captcha before they talk", "base", &[P("Captcha", &["Captcha answer length|6", "Captcha characters|azAZ09 ▾", "Show a colored trace that follows the captcha characters"]), E("verify_simple"), P("Verification", &["Fail action|Kick ▾"])]),
-        ("A panel they press to start", "base", &[P("Verification", &["Verification mode|Button ▾", "Verification channel|#verify ▾", "Verification roles|@Member"]), E("verify_panel"), P("Captcha", &["Captcha answer length|6"])]),
-        ("Set up in the dashboard", "base", &[P("Verification", &["Verification duration|10 min", "Fail action|Kick ▾", "Block VPNs and proxies"]), E("verify_help"), P("Verification", &["Verification roles|@Member"])])]),
+        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_simple"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
+        ("A panel they press to start", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_panel"), M("Mika", "I just joined, what now?"), C("Verify")]),
+        ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
     ("Anti-raid.", &[
-        ("Joins pause when a wave of accounts arrives", "base", &[P("Join raid", &["Minimum trigger (accounts)|8", "Join history|10 s", "Trigger duration|5 min"]), E("raid"), P("Raider List", &["Use the Raider List"])]),
-        ("Every raid gets a report", "base", &[P("Join raid", &["Flag accounts without an avatar", "Flag accounts younger than|7 days"]), E("raid_report"), P("Join raid", &["Join history|10 s"])]),
-        ("Known raiders are flagged on arrival", "base", &[P("Raider List", &["Use the Raider List", "When a listed account joins|Quarantine ▾"]), E("raider_action"), P("Raider List", &["Check members already in the server"])])]),
+        ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
+        ("Every raid gets a report", "base", &[T("Raid report", &[("8 joins in 10 s", "paused"), ("6 accounts without avatar", "flagged"), ("Joins resumed", "ok")]), E("raid_report"), M("Mika", "Joined 3 minutes ago, no avatar"), C("Report")]),
+        ("Known raiders are flagged on arrival", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raider_action"), M("Mika", "Hey, I just joined"), C("Listed")])]),
     ("Anti-nuke.", &[
-        ("Mass bans and deletes are stopped", "base", &[P("Kicks & Bans", &["Monitor this action", "Minute limit|3", "Hour limit|6"]), E("nuke_quarantined"), P("Status", &["Use the antinuke module"])]),
-        ("Rogue bots are kicked", "base", &[P("Bot additions", &["Target bots added by unauthorized members", "Trigger action|Kick ▾"]), E("nuke_bot_kicked"), P("Quarantine", &["Quarantine role|@Quarantine"])]),
-        ("Staff powers are watched", "base", &[P("Status", &["Use the antinuke module", "Punish anyone who touches a quarantined member", "Have Brim guard your server's vanity url"]), E("panic_report_loaded"), P("Kicks & Bans", &["Minute limit|3"])])]),
+        ("Mass bans and deletes are stopped", "base", &[K(&[("#31", "nuke", "open", "rogue-admin \u{b7} 9 deleted"), ("#30", "nuke", "closed", "old-bot \u{b7} 14 bans")]), E("nuke_quarantined"), M("rogue-admin", "Deleting every channel..."), C("Stopped")]),
+        ("Rogue bots are kicked", "base", &[K(&[("#32", "bot kicked", "open", "added Unknown Bot"), ("#29", "bot kicked", "closed", "Jo added Music Bot")]), E("nuke_bot_kicked"), M("rogue-admin", "Adding a bot to the server"), C("Kicked")]),
+        ("Staff powers are watched", "base", &[K(&[("#33", "panic", "open", "rogue-admin \u{b7} 5 bans"), ("#31", "nuke", "closed", "rogue-admin \u{b7} roles")]), E("panic_report_loaded"), M("rogue-admin", "Banning 5 members at once"), C("Panic")])]),
     ("Auto Mod.", &[
-        ("Warn for blocked words", "base", &[P("Word blacklist", &["Use this filter", "Trigger action|Warn ▾", "Action duration|10 min"]), E("automod_warn"), P("Regular message", &["Trigger action|Timeout ▾"])]),
-        ("Kick for invite links", "base", &[P("Invite links", &["Use this filter", "Trigger action|Kick ▾", "Action duration|10 min"]), E("automod_kick"), P("Word blacklist", &["Trigger action|Warn ▾"])]),
-        ("Time out spammers", "base", &[P("Regular message", &["Use this filter", "Trigger action|Timeout ▾", "Action duration|10 min"]), E("automod_timeout"), P("Invite links", &["Trigger action|Kick ▾"])])]),
+        ("Warn for blocked words", "base", &[T("Action log", &[("Mika said a blocked word", "warn"), ("Mika: 2nd blocked word", "warn"), ("Mika: 3rd blocked word", "timeout")]), E("automod_warn"), M("Mika", "Free nitro, click here!!"), C("Warn")]),
+        ("Kick for invite links", "base", &[T("Action log", &[("Mika posted discord.gg/free", "kick"), ("Lee posted an invite", "delete"), ("Jo posted an invite", "delete")]), E("automod_kick"), M("Mika", "Join my server: discord.gg/free"), C("Kick")]),
+        ("Time out spammers", "base", &[T("Action log", &[("Mika spammed 5 messages", "timeout"), ("Mika timed out 10 min", "timeout"), ("Lee spammed 6 messages", "timeout")]), E("automod_timeout"), M("Mika", "buy now! buy now! buy now!"), C("Timeout")])]),
     ("Moderation.", &[
-        ("Ban with a reason", "base", &[P("Moderation commands", &["Default timeout duration|10 min", "Days purged on bans|1"]), E("dm_ban"), P("Punishment DMs", &["DM punished members"])]),
-        ("Short or full replies, your choice", "base", &[P("Replies", &["Compact replies", "Delete auto messages after|30 s"]), E("ban_compact"), P("Moderation commands", &["Days purged on bans|1"])]),
-        ("Cases your whole team can see", "base", &[T("Cases", &[("#4151 ban", "DM ads"), ("#4150 timeout", "Spam"), ("#4149 warn", "Bad words"), ("#4148 ban", "Raid")]), E("note_modified"), P("Confirmation", &["Ask for a Yes/No confirmation"])])]),
+        ("Ban with a reason", "base", &[K(&[("#4151", "ban", "open", "Mika by Sam \u{b7} toxic \u{b7} 2 proofs"), ("#4150", "kick", "closed", "Lee by Sam \u{b7} advertising"), ("#4149", "timeout", "closed", "Jo by Brim \u{b7} spam \u{b7} 10 min")]), E("dm_ban"), M("Sam", "t!ban @Mika toxic"), C("Ban")]),
+        ("Short or full replies, your choice", "base", &[K(&[("#4152", "ban", "open", "Mika by Sam \u{b7} toxic"), ("#4151", "warn", "closed", "Lee by Sam \u{b7} language"), ("#4150", "purge", "closed", "40 messages by Sam")]), E("ban_compact"), M("Sam", "t!ban @Mika"), C("Compact")]),
+        ("Cases your whole team can see", "base", &[K(&[("#4151", "ban", "open", "Mika by Sam \u{b7} toxic \u{b7} 2 proofs"), ("#4150", "kick", "closed", "Lee by Sam \u{b7} advertising"), ("#4149", "quarantine", "open", "Ola by Brim \u{b7} raid account"), ("#4148", "slowmode", "closed", "#general by Sam \u{b7} 10 s")]), E("note_modified"), C("Cases")])]),
     ("Logging.", &[
-        ("Monitor every action on your server", "base", &[P("Channels", &["Brim logs|#brim-logs ▾", "Mod logs|#mod-logs ▾", "Ignore messages with embeds"]), E("mod_log"), P("Log types", &["Member|#member-logs ▾"])]),
-        ("A log for every kind of event", "base", &[P("Log types", &["Message|#message-logs ▾", "Member|#member-logs ▾", "Role|#role-logs ▾"]), E("note_modified"), P("Channels", &["Mod logs|#mod-logs ▾"])]),
-        ("Ignore users, roles or channels", "base", &[P("Ignored", &["Ignored channels|Add", "Ignored roles|Add", "Ignored users|Add"]), E("mod_log"), P("Channels", &["Ignore messages with embeds"])])]),
+        ("Monitor every action on your server", "base", &[T("Action log", &[("Sam banned Mika", "ban"), ("Sam noted Mika", "note"), ("Brim kicked Bot", "kick")]), E("mod_log"), M("Sam", "t!ban @Mika toxic"), C("Logs")]),
+        ("A log for every kind of event", "base", &[T("Member log", &[("Mika joined", "join"), ("Mika left", "leave"), ("Mika renamed", "name")]), E("note_modified"), M("Sam", "t!note @Mika asked for a refund"), C("Events")]),
+        ("Ignore users, roles or channels", "base", &[T("Action log", &[("Sam muted Lee", "timeout"), ("Sam warned Jo", "warn")]), E("mod_log"), M("Mika", "Posting in an ignored channel"), C("Ignored")])]),
     ("Tickets.", &[
-        ("Members open a private ticket", "base", &[P("General", &["Ticket category|Tickets ▾", "Ticket log channel|#ticket-log ▾", "Roles pinged on a new ticket|@Support"]), E("ticket_intro"), P("Replies", &["Anonymous replies by default"])]),
-        ("Staff see the new ticket", "base", &[P("Replies", &["Anonymous replies by default", "Only the reply command reaches the member"]), E("ticket_received"), P("Tickets status", &["Enable Tickets"])]),
-        ("Replies reach the member", "base", &[P("Tickets status", &["?Do you want members to reach your staff by sending Brim a DM?", "Enable Tickets"]), E("ticket_reply"), P("Replies", &["Anonymous replies by default"])])]),
+        ("Members open a private ticket", "base", &[K(&[("#102", "ticket", "open", "Mika \u{b7} order help"), ("#101", "ticket", "closed", "Jo \u{b7} refund")]), E("ticket_intro"), M("Mika", "I need help with my order"), C("Ticket")]),
+        ("Staff see the new ticket", "base", &[K(&[("#103", "ticket", "open", "Mika \u{b7} scam links"), ("#102", "ticket", "open", "Lee \u{b7} order help")]), E("ticket_received"), M("Mika", "Someone keeps sending me scam links"), C("Staff")]),
+        ("Replies reach the member", "base", &[K(&[("#102", "ticket", "open", "Mika \u{b7} we are looking into it"), ("#99", "ticket", "closed", "Lee \u{b7} solved")]), E("ticket_reply"), M("Sam", "t!reply We are looking into it"), C("Reply")])]),
     ("Tools.", &[
-        ("Build any message in the editor", "base", &[P("Messages", &["Title|Verification Required!", "Description|Welcome! One step left."]), X("verify_panel"), P("", &[">Add embed", ">Add field", ">Add button row"])]),
-        ("See every change in History", "stk", &[L("History", "", &[("v12", "by Mika · Nov 22", "Roll back"), ("v11", "by Sam · Nov 20", "Roll back"), ("v10", "by Brim · Nov 18", "Roll back")]), L("Server layout (Layout Guard)", "", &[("Layout v3", "saved from the server, by Mika", "Current"), ("Layout v2", "Channel Setup push, by Sam", "Roll back")]), P("Import settings", &["?This file changes nothing on this server.", ">Import"])]),
-        ("Set up channels and roles", "stk", &[G(&["Everyone", "Member"], &[("\u{25be} Info", &["\u{2713}", "\u{2713}"]), ("# rules", &["\u{2713}", "\u{2713}"]), ("\u{25be} Chat", &["\u{2717}", "\u{2713}"]), ("# general", &["\u{2717}", "\u{2713}"])]), P("", &["?A backup is taken first, so Backups can undo it.", "Add a role|@Member ▾", ">Add"])]),
-        ("Follow feeds into a channel", "stk", &[L("Feeds", "Add new feed", &[("Channel uploads", "YouTube", "Edit"), ("Blog posts", "RSS", "Edit"), ("Releases", "GitHub", "Edit")]), P("Add new feed", &["Link|youtube.com/@brim", "Channel|#uploads ▾", "Ping role|@Feeds ▾"]), P("More options", &["Source|Detect from the link ▾", "Send as Brim"])]),
-        ("Back up and load a layout", "stk", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Load"), ("#9c20", "Brim · yesterday", "View|Load"), ("#77de", "Brim · Nov 18", "View|Load")]), P("Load backup #a1f3", &["Show permissions", ">Apply"])])]),
+        ("Build any message in the editor", "base", &[P("Messages", &["Title|Verification Required!", "Description|One step left.", "Field name|Rules", "Footer text|Brim", ">Add field", ">Add button row"]), E("verify_panel"), C("Editor")]),
+        ("See every change in History", "stk", &[L("History", "", &[("v12", "by Mika · Nov 22", "Roll back"), ("v11", "by Sam · Nov 20", "Roll back"), ("v10", "by Brim · Nov 18", "Roll back")]), L("Server layout (Layout Guard)", "", &[("Layout v3", "saved from the server, by Mika", "Current"), ("Layout v2", "Channel Setup push, by Sam", "Roll back")]), P("Import settings", &["?This file changes nothing on this server.", ">Import"]), C("History")]),
+        ("Set up channels and roles", "stk", &[L("Channels", "", &[("\u{25be} Information", "announcements, rules", "Read-only"), ("\u{25be} Text Channels", "general", "Public"), ("\u{25be} Voice Channels", "Voice", "Public"), ("\u{25be} Logs", "brim-logs, mod-logs", "Staff"), ("\u{25be} Staff", "staff-chat, Staff Voice", "Staff")]), P("Who can see this", &["Public|Verified members", "Read-only|Members read", "Staff|Only staff"]), C("Layout")]),
+        ("Follow feeds into a channel", "stk", &[L("Feeds", "Add new feed", &[("Channel uploads", "YouTube", "Edit"), ("Blog posts", "RSS", "Edit"), ("Releases", "GitHub", "Edit")]), P("Add new feed", &["Link|youtube.com/@brim", "Channel|#uploads ▾", "Ping role|@Feeds ▾"]), P("More options", &["Source|Detect from the link ▾", "Send as Brim"]), C("Feeds")]),
+        ("Back up and load a layout", "stk", &[L("Backups", "Create backup", &[("#a1f3", "Brim · today", "View|Load"), ("#9c20", "Brim · yesterday", "View|Load"), ("#77de", "Brim · Nov 18", "View|Load")]), P("Load backup #a1f3", &["Show permissions", ">Apply"]), C("Backups")])]),
 ];
 
 /// A long sample message ends at a whole block: fields (name and value together, an inline row as one) go from the end,
@@ -69,7 +71,7 @@ fn cap_message(scene: &web_sys::HtmlElement) {
     use wasm_bindgen::JsCast;
     let html = |n: Option<web_sys::Element>| n.and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok());
     let Some(first) = html(scene.query_selector(":scope > .pane, :scope > .lcard, :scope > .tbl").ok().flatten()) else { return };
-    let Some(win) = html(scene.query_selector(":scope > .win:not(.pane):not(.lcard):not(.tbl):not(.xs)").ok().flatten()) else { return };
+    let Some(win) = html(scene.query_selector(":scope > .win:not(.pane):not(.lcard):not(.tbl):not(.xs):not(.mm)").ok().flatten()) else { return };
     if scene.query_selector(".feat-skel").ok().flatten().is_some() || win.get_attribute("data-cap").is_some() { return }
     let _ = win.set_attribute("data-cap", "1");
     let limit = (f64::from(first.offset_height()) * 1.3).max(280.0);
@@ -155,9 +157,6 @@ fn fit() {
         }
     }
 }
-
-/// The three edits of a default message: accent colour and a new first line of text.
-const EDITS: [(u64, &str); 3] = [(0x5865f2, "Welcome! One step left."), (0xe91e63, "Hey there, press the button."), (0x1be725, "Verify to join the fun.")];
 
 /// A sample as the bot sends it, with the template's `{prefix}` filled from the sample prefix (the one in the bot's sample variables).
 /// A sample as a window body; until the samples load, a calm pulsing block of about the same size.
@@ -304,20 +303,9 @@ pub fn Landing(
                                         _ => view! { <div class="tog"><label>{*row}</label><input type="checkbox" class="sw" prop:checked=true disabled=true aria-label=*row /></div> }.into_any(),
                                     }).collect_view()}</div> }.into_any(),
                                     L(title, btn, rows) => view! { <div class="win lcard card"><div class="lhead"><b>{title}</b>{(!btn.is_empty()).then(|| view! { <span class="tb-btn tb-btn-primary fakebtn">{btn}</span> })}</div>{rows.iter().map(|(id, meta, acts)| view! { <div class="lrow"><span class="lname"><b>{*id}</b><small>{*meta}</small></span><span class="lacts">{acts.split('|').map(|a| view! { <span class="pill">{a}</span> }).collect_view()}</span></div> }).collect_view()}</div> }.into_any(),
-                                    G(roles, rows) => view! { <div class="win lcard card"><div class="lhead"><b>"Channel Setup"</b></div><p class="muted">"Each role's Discord permissions here: \u{2713} allow, \u{2717} deny, \u{2013} neutral."</p>
-                                        <table class="data matrix"><thead><tr><th></th>{roles.iter().map(|r| view! { <th>{*r}</th> }).collect_view()}</tr></thead><tbody>{rows.iter().map(|(name, marks)| view! { <tr class:cat=name.starts_with('\u{25be}')><td><b>{*name}</b></td>{marks.iter().map(|m| view! { <td><span class="gmark" class:al=*m == "\u{2713}" class:de=*m == "\u{2717}">{*m}</span></td> }).collect_view()}</tr> }).collect_view()}</tbody></table>
-                                        <div class="lhead"><span class="sel">"Member \u{25be}"</span><span class="pill">"Add role"</span></div></div> }.into_any(),
-                                    X(key) => {
-                                        let m = sample(key);
-                                        view! { <div class="win xs">{EDITS.iter().take(2).map(|(color, text)| {
-                                            let mut m = m.clone();
-                                            if let Some(e) = m["embeds"].get_mut(0) {
-                                                e["color"] = (*color).into();
-                                                if e["description"].is_string() { e["description"] = (*text).into(); }
-                                            }
-                                            shown(m)
-                                        }).collect_view()}</div> }.into_any()
-                                    }
+                                    C(text) => view! { <div class="co">{text}</div> }.into_any(),
+                                    M(name, text) => view! { <div class="win mm"><i class="mmav" aria-hidden="true"></i><div><b>{name}</b><p>{text}</p></div></div> }.into_any(),
+                                    K(rows) => view! { <div class="win tbl caselist stack">{rows.iter().map(|(no, kind, state, meta)| view! { <div class="card link"><b class="no">{*no}</b><span class="what"><span><b>{*kind}</b>" "<span class="chip" class:ok=(*state == "open")>{*state}</span></span><span class="muted">{*meta}</span></span></div> }).collect_view()}</div> }.into_any(),
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                 }).collect_view()}</div> }).collect_view()}
                             </div>
