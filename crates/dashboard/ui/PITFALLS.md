@@ -810,3 +810,9 @@ Two causes of a clipped ring (found in the button audit):
 2. `clip-path` on the element cuts its own `filter` glow (see above).
 
 After any change to a button, Tab through the page and check each focus ring is complete on all sides.
+
+## Front page: the switch ended with a jump (2026-11-23)
+
+The owner saw the new scene sit a little to the right while it moved, with no real fade, and jump when it stopped. Recorded in Chromium (page paused at 299.9 ms of 300 ms, compared with the finished page): about 20,000 pixels differed, the text sat about 1 px off. Cause: a scene is placed with `translate` and `scale` set to fractions (the fit values `--dx` and `--k`). While the scene animated it was its own layer, drawn at a fractional position; when the motion ended the browser dropped the layer and drew the scene again, so the text snapped to a pixel. `getBoundingClientRect` showed no difference, so a position check passed. The fade was `ease-out`, which brings the new scene to 74% in the first 40% of the time, so the cross-fade looked like a pop.
+
+**Rule:** a motion ends exactly at the resting layout. A moved piece keeps its layer when it rests (`will-change:transform,opacity` on `.feat-shot > .scene`), so the first resting frame is the last animated frame. The cross-fade is linear, so the two scenes always add up to one. Check a motion by recording (pause it at 0, 25, 50, 75 and 99.9% and compare the pictures; the page at 99.9% must equal the rested page), never from still screenshots or from rectangle numbers alone.
