@@ -324,6 +324,9 @@ fn added_buttons() -> Value {
         "ticket.confirm": [tickets::confirm(&server, Id::new(1)).1],
         "reply.confirm.question": [crate::confirm::sample_question(MEMBER).1],
         "log.mod_command.raider_list_match": crate::raiders::alert_rows(MEMBER),
+        "log.mod_command.case": crate::undo::rows(4151, "ban"),
+        "verify.kicked": [verify::row(crate::welcome::link("Join again", jump()))],
+        "verify.ban_ended": [verify::row(crate::welcome::link("Join again", jump()))],
         "log.report.message_reported": crate::reports::rows(1, jump(), true),
         "log.join_raid.raid_report": crate::events::link_row(Some(&(joingate::RAID_REPORT, jump()))),
     });

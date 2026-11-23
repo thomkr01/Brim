@@ -87,7 +87,18 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     .bind(bot_wide())
     .fetch_all(&st.db)
     .await?;
-    let added = added_buttons(&st, guild).await?;
+    let (_, cfg) = crate::store::current(&st.db, guild).await?;
+    let tickets: brim_core::sections::TicketsCfg =
+        serde_json::from_value(cfg["tickets"].clone()).unwrap_or_default();
+    // What the ticket panel message shows for `{text}`: a line per enabled panel with a description.
+    let panel_text: String = tickets
+        .panels
+        .iter()
+        .filter(|p| p.enabled && !p.description.is_empty())
+        .map(|p| format!("**{}**\n{}", p.name, p.description))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let added = added_buttons(&st, guild, &tickets).await?;
     let rows: Vec<Value> = botmsg::defs()
         .iter()
         .filter(|d| !botmsg::HIDDEN.contains(&d.key.as_str()))
@@ -99,6 +110,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                 .map(|v| {
                     let (label, example) = botmsg::var_info(&d.key, v);
                     let example = if is_log_type(d, v) { &d.name } else { example };
+                    let example = if d.key == "ticket.panel" && *v == "text" && !panel_text.is_empty() { panel_text.as_str() } else { example };
                     json!({"name": v, "label": label, "example": example})
                 })
                 .collect();
@@ -122,16 +134,17 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
 
 /// The buttons Brim adds under each message, as the bot saved them at startup (`previews.rs`).
 /// The Enter button of a running giveaway takes this server's label and emoji.
-async fn added_buttons(st: &AppState, guild: i64) -> Result<Value, ApiError> {
+async fn added_buttons(
+    st: &AppState,
+    guild: i64,
+    t: &brim_core::sections::TicketsCfg,
+) -> Result<Value, ApiError> {
     let mut all: Value = sqlx::query_scalar("select messages->'buttons' from bot_previews")
         .fetch_optional(&st.db)
         .await?
         .flatten()
         .unwrap_or_else(|| json!({}));
     // The panel of this server: the buttons the bot posts, from its real ticket types.
-    let (_, c) = crate::store::current(&st.db, guild).await?;
-    let t: brim_core::sections::TicketsCfg =
-        serde_json::from_value(c["tickets"].clone()).unwrap_or_default();
     let panels = if t.panels.is_empty() {
         serde_json::from_value(brim_core::sections::default_panels()).unwrap_or_default()
     } else {

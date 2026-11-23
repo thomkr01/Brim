@@ -275,6 +275,11 @@ fn embed(e: &Value) -> AnyView {
     }.into_any()
 }
 
+/// A message as members see it, with the button that opens its editor. `edit`: the editor's link.
+pub fn preview_box(m: &Value, edit: &str) -> AnyView {
+    view! { <p class="muted">"Preview:"</p>{bot(m)}<a class="btn ghost" href=edit.to_string()>"Edit message"</a> }.into_any()
+}
+
 /// A message the bot sends: content, embeds, button rows; flag 64 marks it "only you can see this".
 pub fn bot(m: &Value) -> AnyView {
     let content = m["content"].as_str().unwrap_or("");

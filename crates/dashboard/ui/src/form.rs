@@ -757,8 +757,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                     <p class="muted">"Members press it in #open-a-ticket. Save, and Brim edits the posted message."</p>
                     <p class="muted">"The message's title, text and color are on Default messages."</p>
                     // One row, so the two buttons keep the row gap and do not touch.
-                    <div class="row"><a class="btn ghost" href=entry>"Edit message"</a>
-                    {move || (count.get() == 0).then(|| view! { <button on:click=start>"Edit the ticket button"</button> })}</div>
+                    <div class="row">{move || (count.get() == 0).then(|| view! { <button on:click=start>"Edit the ticket button"</button> })}</div>
                     {move || if count.get() == 0 {
                         ().into_any()
                     } else {
@@ -769,7 +768,7 @@ pub fn Field(f: Value, val: RwSignal<Value>, dc: RwSignal<Value>) -> impl IntoVi
                             {first("style", "choice", "Button color", "", json!({"default": "primary", "options": ["primary", "secondary", "success", "danger"]}))}
                         }.into_any()
                     }}
-                    <TicketPreview guild=guild.clone() val greeting=false />
+                    <TicketPreview guild=guild.clone() val greeting=false edit=entry.clone() />
                 </div>
                 <details class="card"><summary>"More buttons and forms"</summary>
                 <p class="muted">"Each extra panel adds a button, with its own form, greeting, category and pings."</p>
@@ -1047,7 +1046,7 @@ fn CaptchaPreview(guild: String, val: RwSignal<Value>) -> impl IntoView {
 /// (saved or not; `POST .../tickets/preview` runs the code the bot posts with), asked 400 ms after
 /// the last change. `greeting`: the greeting of a new ticket, else the panel message.
 #[component]
-pub fn TicketPreview(guild: String, val: RwSignal<Value>, greeting: bool) -> impl IntoView {
+pub fn TicketPreview(guild: String, val: RwSignal<Value>, greeting: bool, #[prop(into)] edit: String) -> impl IntoView {
     let shown = RwSignal::new(Value::Null);
     let seq = StoredValue::new(0u32);
     Effect::new(move |_| {
@@ -1093,7 +1092,7 @@ pub fn TicketPreview(guild: String, val: RwSignal<Value>, greeting: bool) -> imp
             return view! { <p class="muted">"The greeting is empty: no message is sent."</p> }
                 .into_any();
         }
-        view! { <p class="muted">"Preview:"</p>{crate::discord::bot(&m)} }.into_any()
+        crate::discord::preview_box(&m, &edit)
     }
 }
 
@@ -1580,7 +1579,7 @@ pub fn Section(
                         let text = move || if !plain && off.get() { note.clone() } else { "Your current choices do not use this card, so its settings have no effect.".into() };
                         let fields = fs.into_iter().map(|f| { let only = f["only"].clone(); view! { <Show when=move || val.with(|v| holds(v, &only))><Field f=f.clone() val dc /></Show> } }).collect_view();
                         let captcha = (sec == "verification" && g == "Captcha").then(|| view! { <CaptchaPreview guild=gs.get_value() val /> });
-                        let look = (sec == "tickets" && g == "Messages").then(|| view! { <p class="muted">"The greeting's title and color are on Default messages."</p><a class="btn ghost" href=format!("#/{}/bot_messages/ticket.greeting/from-tickets", gs.get_value())>"Edit the look"</a><TicketPreview guild=gs.get_value() val greeting=true /> });
+                        let look = (sec == "tickets" && g == "Messages").then(|| view! { <TicketPreview guild=gs.get_value() val greeting=true edit=format!("#/{}/bot_messages/ticket.greeting/from-tickets", gs.get_value()) /> });
                         (weight, view! { <div class="card" id=gid class:off=ring><h2>{g}</h2>{fields}{captcha}{look}<Show when=move || ring.get()><p class="offnote"><crate::common::Tip text=Signal::derive(text.clone()) />"Not in use right now"</p></Show></div> }.into_any())
                     }).collect::<Vec<_>>();
                     view! { <crate::common::Cards cards /> }

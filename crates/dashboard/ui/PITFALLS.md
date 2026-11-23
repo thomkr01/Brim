@@ -762,3 +762,9 @@ The preview drew the saved message. Buttons that Brim adds when it posts (Enter,
 The revert path replaced the whole editor value with `{"body": ..}`. The `added` rows (buttons Brim adds) were lost, so the preview showed less than the bot posts until the page was reloaded.
 
 **Rule:** change one field of the editor value (`cur.update(|c| c["body"] = ..)`), never rebuild the whole value in a later path.
+
+## One example value for a variable that means different things
+
+`{text}` had one example, "What happened, written by Brim.", in every message. In the ticket panel it read as a panel line, in a ticket reply as a member's words, which is wrong.
+
+**Rule:** when a variable name is shared by messages that fill it with different things, give each message its own example (`var_info` in `crates/logging/src/botmsg.rs`), and take it from the server's real data where the dashboard knows it (the ticket panel lines).

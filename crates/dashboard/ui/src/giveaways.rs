@@ -589,7 +589,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         <Section guild=guild.clone() name="giveaways".to_string() on_save=Callback::new(move |_| load()) />
         <div class="card">
             <h3>"Messages"</h3>
-            <p class="muted small">"Change how the giveaway looks in the Message Builder, with a live preview."</p>
+            <p class="muted small">"Each message opens with its preview and an Edit message button."</p>
             <div class="row">
                 <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.running")>"Giveaway message"</a>
                 <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.ended")>"Ended message"</a>

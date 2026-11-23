@@ -6548,6 +6548,28 @@ const FEED_VARS: &[(&str, &str, &str)] = &[
 
 /// The editor name and example of a template variable of entry `key`.
 pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
+    // `{text}` is a different thing in each message: give each the example that fits it.
+    if name == "text" {
+        let ex = match key {
+            "ticket.sent" => Some("Hi, I need help with my account."),
+            "ticket.reply" => Some("Thanks, we are looking into it."),
+            "ticket.greeting" => Some("Hi @member, thanks for reaching out. Tell us what you need, and staff will answer here soon."),
+            "ticket.closing" => Some("Your ticket is closed. Thanks for contacting us."),
+            "ticket.panel" => Some("**Support**\nAsk staff for help."),
+            "reply.ticket.usage" | "reply.error.usage" => Some("ban <member> [reason]"),
+            "reply.error.wrong_use" => Some("That member is not in this server."),
+            "reply.confirm.question" => Some("@sam"),
+            "reply.lock.updates_notice" | "reply.lock.locked_notice" => Some("1. The server opens again at 18:00."),
+            _ => None,
+        };
+        if let Some(ex) = ex {
+            return (var_info_raw(key, name).0, ex);
+        }
+    }
+    var_info_raw(key, name)
+}
+
+fn var_info_raw(key: &str, name: &str) -> (&'static str, &'static str) {
     // A running giveaway has a number of winners, not names.
     if key == "giveaway.running" && name == "winners" {
         return ("The number of winners", "2");

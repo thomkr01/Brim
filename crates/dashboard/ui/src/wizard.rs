@@ -398,7 +398,7 @@ fn ticket_preview(c: &Value, dc: &Value) -> AnyView {
     }
     view! {
         <p class="muted">"The button in #open-a-ticket:"</p>
-        <crate::form::TicketPreview guild=crate::hash().first().cloned().unwrap_or_default() val=RwSignal::new(serde_json::json!({"tickets": t.clone()})) greeting=false />
+        <crate::form::TicketPreview guild=crate::hash().first().cloned().unwrap_or_default() val=RwSignal::new(serde_json::json!({"tickets": t.clone()})) greeting=false edit=format!("#/{}/bot_messages/ticket.panel", crate::hash().first().cloned().unwrap_or_default()) />
         <p class="muted">"In the member's DMs:"</p>
         {chat("member", text("Hi, someone in the server keeps sending me scam links."))}
         {show("ticket_confirm")}{show("ticket_sent")}
