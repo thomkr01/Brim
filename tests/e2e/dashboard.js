@@ -163,7 +163,6 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('.mcard .seg button:has-text("JSON")');
   if (!(await page.locator('textarea.json').inputValue()).includes('"components"')) failed.push('embeds: JSON view has no buttons');
   await page.click('.mcard .seg button:has-text("Visual")');
-  await page.click('.tabs button:has-text("Preview")');
   if (!(await page.locator('.dmsg .embed b', { hasText: 'Hello' }).count())) failed.push('embeds: preview did not render bold');
   if ((await page.locator('.pvwrap .embed .fields > div').count()) !== 2) failed.push('embeds: preview fields missing');
   await page.click('.pvwrap .spoiler');
@@ -580,6 +579,9 @@ fs.mkdirSync(out, { recursive: true });
   await page.click('button.card.hub:not(.sub):has-text("Moderation")');
   await page.click('button.card.hub.sub:has-text("Punishment DMs")');
   await page.click('.mrow .nm b:text-is("Ban")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Ban row'));
+  // The preview shows at once; the editor opens with Edit message.
+  await page.locator('.msplit .mview .dmsg').first().waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no preview beside the message'));
+  await page.click('.msplit .editbtn', { timeout: 5000 }).catch(() => failed.push('bot messages: no Edit message button'));
   await page.locator('.ed[aria-label="Title"]').first().waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: Ban did not open in the editor'));
   if (await page.locator('button', { hasText: 'Add button row' }).count()) failed.push('bot messages: the editor offers buttons');
   await page.click('button:text-is("← Default messages")', { timeout: 5000 }).catch(() => failed.push('bot messages: no way back'));
@@ -598,6 +600,7 @@ fs.mkdirSync(out, { recursive: true });
   // An entry with {text} says it must keep it; removing it turns the notice red and offers Insert Bot text.
   await find.fill('Message Edited');
   await page.click('.mrow .nm b:text-is("Message Edited")', { timeout: 5000 }).catch(() => failed.push('bot messages: no Message Edited row'));
+  await page.click('.msplit .editbtn', { timeout: 5000 }).catch(() => failed.push('bot messages: no Edit message button on Message Edited'));
   await page.locator('.note.req-text').waitFor({ timeout: 5000 }).catch(() => failed.push('bot messages: no Bot text notice on a log entry'));
   if (await page.locator('.note.req-text.bad').count()) failed.push('bot messages: the default log entry is marked as missing {text}');
   await page.click('button:text-is("← Default messages")', { timeout: 5000 }).catch(() => failed.push('bot messages: no way back from a log entry'));

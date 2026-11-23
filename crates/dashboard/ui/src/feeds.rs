@@ -209,7 +209,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
     let cur = RwSignal::new(json!({"body": {}}));
     let orig = RwSignal::new(Value::Null);
     let dirty = Memo::new(move |_| cur.with(|c| c["body"].clone()) != orig.get());
-    let tab = RwSignal::new("message");
+    let editing = RwSignal::new(false);
     let ed = Editor::new(cur, g, true);
     let (message_tab, preview_tab, pop_view) = ed.views();
     on_cleanup(|| crate::msgparts::set_bot_vars(&[]));
@@ -388,7 +388,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             orig.set(body.clone());
             cur.set(json!({"body": body}));
             ed.reset();
-            tab.set(if admin() { "message" } else { "preview" });
+            editing.set(false);
             open.set(Some((f, row)));
         })
     };
@@ -659,13 +659,8 @@ pub fn Feeds(guild: String) -> impl IntoView {
                     <Tip text="Each event has its own message. Save or cancel your changes before you pick another event." icon="info" /></div>
             } })}
             <p class="muted small">"Only this feed sends this version. The entry on the Bot messages page is the version for every other feed of this kind. Edits apply to posts sent after the save."</p>
-            {can.then(|| view! {
-                <PageTabs tabs=vec![Tab::state("message", "Message").icon("edit"), Tab::state("preview", "Preview").icon("eye")]
-                    active=Signal::derive(move || tab.get().to_string())
-                    on_pick=Callback::new(move |k| { ed.pop.set(None); ed.parts.sub.set(None); ed.answer.set(None); tab.set(k) }) />
-            })}
             {move || gone().then(|| view! { <p class="err">"{link} is missing: keep {link} in the message text or the first embed, or this cannot be saved."</p> })}
-            {move || if tab.get() == "preview" || !can { preview_tab() } else { message_tab() }}
+            {crate::embeds::split(editing, can, cur, message_tab, preview_tab)}
             {pop_view}
             {crate::msgparts::sub_view(ed.parts)}
             <Show when=move || can && dirty.get()>

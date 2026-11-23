@@ -6548,6 +6548,10 @@ const FEED_VARS: &[(&str, &str, &str)] = &[
 
 /// The editor name and example of a template variable of entry `key`.
 pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
+    // A running giveaway has a number of winners, not names.
+    if key == "giveaway.running" && name == "winners" {
+        return ("The number of winners", "2");
+    }
     if let Some(rows) = panel(key) {
         if let Some(r) = rows.iter().find(|r| r.0 == name) {
             // As the panel shows it: `[3]`, or `[A]` for a lettered row.

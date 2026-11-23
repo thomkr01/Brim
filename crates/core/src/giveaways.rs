@@ -39,6 +39,34 @@ pub const CODE_TRIES: i16 = 3;
 /// Minutes a member waits after too many wrong entry codes.
 pub const CODE_WAIT_MINS: i64 = 10;
 
+/// A button emoji as the settings write it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ButtonEmoji {
+    Unicode(String),
+    Custom {
+        animated: bool,
+        name: String,
+        id: u64,
+    },
+}
+
+/// `🎉` or `<:name:id>` as a button emoji; anything else none.
+pub fn button_emoji(s: &str) -> Option<ButtonEmoji> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(inner) = s.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
+        let mut it = inner.split(':');
+        let animated = it.next()? == "a";
+        let name = it.next()?.to_string();
+        let id = it.next()?.parse().ok().filter(|i| *i > 0)?;
+        return Some(ButtonEmoji::Custom { animated, name, id });
+    }
+    (s.chars().count() <= 8 && !s.chars().any(char::is_alphanumeric))
+        .then(|| ButtonEmoji::Unicode(s.into()))
+}
+
 /// The extras of one giveaway: a winner role for a time, a private thread for the winners, and
 /// entry by reaction instead of the button.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

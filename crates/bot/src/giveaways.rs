@@ -47,7 +47,7 @@ const CLAIM: &str = "gw:c:";
 const CODE: &str = "gw:k:";
 
 /// The Claim button under the winners post and in the winner DM.
-fn claim_row(id: i64) -> Component {
+pub(crate) fn claim_row(id: i64) -> Component {
     Component::ActionRow(ActionRow {
         id: None,
         components: vec![Component::Button(Button {
@@ -206,23 +206,14 @@ async fn line(app: &App, gid: Id<GuildMarker>, key: &str, vars: &[(&str, &str)])
 
 /// `🎉` or `<:name:id>` as a button emoji; anything else none.
 fn button_emoji(s: &str) -> Option<EmojiReactionType> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    if let Some(inner) = s.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
-        let mut it = inner.split(':');
-        let animated = it.next()? == "a";
-        let name = it.next()?.to_string();
-        let id = Id::new_checked(it.next()?.parse().ok()?)?;
-        return Some(EmojiReactionType::Custom {
+    Some(match store::button_emoji(s)? {
+        store::ButtonEmoji::Unicode(name) => EmojiReactionType::Unicode { name },
+        store::ButtonEmoji::Custom { animated, name, id } => EmojiReactionType::Custom {
             animated,
-            id,
+            id: Id::new_checked(id)?,
             name: Some(name),
-        });
-    }
-    (s.chars().count() <= 8 && !s.chars().any(char::is_alphanumeric))
-        .then(|| EmojiReactionType::Unicode { name: s.into() })
+        },
+    })
 }
 
 /// The reaction that enters a reaction giveaway: the button emoji, or 🎉.
@@ -257,17 +248,18 @@ fn same_emoji(a: &EmojiReactionType, b: &EmojiReactionType) -> bool {
     }
 }
 
-fn enter_row(g: &Giveaway) -> Component {
-    let label = Some(g.button_label.trim())
+/// The Enter button under a running giveaway; the preview in the dashboard draws the same one.
+pub(crate) fn enter_row(id: i64, label: &str, emoji: &str) -> Component {
+    let label = Some(label.trim())
         .filter(|l| !l.is_empty())
         .unwrap_or("Enter");
     Component::ActionRow(ActionRow {
         id: None,
         components: vec![Component::Button(Button {
             id: None,
-            custom_id: Some(format!("{ENTER}{}", g.id)),
+            custom_id: Some(format!("{ENTER}{id}")),
             disabled: false,
-            emoji: button_emoji(&g.button_emoji),
+            emoji: button_emoji(emoji),
             label: Some(label.into()),
             style: ButtonStyle::Primary,
             url: None,
@@ -299,7 +291,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
             let (t, e) = rendered(app, gid, "giveaway.running", &vars).await;
             let rows = match g.extras.reaction {
                 true => vec![],
-                false => vec![enter_row(g)],
+                false => vec![enter_row(g.id, &g.button_label, &g.button_emoji)],
             };
             (t, e, rows)
         }
@@ -2651,7 +2643,7 @@ pub(crate) async fn command(
                 ],
             )
             .await;
-            Ok((q, None, vec![confirm_row(op, &gw, invoker)]))
+            Ok((q, None, vec![confirm_row(op, (gw.id, gw.draws), invoker)]))
         }
         Sub::Redraw { id, users, reason } => {
             let Some(gw) = find(id).await? else {
@@ -2668,7 +2660,11 @@ pub(crate) async fn command(
                     ],
                 )
                 .await;
-                return Ok((q, None, vec![confirm_row("reroll", &gw, invoker)]));
+                return Ok((
+                    q,
+                    None,
+                    vec![confirm_row("reroll", (gw.id, gw.draws), invoker)],
+                ));
             }
             text(redraw_reply(app, &gw, &users, invoker, reason.as_deref()).await?)
         }
@@ -2784,15 +2780,15 @@ async fn list(app: &App, gid: Id<GuildMarker>) -> Result<Reply> {
 
 /// Yes and No for a giveaway action. The button names the asker and the state it was asked in,
 /// so a press after the giveaway changed does nothing.
-fn confirm_row(op: &str, g: &Giveaway, actor: Id<UserMarker>) -> Component {
+pub(crate) fn confirm_row(op: &str, (id, draws): (i64, i32), actor: Id<UserMarker>) -> Component {
     let b = |yes: bool| {
         Component::Button(Button {
             id: None,
             custom_id: Some(format!(
                 "{ANSWER}{}:{op}:{}:{actor}:{}",
                 if yes { "y" } else { "n" },
-                g.id,
-                g.draws
+                id,
+                draws
             )),
             disabled: false,
             emoji: None,

@@ -189,8 +189,9 @@ fn button(b: &Value) -> AnyView {
     let emoji = emoji(&b["emoji"]);
     // `data-url`: the Message Builder's preview opens it after asking, as Discord does.
     let url = b["url"].as_str().map(String::from);
-    let id = b["custom_id"].as_str().map(String::from);
-    view! { <span class=format!("dbtn blk {style}") data-url=url data-id=id><span inner_html=emoji />{b["label"].as_str().unwrap_or("").to_string()}{link.then_some(" ↗")}</span> }.into_any()
+    let added = b["added"] == true;
+    let id = b["custom_id"].as_str().filter(|_| !added).map(String::from);
+    view! { <span class=format!("dbtn blk {style}") class:added=added data-url=url data-id=id><span inner_html=emoji />{b["label"].as_str().unwrap_or("").to_string()}{link.then_some(" ↗")}</span> }.into_any()
 }
 
 /// A button's or menu option's emoji as HTML: the image of a custom one, else the character.

@@ -182,7 +182,7 @@ pub fn BotMessages(
     let cur = RwSignal::new(json!({"body": {}}));
     let orig = RwSignal::new(Value::Null);
     let dirty = Memo::new(move |_| cur.with(|c| c["body"].clone()) != orig.get());
-    let tab = RwSignal::new("message");
+    let editing = RwSignal::new(false);
     let busy = RwSignal::new(false);
     // Search text and the opened areas and sub-groups (all closed at first); kept for this visit only.
     let query = RwSignal::new(String::new());
@@ -236,10 +236,9 @@ pub fn BotMessages(
             r["default"].clone()
         };
         orig.set(body.clone());
-        cur.set(json!({"body": body}));
+        cur.set(json!({"body": body, "added": r["buttons"]}));
         ed.reset();
-        let locked = r["locked"] == true || !may(&r);
-        tab.set(if locked { "preview" } else { "message" });
+        editing.set(false);
         open.set(Some(r));
     };
     Effect::new(move |_| {
@@ -656,15 +655,10 @@ pub fn BotMessages(
             </div>
             {locked.then(|| view! { <p class="muted">{crate::icons::icon("lock")}" It is shown here, but it cannot be changed."</p> })}
             {(!locked && !can_edit).then(|| view! { <p class="muted">{if r["security"] == true { "Trusted Admins and above can change security texts, with a 2FA code." } else { "Only the Owner, Extra Owners and Trusted Admins can change bot messages." }}</p> })}
-            {can_edit.then(|| view! {
-                <PageTabs tabs=vec![Tab::state("message", "Message").icon("edit"), Tab::state("preview", "Preview").icon("eye")]
-                    active=Signal::derive(move || tab.get().to_string())
-                    on_pick=Callback::new(move |k| { ed.pop.set(None); ed.parts.sub.set(None); ed.answer.set(None); tab.set(k) }) />
-                <p class="muted small">"Brim adds this message's buttons itself. Type { or press { } for the values Brim fills in."</p>
-            })}
+            {can_edit.then(|| view! { <p class="muted small">"Type { or press { } for the values Brim fills in."</p> })}
             {bot_text}
             {warn}
-            {move || if tab.get() == "preview" || !can_edit { preview_tab() } else { message_tab() }}
+            {crate::embeds::split(editing, can_edit, cur, message_tab, preview_tab)}
             {pop_view}
             {crate::msgparts::sub_view(ed.parts)}
             <Show when=move || can_edit && dirty.get()>

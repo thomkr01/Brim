@@ -17,6 +17,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use brim_core::giveaways;
 use brim_logging::botmsg::{self, change_line, security_keys};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -86,6 +87,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     .bind(bot_wide())
     .fetch_all(&st.db)
     .await?;
+    let added = added_buttons(&st, guild).await?;
     let rows: Vec<Value> = botmsg::defs()
         .iter()
         .filter(|d| !botmsg::HIDDEN.contains(&d.key.as_str()))
@@ -106,6 +108,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                 "area": area.0, "sub": area.1,
                 "security": d.security, "plain_facts": d.strict(), "details": d.details() && d.vars.contains(&"text"),
                 "vars": vars, "important": d.important, "default": d.template,
+                "buttons": added.get(d.key.as_str()),
                 "required": d.required, "what": d.what, "in_text": botmsg::in_text(d),
                 "message": mine.map(|r| &r.1),
                 "updated_by": mine.map(|r| r.2.to_string()),
@@ -115,6 +118,30 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         })
         .collect();
     Ok(Json(json!(rows)))
+}
+
+/// The buttons Brim adds under each message, as the bot saved them at startup (`previews.rs`).
+/// The Enter button of a running giveaway takes this server's label and emoji.
+async fn added_buttons(st: &AppState, guild: i64) -> Result<Value, ApiError> {
+    let mut all: Value = sqlx::query_scalar("select messages->'buttons' from bot_previews")
+        .fetch_optional(&st.db)
+        .await?
+        .flatten()
+        .unwrap_or_else(|| json!({}));
+    if let Some(cfg) = crate::giveaways::settings(st, guild).await? {
+        let b = &mut all["giveaway.running"][0]["components"][0];
+        if !cfg.button_label.trim().is_empty() {
+            b["label"] = json!(cfg.button_label.trim());
+        }
+        b["emoji"] = match giveaways::button_emoji(&cfg.button_emoji) {
+            Some(giveaways::ButtonEmoji::Unicode(name)) => json!({"name": name}),
+            Some(giveaways::ButtonEmoji::Custom { animated, name, id }) => {
+                json!({"name": name, "id": id.to_string(), "animated": animated})
+            }
+            None => Value::Null,
+        };
+    }
+    Ok(all)
 }
 
 /// The outside-server keys, for SQL.

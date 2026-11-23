@@ -79,6 +79,63 @@ fn body_to_save(c: &Value) -> Value {
     b
 }
 
+/// `msg` with the buttons Brim adds itself (`c["added"]`, rows as Discord takes them), marked so
+/// the preview draws them as not editable.
+fn with_added(c: &Value, mut msg: Value) -> Value {
+    let mut rows = msg["components"].as_array().cloned().unwrap_or_default();
+    for mut r in c["added"].as_array().cloned().unwrap_or_default() {
+        for b in r["components"].as_array_mut().into_iter().flatten() {
+            b["added"] = json!(true);
+        }
+        rows.push(r);
+    }
+    msg["components"] = json!(rows);
+    msg
+}
+
+/// The one notice for parts Brim adds when it posts (`c["added"]`): none when it adds nothing.
+/// Shown in the editor and beside the preview, with the same words.
+pub fn added_notice(c: &Value) -> Option<AnyView> {
+    let names: Vec<String> = c["added"]
+        .as_array()?
+        .iter()
+        .flat_map(|r| r["components"].as_array().into_iter().flatten())
+        .filter_map(|b| b["label"].as_str().map(String::from))
+        .collect();
+    (!names.is_empty()).then(|| view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds these buttons itself when it posts: "</b>{names.join(", ")}". They are not part of the message text, so you cannot edit or press them here."</span></p> }.into_any())
+}
+
+/// The message preview on the right, as members see it, and the editor on the left behind an
+/// "Edit message" button. One shared layout for every place that has a message; on a phone the
+/// preview sits on top and the editor opens below it.
+pub fn split(
+    editing: RwSignal<bool>,
+    can_edit: bool,
+    cur: RwSignal<Value>,
+    message: impl Fn() -> AnyView + Copy + Send + Sync + 'static,
+    preview: impl Fn() -> AnyView + Copy + Send + Sync + 'static,
+) -> AnyView {
+    view! {
+        <div class="msplit">
+            <div class="mside">
+                {move || if !can_edit {
+                    ().into_any()
+                } else if editing.get() {
+                    view! {
+                        <div class="mtop"><b>"Edit message"</b><span class="sp"></span>
+                            <button class="ghost" on:click=move |_| editing.set(false)>"Close editor"</button></div>
+                        {move || cur.with(added_notice)}
+                        {message()}
+                    }.into_any()
+                } else {
+                    view! { <button class="editbtn" on:click=move |_| editing.set(true)>{crate::icons::icon("edit")}"Edit message"</button> }.into_any()
+                }}
+            </div>
+            <div class="mview">{preview()}</div>
+        </div>
+    }.into_any()
+}
+
 /// What a save compares: the parts the user edits.
 fn snapshot(c: &Value) -> Value {
     json!([c["name"], c["body"], c["channel"], c["pings"], c["webhook"]])
@@ -1182,7 +1239,8 @@ impl Editor {
                         </div>
                     </div>
                     <div class="pvwrap" class:phone=move || phone.get() on:click=move |e| preview_menu(e, answer)>
-                        {move || cur.with(|c| crate::discord::bot(&crate::msgparts::examples(&body_to_save(c))))}
+                        {move || cur.with(|c| crate::discord::bot(&with_added(c, crate::msgparts::examples(&body_to_save(c)))))}
+                        {move || cur.with(added_notice)}
                         {move || answer.get().and_then(|(r, o)| cur.with(|c| c.pointer(&format!("/body/components/{r}/components/0/options/{o}/answer")).cloned()))
                             .map(|a| crate::discord::bot(&json!({"content": crate::msgparts::examples(&a), "flags": 64})))}
                     </div>
@@ -1237,6 +1295,7 @@ pub fn Embeds(
     // false: the list of messages; true: the builder for `cur`.
     let open = RwSignal::new(false);
     let tab = RwSignal::new("message");
+    let editing = RwSignal::new(false);
     let q = RwSignal::new(String::new());
     let (cur, msg) = (RwSignal::new(blank()), Msg::default());
     let orig = RwSignal::new(snapshot(&blank()));
@@ -1345,6 +1404,7 @@ pub fn Embeds(
         orig.set(snapshot(&m));
         cur.set(m);
         tab.set("message");
+        editing.set(true);
         json_view.set(false);
         pop.set(None);
         parts.sub.set(None);
@@ -1732,14 +1792,13 @@ pub fn Embeds(
                     <button class="ghost" title="Delete" aria-label="Delete" on:click=move |_| { let c = cur.get_untracked(); remove(c["id"].as_i64().unwrap_or(0), c["name"].as_str().unwrap_or("").to_string()) }>{crate::icons::icon("trash")}</button>
                 </Show>
             </div>
-            <PageTabs tabs=vec![Tab::state("message", "Message").icon("edit"), Tab::state("preview", "Preview").icon("eye"), Tab::state("automate", "Automate").icon("clock"), Tab::state("send", "Send").icon("send")]
+            <PageTabs tabs=vec![Tab::state("message", "Message").icon("edit"), Tab::state("automate", "Automate").icon("clock"), Tab::state("send", "Send").icon("send")]
                 active=Signal::derive(move || tab.get().to_string())
                 on_pick=Callback::new(move |k| { pop.set(None); parts.sub.set(None); answer.set(None); tab.set(k) }) />
             {move || match tab.get() {
-                "preview" => preview_tab().into_any(),
                 "send" => send_tab().into_any(),
                 "automate" => automate_tab().into_any(),
-                _ => message_tab().into_any(),
+                _ => split(editing, true, cur, message_tab, preview_tab),
             }}
             {pop_view}
             {crate::msgparts::sub_view(parts)}

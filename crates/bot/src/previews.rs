@@ -301,10 +301,34 @@ fn messages() -> Value {
     all
 }
 
+/// The buttons Brim adds under a default message, by message key, built by the code that posts
+/// them. The dashboard draws them under the preview, where the owner cannot edit them.
+fn added_buttons() -> Value {
+    let user = Id::new(MEMBER);
+    let server = tickets::Server {
+        id: Id::new(1),
+        name: SERVER.into(),
+        icon: None,
+        own: vec![],
+    };
+    let claim = json!([crate::giveaways::claim_row(1)]);
+    json!({
+        "giveaway.running": [crate::giveaways::enter_row(1, "", "🎉")],
+        "giveaway.winners": claim,
+        "giveaway.reroll": claim,
+        "giveaway.winner_dm": claim,
+        "reply.giveaway.confirm": [crate::giveaways::confirm_row("cancel", (1, 0), user)],
+        "ticket.confirm": [tickets::confirm(&server, Id::new(1)).1],
+        "reply.confirm.question": [crate::confirm::sample_question(MEMBER).1],
+        "log.mod_command.raider_list_match": crate::raiders::alert_rows(MEMBER),
+    })
+}
+
 /// Saves the samples, and the command list under `commands`, for the dashboard; run at startup,
 /// once the custom emojis are loaded.
 pub async fn publish(pool: &PgPool) -> Result<()> {
     let mut m = messages();
+    m["buttons"] = added_buttons();
     m["commands"] = crate::general::catalog();
     sqlx::query(
         "INSERT INTO bot_previews (id, messages) VALUES (true, $1)
@@ -314,6 +338,14 @@ pub async fn publish(pool: &PgPool) -> Result<()> {
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[test]
+fn added_buttons_belong_to_real_messages() {
+    for (k, rows) in added_buttons().as_object().unwrap() {
+        assert!(brim_logging::botmsg::find(k).is_some(), "{k} is no message");
+        assert!(rows[0]["components"][0]["type"] == 2, "{k} has no button");
+    }
 }
 
 #[test]
