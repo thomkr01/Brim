@@ -238,9 +238,8 @@
   .tb-mascot { display: none; }
 }
 
-/* Reduced motion: no animation */
+/* No lift on hover or tap when the system asks for less motion. Animations always play (owner decision). */
 @media (prefers-reduced-motion: reduce) {
-  .tb-root *, .tb-root *::before, .tb-root *::after { animation: none !important; transition: none !important; }
   .tb-btn:hover, .tb-pebble:hover, .tb-link:hover, .tb-btn:active, .tb-pebble:active, .tb-link:active { transform: none; }
 }
 

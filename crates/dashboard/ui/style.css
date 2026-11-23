@@ -147,7 +147,7 @@ details { margin:12px 0; }
 .brand .ring .arc { stroke:url(#ring-brand); filter:drop-shadow(0 0 6px #9B7BFF77); }
 .ring.small { width:64px; height:64px; } .ring.small .num { font-size:var(--fs-ui); }
 .ring.small .track, .ring.small .arc { stroke-width:14; }
-:root[data-motion=reduced] .ring { transition:none; } :root[data-motion=reduced] .ring.full .arc, :root[data-motion=reduced] .ring .num.landed { animation:none; } :root[data-motion=reduced] .ring .confetti { display:none; }
+
 .split { display:flex; gap:24px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
 .stat { display:inline-flex; align-items:baseline; gap:8px; min-width:0; } .stat > span { font-size:var(--fs-caption); color:var(--muted); } .stat b { overflow-wrap:anywhere; }
 /* Overview Details: the title and the stats on one line, wrapping on a phone. */
@@ -189,8 +189,8 @@ details.more { margin:0 0 12px; } details.more summary { cursor:pointer; color:v
 .wizbody .acts { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
 @media (max-width:600px) { .wizhead { flex-direction:column-reverse; align-items:stretch; text-align:center; } .wizhead .brand { align-self:center; } .wizhead .acts { justify-content:center; } .steps { flex-wrap:nowrap; overflow-x:auto; padding-bottom:var(--space-4); scrollbar-width:none; } .steps button { flex:none; } }
 @media (forced-colors:active) { .ring.full .num { color:CanvasText; background:none; } }
-:root[data-motion=reduced] .steps { scroll-behavior:auto; } :root[data-motion=reduced] .slide > * > *, :root[data-motion=reduced] .slide > * > h2, :root[data-motion=reduced] .wizprog .line i::after { animation:none; } :root[data-motion=reduced] .wizprog .line i { transition:none; }
-.tabs { display:flex; gap:var(--space-4); margin:0 0 var(--space-24); overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--line); } .tabs::-webkit-scrollbar { display:none; } .tabs a:focus-visible, .tabs button:focus-visible { outline-offset:-2px; } .tabs > :first-child { margin-inline-start:auto; } .tabs > :last-child { margin-inline-end:auto; }
+
+.tabs { display:flex; gap:var(--space-4); margin:0 0 var(--space-24); overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--line); } .tabs::-webkit-scrollbar { display:none; } nav a:focus-visible, .tabs a:focus-visible, .tabs button:focus-visible { outline-offset:-2px; } .tabs > :first-child { margin-inline-start:auto; } .tabs > :last-child { margin-inline-end:auto; }
 /* Tabs (fixed by the owner, must not change): a quiet row, an orange underline on the open tab, no pill box, never wraps, scrolls sideways. Guarded by tools/ui-sizes.mjs and the e2e sweep. */
 .tabs a, .tabs button { flex:none; white-space:nowrap; text-decoration:none; background:none; border:0; border-bottom:2px solid transparent; border-radius:0; padding:var(--space-8) var(--space-20); color:var(--muted); font-weight:400; } .tabs a.on, .tabs button.on { color:var(--fg); border-bottom-color:var(--primary); }
 .link { display:flex; align-items:center; gap:16px; text-decoration:none; } .link .ico { width:56px; height:56px; flex:none; } .link .ico .i { width:100%; height:100%; } .link > .i { width:24px; height:24px; flex:none; } @media (max-width:600px) { .link:has(> .sw) { gap:var(--space-12); } .link:has(> .sw) .ico { width:40px; height:40px; } .link:has(> .sw) > .i { display:none; } }
@@ -228,7 +228,7 @@ button.menu { display:block; width:100%; margin:8px 0; text-align:left; text-tra
 @media (hover:hover) { .srow:not(.fixed):hover, .cs .tr:hover, .mlist .mrow:hover { box-shadow:var(--ol-hover); } }
 .srow.moving, .srow.moving:hover { box-shadow:var(--ol-pick), var(--lift); transform:translateY(-2px); }
 .srow.above, .srow.above:hover { box-shadow:inset 0 2px 0 var(--primary); } .srow.below, .srow.below:hover { box-shadow:inset 0 -2px 0 var(--primary); }
-:root[data-motion=reduced] .srow, :root[data-motion=reduced] .srow.moving, :root[data-motion=reduced] .cs .tr.moving { transition:none; transform:none; }
+
 /* Table card (layout step 5): every table is table.data inside a card, with one header style. .tact is a button column. */
 table.data { width:100%; border-collapse:collapse; } table.data td { vertical-align:top; }
 table.data th { padding:var(--space-8) var(--space-12); color:var(--muted); font-size:var(--fs-caption); font-weight:600; text-align:left; }
@@ -312,7 +312,7 @@ button.link.err { color:var(--bad); } button.link.err.on { border:1px solid var(
 .preview.loop > :not(.chg) { animation:chat-in 8s var(--quint) calc(var(--i, 0) * 400ms) infinite backwards; }
 .preview.loop > :nth-child(2) { --i:1; } .preview.loop > :nth-child(3) { --i:2; } .preview.loop > :nth-child(4) { --i:3; } .preview.loop > :nth-child(5) { --i:4; } .preview.loop > :nth-child(6) { --i:5; } .preview.loop > :nth-child(n+7) { --i:6; }
 @keyframes chat-in { 0% { opacity:0; transform:translateX(-100px); } 6%, 100% { opacity:1; transform:none; } }
-@media all { :root[data-motion=reduced] *, :root[data-motion=reduced] *::before, :root[data-motion=reduced] *::after { animation-duration:.01ms !important; animation-delay:0s !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; transition-delay:0s !important; } }
+
 .wizbody > .card { background:none; box-shadow:none; padding:0; margin:0; }
 .scrim { display:none; } @media (max-width:900px) { .scrim { display:block; position:fixed; inset:80px 0 0; z-index:19; background:var(--scrim); animation:fade var(--dur) var(--ease); } }
 .cmds { gap:8px; } .cmds > p { margin:0; } .cmds h3 { margin:12px 0 0; } .cmds .card { padding:var(--space-8) var(--space-12); } .cmds .card p, .cmds ul { margin:4px 0; } .cmds summary { cursor:pointer; display:flex; flex-wrap:wrap; gap:4px 12px; align-items:center; } .cmds summary .chip { margin-left:auto; text-transform:none; }
@@ -352,7 +352,7 @@ nav a.on .i [fill^="url"] { fill:currentColor; } nav a.on .i [stroke^="url"] { s
 .cs .risk-i .i [fill^="url"] { fill:var(--bad); } .cs .risk-i .i [stroke^="url"] { stroke:var(--bad); }
 @keyframes risk { 50% { background:color-mix(in srgb, var(--bad) 22%, transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--bad) 70%, transparent); } }
 .cs .tr.risk, .cs .tr.risk:hover { background:color-mix(in srgb, var(--bad) 10%, transparent); animation:risk calc(var(--dur-slow) * 5) var(--ease) infinite; }
-:root[data-motion=reduced] .cs .tr.risk { animation:none; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--bad) 70%, transparent); }
+
 .cs .lbl { font-size:var(--fs-caption); font-weight:600; color:var(--muted); margin:16px 0 8px; }
 .cs .seg { display:inline-flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:var(--radius-row); overflow:hidden; } .cs .seg button { border:0; border-radius:0; text-transform:none; font-weight:400; } .cs .seg button.on { font-weight:600; }
 .cs .row2 { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:12px 0; } .cs .row2 .tip { margin-left:0; } .cs .row2 button .i { margin-right:8px; }
@@ -412,9 +412,6 @@ table.stats tr.detail ul { margin:0; padding-left:var(--space-20); white-space:n
 .working .word { background:var(--brand); -webkit-background-clip:text; background-clip:text; color:transparent; }
 /* While a button works it shows only the dots and the word, without the button box (owner decision 2026-11-18). */
 button:has(> .working) { background:none; border-color:transparent; color:var(--fg); text-transform:none; padding-left:0; padding-right:0; }
-/* Animations off (the sparkle button, or the one-time question when the system has them off): the dots stay in their corners and pulse, so a running task still shows it is alive. !important beats the global rule. */
-:root[data-motion=reduced] .working .dots i { animation:dot-pulse 1.6s ease-in-out infinite !important; }
-@keyframes dot-pulse { 50% { opacity:.35; } }
 /* Info icons, Misc, AutoMod pause */
 .row label .tip { margin-left:8px; }
 .chip.warn { background:var(--warn); color:#000; }
@@ -584,7 +581,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land header { position:static; height:auto; background:none; z-index:auto; }
 .land main { max-width:none; margin:0; }
 /* Hero (owner decision 2026-11-20): steel and copper drawn here, not from a picture, so it fits any screen. The colours are the banner pack's. */
-.land { --shield:polygon(0 8%,50% 0,100% 8%,100% 54%,50% 100%,0 54%); --turf:path('M0,20 L0,17.5 Q0,16.5 2,16.5 Q4.7,15.5 9.5,5 Q8.5,15.5 11.0,16.5 Q13.7,15.5 13.5,3 Q17.5,15.5 20.0,16.5 Q22.4,15.5 24.0,3 Q25.8,15.5 28.0,16.5 Q30.7,15.5 30.5,8 Q34.5,15.5 37.0,16.5 Q40.3,15.5 45.5,8 Q44.9,15.5 48.0,16.5 Q51.3,15.5 53.5,8 Q55.9,15.5 59.0,16.5 Q62.3,15.5 67.5,1 Q66.9,15.5 70.0,16.5 Q72.7,15.5 76.5,1 Q76.5,15.5 79.0,16.5 Q82.3,15.5 87.5,8 Q86.9,15.5 90.0,16.5 Q92.4,15.5 96.0,6 Q95.8,15.5 98.0,16.5 L102,16.5 Q104,16.5 104,17.5 L104,20 Z'); --star:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); --orange-grad:linear-gradient(135deg,#ffc27a,var(--accent) 55%,#d4581a); --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
+.land { --orange-grad:linear-gradient(135deg,#ffc27a,var(--accent) 55%,#d4581a); --shield:polygon(0 8%,50% 0,100% 8%,100% 54%,50% 100%,0 54%); --turf:path('M0,20 L0,17.5 Q0,16.5 2,16.5 Q4.7,15.5 9.5,5 Q8.5,15.5 11.0,16.5 Q13.7,15.5 13.5,3 Q17.5,15.5 20.0,16.5 Q22.4,15.5 24.0,3 Q25.8,15.5 28.0,16.5 Q30.7,15.5 30.5,8 Q34.5,15.5 37.0,16.5 Q40.3,15.5 45.5,8 Q44.9,15.5 48.0,16.5 Q51.3,15.5 53.5,8 Q55.9,15.5 59.0,16.5 Q62.3,15.5 67.5,1 Q66.9,15.5 70.0,16.5 Q72.7,15.5 76.5,1 Q76.5,15.5 79.0,16.5 Q82.3,15.5 87.5,8 Q86.9,15.5 90.0,16.5 Q92.4,15.5 96.0,6 Q95.8,15.5 98.0,16.5 L102,16.5 Q104,16.5 104,17.5 L104,20 Z'); --star:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%); --steel-1:#172021; --steel-2:#222626; --steel-3:#101718; --copper:#d77c46; --copper-soft:#956343; --hero-name:clamp(72px,calc(10 * var(--vw)),150px); --hero-slogan:clamp(24px,calc(2.4 * var(--vw)),36px); --hero-name-phone:72px; --hero-room:200px; --hero-fade:480px; --hero-room-phone:152px; }
 .land .hero { position:relative; z-index:2; isolation:isolate; overflow:hidden; min-height:min(calc(100 * var(--vh)),940px); display:flex; flex-direction:column; background:linear-gradient(135deg,var(--steel-1) 0%,var(--steel-2) 56%,var(--steel-3) 100%); }
 .land .hero-split { position:absolute; inset:0; z-index:-1; background:#53403338; mask-image:linear-gradient(#000 30%,#0000 80%); clip-path:polygon(50% 0,100% 0,100% 100%,31.5% 100%); }
 .land .hero-lines { mask-image:linear-gradient(#000 40%,#0000 85%); position:absolute; inset:0; z-index:-1; width:100%; height:100%; fill:none; stroke:var(--copper-soft); stroke-opacity:.3; stroke-width:1.5; }
@@ -642,9 +639,17 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat-tabs { display:flex; flex-direction:column; align-items:flex-start; gap:var(--space-16); margin-top:var(--space-20); }
 .land .feat-tab { display:flex; align-items:center; gap:var(--space-8); padding:0; border:0; background:none; color:inherit; font:inherit; font-size:1.1em; font-weight:500; text-align:left; color:var(--text-secondary); cursor:pointer; transition:color .2s ease; }
 .land .feat-tab:hover, .land .feat-tab[aria-pressed="true"] { color:#fff; }
-.land .feat-dot { position:relative; width:var(--space-16); height:var(--space-16); flex:none; background:var(--orange-grad); clip-path:var(--shield); }
-.land .feat-dot::after { content:""; position:absolute; inset:var(--stroke-2); background:var(--page); clip-path:inherit; }
-.land .feat-tab[aria-pressed="true"] .feat-dot::after { display:none; }
+.land .feat-tab:is(:hover, :active), .land .scene :is(.card, .win, .tb-btn):is(:hover, :active) { transform:none !important; }
+/* The shield outline is a stroke of one width: the stroke is cut by the shield shape, so the line is as wide on the slanted sides as on the straight ones. */
+/* Feature line marker: the editor star. Orange outline when idle, white outline on hover, filled orange with the static glow only on the selected line. The shapes are on the pseudo elements and the glow filter on the element, so the clip does not cut the glow. */
+.land .feat-dot { position:relative; width:var(--space-24); height:var(--space-24); flex:none; }
+.land .feat-dot::before, .land .feat-dot::after { content:""; position:absolute; inset:0; clip-path:var(--star); -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 0L62 38L100 50L62 62L50 100L38 62L0 50L38 38Z' fill='none' stroke='%23000' stroke-width='16' stroke-linejoin='miter'/%3E%3C/svg%3E") center/100% 100% no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50 0L62 38L100 50L62 62L50 100L38 62L0 50L38 38Z' fill='none' stroke='%23000' stroke-width='16' stroke-linejoin='miter'/%3E%3C/svg%3E") center/100% 100% no-repeat; }
+.land .feat-dot::before { background:var(--orange-grad); }
+/* The white outline lies on the orange one and fades in with the text colour on hover. */
+.land .feat-dot::after { background:#fff; opacity:0; transition:opacity .2s ease; }
+.land .feat-tab:hover:not([aria-pressed="true"]) .feat-dot::after { opacity:1; }
+.land .feat-tab[aria-pressed="true"] .feat-dot { filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .feat-tab[aria-pressed="true"] .feat-dot::before { -webkit-mask:none; mask:none; }
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
 .land .feat-shot { position:relative; flex:1.5 1 0; min-width:0; isolation:isolate; }
 .land .feat-shot { display:grid; grid-template-columns:minmax(0,1fr); height:var(--sh, 0px); }
@@ -700,24 +705,29 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .fx { position:absolute; inset:0 auto 0 var(--fxl, 0px); width:var(--fxw, 100%); z-index:3; pointer-events:none; }
 .land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
-.land .spark { width:var(--space-32); height:var(--space-32); background:var(--orange-grad) var(--gp, 0%) var(--gp, 0%) / 240% 240%; clip-path:var(--star); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
-.land .spark { animation:feat-twinkle 4s ease-in-out var(--d, 0s) infinite; width:calc(var(--space-24) * var(--k, 1)); height:calc(var(--space-24) * var(--k, 1)); } .land .spark.lg { width:calc(var(--space-32) * var(--k, 1)); height:calc(var(--space-32) * var(--k, 1)); }
+/* The star shape is on ::before: a clip-path on the same element would cut off its own glow (filter runs before clip-path). */
+.land .spark { width:var(--space-32); height:var(--space-32); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
+.land .spark::before { content:""; position:absolute; inset:0; background:var(--orange-grad); clip-path:var(--star); }
+.land .spark { width:calc(var(--space-24) * var(--k, 1)); height:calc(var(--space-24) * var(--k, 1)); } .land .spark.lg { width:calc(var(--space-32) * var(--k, 1)); height:calc(var(--space-32) * var(--k, 1)); }
 /* Outline shapes: the same gradient shows only as a thin edge, because the inner copy is the page colour. */
-.land .ol::after { content:""; position:absolute; inset:var(--space-4); background:var(--page); clip-path:inherit; }
-@keyframes feat-twinkle { 50% { scale:.8; opacity:.6; } }
+.land .ol::after { content:""; position:absolute; inset:var(--space-4); background:var(--page); clip-path:var(--star); }
 @keyframes feat-wander { to { translate:var(--wx,0) var(--wy,0); } }
 @keyframes feat-rise { 0% { transform:translate(0,0); opacity:0; } 20% { opacity:1; } 100% { transform:translate(var(--sx,0%),var(--sy,-100%)); opacity:0; } }
 @keyframes feat-shimmer { 0%,60% { transform:translateX(-100%); } 100% { transform:translateX(100%); } }
 .land .land-edit { margin:calc(var(--space-56) * 3) auto 0; max-width:min(36em,100%); font-size:1.5em; font-weight:600; }
 .land .u { background:linear-gradient(var(--accent),var(--accent)) 0 100% / 100% var(--space-4) no-repeat; padding-bottom:var(--space-4); }
+.land .land-brand { margin:calc(var(--space-56) * 2) 0 0; }
+.land .land-line { height:0; border-bottom:var(--stroke-2) solid var(--copper); margin:calc(var(--space-56) * 2) calc(var(--space-24) * -1) 0; }
 .land .land-close { position:relative; margin:calc(var(--space-56) * 3) auto calc(var(--space-56) * 2); }
+/* The wordmark and the grey line under it read as one block, as the name and the slogan do at the top. */
+.land .land-brand + .land-close { margin-top:var(--space-16); }
 .land .land-close h2 { margin:var(--space-8) 0 var(--space-24); font-size:2.4em; }
 .land .land-close .tb-actions { justify-content:center; }
-.land .land-close .spark { left:20%; top:0; } .land .land-close .spark.lg { right:22%; left:auto; top:auto; bottom:0; }
+.land .land-close .spark { position:absolute; left:20%; top:0; } @media (max-width:760px) { .land .land-close .spark { left:var(--space-12); top:0; } } .land .land-close .spark.lg { right:22%; left:auto; top:auto; bottom:0; } @media (max-width:900px) { .land .land-close .spark.lg { bottom:calc(var(--space-56) * -1); } }
 /* Each block fades in as it scrolls into view. Outside the animation range the block is fully shown, so nothing hides without support. */
 @supports (animation-timeline:view()) { .land .feat, .land .land-edit, .land .land-close { animation:feat-reveal linear; animation-timeline:view(); animation-range:entry 0% entry 60%; } }
 @keyframes feat-reveal { from { opacity:0; transform:translateY(var(--space-24)); } }
-:root[data-motion=reduced] .land .spark, :root[data-motion=reduced] .land .feat { animation:none; }
+
 @media (max-width:760px) {
   .land .feat, .land .feat.flip { flex-direction:column; gap:var(--space-16); padding:var(--space-32) 0; text-align:center; border-bottom:1px solid var(--surface); }
   .land .feat-tabs { align-items:center; }
@@ -745,7 +755,7 @@ nav a, .tabs a, .card.link, .gcard, label.ghost { transition:transform 180ms var
 nav a:active, .tabs a:active, a.btn:active, a.ghost:active, label.ghost:active { transform:scale(.96); }
 .card.link:active, .gcard:active { transform:scale(.98); }
 @media (hover:hover) { .card.link:hover, .gcard:hover, label.ghost:hover { transform:translateY(-2px); } }
-:root[data-motion=reduced] :is(button, nav a, .tabs a, a.btn, a.ghost, label.ghost, .card.link, .gcard):is(:hover, :active) { transform:none; }
+
 @media (prefers-reduced-motion:reduce) { :is(button, nav a, .tabs a, a.btn, a.ghost, label.ghost, .card.link, .gcard):is(:hover, :active) { transform:none; } }
 /* Style page (#/ui): one line per text size token. */
 .sg-size { display:flex; align-items:baseline; gap:var(--space-16); padding:var(--space-4) 0; border-top:1px solid var(--line); } .sg-size code { flex:0 0 190px; color:var(--muted); font-size:var(--fs-caption); }
@@ -898,3 +908,27 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .added-note { display:flex; gap:var(--space-8); align-items:flex-start; margin:0 0 var(--space-12); padding:var(--space-8) var(--space-12); border:1px solid var(--accent); border-radius:var(--radius-row); background:var(--b2); font-size:var(--fs-ui); }
 @media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { position:static; order:-1; } }
 .pics { display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:var(--space-8); } .pics .pic { padding:var(--space-4); min-width:0; color:var(--fg); background:var(--b2); border:2px solid var(--line); border-radius:var(--radius-row); text-transform:none; font-weight:400; } .pics .pic img { display:block; width:100%; height:auto; border-radius:var(--radius-field); } .pics .pic.on { border-color:var(--primary); } .pics .pic span { display:flex; align-items:center; justify-content:center; aspect-ratio:16/9; }
+
+/* Tab row: the orange underline is one bar that slides (transform only); the content below fades in (opacity only). Without the script the open tab keeps its own border. */
+.tabs { position:relative; }
+.tabs::after { content:""; position:absolute; left:0; bottom:0; width:1px; height:0; border-top:2px solid var(--primary); transform-origin:0 0; transform:translateX(var(--tx, 0px)) scaleX(var(--tw, 0)); transition:transform .25s ease-out; pointer-events:none; }
+.tabs[data-slide] :is(a, button).on { border-bottom-color:transparent; }
+.tf-a { animation:tab-fade-a .22s ease-out; } .tf-b { animation:tab-fade-b .22s ease-out; }
+@keyframes tab-fade-a { from { opacity:0; } } @keyframes tab-fade-b { from { opacity:0; } }
+
+/* Front page: the big buttons do not lift on hover; an orange gradient line outside the edge shows the hover instead (no size change, no layout shift). Footer links only change colour. Keyboard focus keeps its own ring (bundle.css). */
+.land .tb-btn:hover, .land .tb-link:hover { transform:none; }
+/* The hover line is the button's own shape grown by 3 px: a gradient layer behind the button, the button covers its middle, so it has no gap and the same width all round. */
+.land .tb-btn { position:relative; }
+.land .tb-btn::before { content:""; display:none; position:absolute; inset:calc(var(--stroke-2) * -1.5); border-radius:calc(var(--radius-button) + var(--stroke-2) * 1.5); background:var(--ring); z-index:-1; pointer-events:none; }
+.land .tb-btn:hover::before { display:block; }
+/* The hover line colour: --ring for the quiet buttons (orange gradient), --ring-primary for the orange button (white, so it reads next to the orange fill). */
+.land { --ring:var(--orange-grad); --ring-primary:#fff; }
+.land .tb-btn-primary::before { background:var(--ring-primary); }
+.land .tb-link:hover { color:var(--text); }
+/* A very small press-down at the moment of a click on the big buttons (active state only); the hover line is a child, so it presses with the button. */
+.land .tb-btn { transition:transform .08s ease-out; }
+.land .tb-btn:active { transform:scale(.97); }
+
+/* The front page main box starts exactly at the left edge of the buttons, and the page-wide `main { overflow-x:clip }` cut their focus ring and hover line there. The hero clips the page edge itself. */
+.land .hero-body { overflow:visible; }

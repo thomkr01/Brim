@@ -475,6 +475,8 @@ impl Tab {
     }
 }
 
+thread_local! { static TAB_AT: std::cell::Cell<Option<(f64, f64)>> = const { std::cell::Cell::new(None) }; static TAB_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
 /// `active` is the open tab's key. A state tab calls `on_pick` with its key; a route tab is a plain link.
 #[component]
 pub fn PageTabs(
@@ -482,8 +484,50 @@ pub fn PageTabs(
     #[prop(into)] active: Signal<String>,
     #[prop(optional, into)] on_pick: Option<Callback<&'static str>>,
 ) -> impl IntoView {
+    let row = NodeRef::<leptos::html::Div>::new();
+    // The orange underline slides to the open tab and the content below fades in (transform and opacity only, style.css `.tabs`).
+    // A route tab builds this row again on each page, so the last place is kept to slide from.
+    Effect::new(move |_| {
+        active.track();
+        let go = move |fade: bool| {
+            use wasm_bindgen::JsCast;
+            let Some(row) = row.try_get_untracked().flatten() else { return };
+            let row: &web_sys::HtmlElement = row.unchecked_ref();
+            let Ok(Some(on)) = row.query_selector(".on") else {
+                let _ = row.remove_attribute("data-slide");
+                return;
+            };
+            let on: web_sys::HtmlElement = on.unchecked_into();
+            let (x, w) = (f64::from(on.offset_left()), f64::from(on.offset_width()));
+            let first = TAB_AT.with(|t| t.get().is_none());
+            let from = TAB_AT.with(|t| t.replace(Some((x, w))));
+            let st = row.style();
+            if let Some((fx, fw)) = from {
+                let _ = st.set_property("--tx", &format!("{fx}px"));
+                let _ = st.set_property("--tw", &fw.to_string());
+                let _ = row.offset_width(); // the old place is drawn once, then the new one slides in
+            }
+            let _ = st.set_property("--tx", &format!("{x}px"));
+            let _ = st.set_property("--tw", &w.to_string());
+            let _ = row.set_attribute("data-slide", "");
+            if fade && !first && from != Some((x, w)) {
+                let mut next = row.next_element_sibling();
+                let flip = TAB_FADE.with(|f| f.replace(!f.get()));
+                while let Some(el) = next {
+                    let c = el.class_list();
+                    let _ = c.remove_2("tf-a", "tf-b");
+                    let _ = row.offset_width();
+                    let _ = c.add_1(if flip { "tf-a" } else { "tf-b" });
+                    next = el.next_element_sibling();
+                }
+            }
+        };
+        request_animation_frame(move || go(true));
+        // Fonts can still change the widths a moment after the first draw.
+        set_timeout(move || go(false), Duration::from_millis(400));
+    });
     view! {
-        <div class="tabs">
+        <div class="tabs" node_ref=row>
             {tabs.into_iter().map(|t| {
                 let (key, ico) = (t.key, t.icon.map(crate::icons::icon));
                 let on = move || active.get() == key;

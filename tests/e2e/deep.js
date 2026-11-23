@@ -201,7 +201,9 @@ async function matrix(browser) {
         if (path.endsWith('/purge') && !path.includes('blacklist') && RANK[lvl] >= RANK.owner && up) continue;
         const cfgRes = await getJson(page, `${g}/config`);
         const v = cfgRes?.version ?? 0;
-        const r = await call(page, m, path, body(v, cfgRes?.config || {}));
+        // A dropped request names its route here; before, one network error ended the whole matrix and said nothing about which call it was.
+        let r;
+        try { r = await call(page, m, path, body(v, cfgRes?.config || {})); } catch (e) { fail('matrix', `${code}${up ? '+2FA' : ''} ${m} ${path.replace(g, '')} -> no answer (${String(e.message).split('\n')[0]})`); continue; }
         const want = (min === 'discord' ? code === 'x' : RANK[lvl] >= RANK[min]) && (!step || up) && (!staff || RANK[lvl] >= RANK.admin || staff.some((p) => perms.includes(p)));
         const denied = r.s === 401 || r.s === 403;
         rows.push(`${code}\t${up ? 'step' : '-'}\t${m} ${path.replace(g, '')}\t${r.s}\t${want ? 'allow' : 'deny'}`);

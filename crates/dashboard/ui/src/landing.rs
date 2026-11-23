@@ -171,8 +171,7 @@ fn sample(key: &str) -> serde_json::Value {
 }
 
 /// The stars of a block, fixed in its box (`fit` sets their places): three pairs of a big and a small star, filled and outline.
-/// The seed (the block's number) makes the same few stars vary on every load: 0 to 2 stars are left out, each turns by its own
-/// angle and shows its own slice of the gradient.
+/// Every star stands upright with the same gradient and glow, like the layout editor. The block's number decides which 0 to 2 stars are left out.
 fn effects(seed: usize) -> impl IntoView {
     let mut x = (seed as u32 + 1).wrapping_mul(2_654_435_761) | 1;
     let mut r = move || { x ^= x << 13; x ^= x >> 17; x ^= x << 5; f64::from(x) / 4_294_967_296.0 };
@@ -183,7 +182,7 @@ fn effects(seed: usize) -> impl IntoView {
         .map(|n| {
             let class = match n { 0 | 4 => "spark ol lg", 1 | 5 => "spark", 2 => "spark lg", _ => "spark ol" };
             let hide = if off.contains(&n) { "display:none;" } else { "" };
-            view! { <i class=class style=format!("{hide}rotate:{:.0}deg;--gp:{:.0}%;--d:-{:.1}s", -40.0 + r() * 80.0, r() * 100.0, r() * 7.0) aria-hidden="true"></i> }
+            view! { <i class=class style=hide aria-hidden="true"></i> }
         })
         .collect::<Vec<_>>()
 }
@@ -314,6 +313,8 @@ pub fn Landing(
                 }).collect_view()}
                 </div>
                 <p class="land-edit">"Every embed Brim sends can be "<span class="u">"edited"</span>" in the message editor."</p>
+                <div class="land-line" aria-hidden="true"></div>
+                <p class="hero-name land-brand" aria-hidden="true">"Brim"</p>
                 <section class="land-close">
                     <i class="spark" aria-hidden="true"></i><i class="spark ol lg" aria-hidden="true"></i>
                     <p class="feat-sub">"Free, with every feature."</p>

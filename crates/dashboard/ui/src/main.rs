@@ -380,52 +380,6 @@ fn Bell(route: ReadSignal<Vec<String>>) -> impl IntoView {
     </div></details> }
 }
 
-fn store() -> Option<web_sys::Storage> {
-    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
-}
-
-/// Animations are on unless the user turned them off here (`motion` = "reduced"), whatever the
-/// system setting says (owner decision 2026-11-18). style.css reads `data-motion` on the root.
-fn set_motion(reduced: bool) {
-    let v = if reduced { "reduced" } else { "on" };
-    if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-        let _ = root.set_attribute("data-motion", v);
-    }
-    if let Some(s) = store() {
-        let _ = s.set_item("motion", v);
-    }
-}
-
-/// Restores the choice. When the system has animations off and the user was never asked, returns
-/// true: the page starts with animations on and asks once.
-fn restore_motion() -> bool {
-    let saved = store().and_then(|s| s.get_item("motion").ok().flatten());
-    let system_off = web_sys::window()
-        .and_then(|w| w.match_media("(prefers-reduced-motion: reduce)").ok().flatten())
-        .is_some_and(|m| m.matches());
-    let ask = saved.is_none() && system_off;
-    if let Some(root) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.document_element()) {
-        let _ = root.set_attribute("data-motion", if saved.as_deref() == Some("reduced") { "reduced" } else { "on" });
-    }
-    if ask {
-        // Remembered now, so the question comes once; Turn off flips it.
-        if let Some(s) = store() {
-            let _ = s.set_item("motion", "on");
-        }
-    }
-    ask
-}
-
-fn toggle_motion() {
-    let off = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.document_element())
-        .and_then(|r| r.get_attribute("data-motion"))
-        .as_deref()
-        == Some("reduced");
-    set_motion(!off);
-}
-
 pub(crate) fn hash() -> Vec<String> {
     let h = web_sys::window()
         .unwrap()
@@ -702,20 +656,8 @@ fn close_menus(click: Option<web_sys::EventTarget>) {
     }
 }
 
-thread_local! { static ASK_MOTION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
-
 #[component]
 fn App() -> impl IntoView {
-    if ASK_MOTION.take() {
-        Effect::new(move |_| {
-            ask(
-                Ask::new("Turn animations off?")
-                    .text("Your system has animations turned off, but the dashboard keeps them on by default. You can change this any time with the sparkle button in the top bar.")
-                    .yes("Turn off"),
-                |_| set_motion(true),
-            )
-        });
-    }
     let (route, set_route) = signal(hash());
     window_event_listener(leptos::ev::hashchange, move |e| {
         let next = hash();
@@ -970,7 +912,6 @@ fn App() -> impl IntoView {
                 <a class="ghost" href="#/commands">"Commands"</a>
                 <Show when=move || me.get().is_some_and(|m| m["bot_owner"] == true)><a class="ghost" href="#/update">"Update"</a></Show>
                 <Bell route />
-                <button class="ghost" aria-label="turn animations on or off" title="Animations on or off" on:click=|_| toggle_motion()>{icons::icon("sparkle")}</button>
                 <details>
                     <summary aria-label="account menu">{move || me.get().and_then(|m| m["username"].as_str().and_then(|u| u.chars().next()).map(|c| c.to_uppercase().to_string())).unwrap_or_default()}</summary>
                     <div><a href="#/">"Servers"</a><a class="m-only" href="#/commands">"Commands"</a><Show when=move || me.get().is_some_and(|m| m["bot_owner"] == true)><a class="m-only" href="#/update">"Update"</a><a href="#/mcp-tokens">"MCP tokens"</a><a href="#/raiders">"Raider List review"</a><a href="#/data-requests">"Data requests"</a><a href="#/secure-account">"Secure my account"</a></Show><a href="#/raider-appeal">"Raider List status"</a><button title="Lets you make protected changes in Discord for 10 minutes" on:click=move |_| two_fa.set(true)>"Confirm 2FA"</button><button on:click=move |_| spawn_local(async { let _ = api("POST", "/auth/logout", None).await; signed_out(); web_sys::window().unwrap().location().reload().ok(); })>"Logout"</button></div>
@@ -1186,7 +1127,6 @@ fn main() {
             let _ = body.insert_adjacent_text("beforeend", &format!("Dashboard crashed: {info}"));
         }
     }));
-    ASK_MOTION.set(restore_motion());
     // The app gets its own box: the screen scale (`zoom`) sits there, not on the page root, so a
     // password manager's button added to the page is not scaled twice (style.css, --z).
     let app = web_sys::window()

@@ -72,7 +72,10 @@ fs.mkdirSync(out, { recursive: true });
       const z = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--z')) || 1;
       for (const el of document.querySelectorAll('main .tabs > .on')) {
         const c = getComputedStyle(el);
-        if (parseFloat(c.borderBottomWidth) * z < 1.99 || c.borderBottomColor === 'rgba(0, 0, 0, 0)' || c.backgroundColor !== 'rgba(0, 0, 0, 0)') return `open tab "${el.textContent}" lost the orange underline (primary ${primary})`;
+        // A row with the sliding bar draws the orange line as that bar (style.css, `.tabs::after`): the bar is the 2 px orange top border.
+        const bar = el.parentElement.hasAttribute('data-slide') ? getComputedStyle(el.parentElement, '::after') : null;
+        const ok = bar ? parseFloat(bar.borderTopWidth) * z >= 1.99 && bar.borderTopColor !== 'rgba(0, 0, 0, 0)' : parseFloat(c.borderBottomWidth) * z >= 1.99 && c.borderBottomColor !== 'rgba(0, 0, 0, 0)';
+        if (!ok || c.backgroundColor !== 'rgba(0, 0, 0, 0)') return `open tab "${el.textContent}" lost the orange underline (primary ${primary})`;
       }
       return '';
     });
