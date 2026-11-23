@@ -681,6 +681,7 @@ fs.mkdirSync(out, { recursive: true });
   psql(`update guild_config set config = config || jsonb_build_object('giveaways', jsonb_build_object('enabled', true)) where guild_id = ${gid} and version = (select max(version) from guild_config where guild_id = ${gid})`);
   await page.goto(`${base}/#/${gid}/giveaways`);
   // The Giveaways page shows the message as members see it, with the Enter button Brim adds, and an editor beside it (a button goes to the full editor).
+  await page.click('.tabs button:has-text("Messages")', { timeout: 5000 }).catch(() => failed.push('giveaways: no Messages tab'));
   await page.locator('.msgswitch .dmsg .dbtn.added', { hasText: 'Enter' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: no live preview with the Enter button'));
   await page.click('.seg button:text-is("Winners post")', { timeout: 3000 }).catch(() => failed.push('giveaways: no Winners post switch'));
   await page.locator('.msgswitch .dbtn.added', { hasText: 'Claim' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: the Winners post preview has no Claim button'));

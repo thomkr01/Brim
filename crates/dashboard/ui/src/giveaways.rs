@@ -584,15 +584,21 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                 on_edit=Callback::new(edit_saved) on_delete=Callback::new(delete_saved) />
         }.into_any()
     };
+    // Tabs, so a page of settings, messages and giveaways shows one part at a time.
+    let tab = RwSignal::new("giveaways");
+    let (g1, g2) = (guild.clone(), guild);
     view! {
-        <Section guild=guild.clone() name="giveaways".to_string() on_save=Callback::new(move |_| load()) />
-        <div class="card">
-            <h3>"Messages"</h3>
-            <crate::botmsgs::MessageSwitch guild=guild.clone() keys=vec![("giveaway.running", "Running"), ("giveaway.ended", "Ended"), ("giveaway.winners", "Winners post"), ("giveaway.winner_dm", "Winner DM")] />
-        </div>
-        {list}
-        {form_view}
-        {people_view}
+        <PageTabs tabs=vec![Tab::state("giveaways", "Giveaways"), Tab::state("messages", "Messages"), Tab::state("settings", "Settings")]
+            active=Signal::derive(move || tab.get().to_string()) on_pick=Callback::new(move |k| tab.set(k)) />
+        {move || match tab.get() {
+            "settings" => view! { <Section guild=g1.clone() name="giveaways".to_string() on_save=Callback::new(move |_| load()) /> }.into_any(),
+            "messages" => view! {
+                <div class="card">
+                    <crate::botmsgs::MessageSwitch guild=g2.clone() keys=vec![("giveaway.running", "Running"), ("giveaway.ended", "Ended"), ("giveaway.winners", "Winners post"), ("giveaway.winner_dm", "Winner DM")] />
+                </div>
+            }.into_any(),
+            _ => view! { {list}{form_view}{people_view} }.into_any(),
+        }}
         <Toast msg />
     }
 }
