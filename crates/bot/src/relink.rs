@@ -21,6 +21,7 @@ pub async fn relink(app: &App, gid: Id<GuildMarker>, map: &HashMap<u64, u64>, im
         return;
     }
     crate::msgrules::relink(app, gid, &map).await;
+    crate::giveaways::relink(app, gid, &map).await;
     match run(app, gid, &map, &channels(&map, image)).await {
         Ok(0) => {}
         Ok(n) => tracing::info!(%gid, n, "config ids moved to recreated objects"),

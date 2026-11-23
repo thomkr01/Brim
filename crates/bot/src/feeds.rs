@@ -645,7 +645,7 @@ async fn post_to(
 }
 
 /// Panic mode runs, or an anti-nuke case is open: Brim makes no new webhook then.
-fn under_attack(app: &App, g: u64) -> bool {
+pub(crate) fn under_attack(app: &App, g: u64) -> bool {
     app.panic_runs.lock().unwrap().contains_key(&g)
         || app
             .nukes

@@ -4609,9 +4609,9 @@ fn giveaways(out: &mut Vec<Def>) {
     out.push(msg(
         "giveaway.winners",
         "Winners post",
-        &["winners", "prize", "sponsor", "link"],
+        &["winners", "prize", "sponsor", "link", "claim"],
         &["winners", "prize"],
-        json!({"content": "{e:trophy} Congratulations {winners}! You won **{prize}**!\n{e:star} **Sponsored by:** {sponsor}\n{link}", "embeds": []}),
+        json!({"content": "{e:trophy} Congratulations {winners}! You won **{prize}**!\n{e:star} **Sponsored by:** {sponsor}\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}", "embeds": []}),
     ));
     out.push(msg(
         "giveaway.no_winners",
@@ -4623,14 +4623,14 @@ fn giveaways(out: &mut Vec<Def>) {
     out.push(msg(
         "giveaway.reroll",
         "Reroll post",
-        &["winners", "prize", "link"],
+        &["winners", "prize", "link", "claim"],
         &["winners", "prize"],
-        json!({"content": "{e:trophy} New winner: {winners}! You won **{prize}**!\n{link}", "embeds": []}),
+        json!({"content": "{e:trophy} New winner: {winners}! You won **{prize}**!\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}", "embeds": []}),
     ));
     out.push(msg(
         "giveaway.winner_dm",
         "Winner DM",
-        &["prize", "server", "sponsor", "link"],
+        &["prize", "server", "sponsor", "link", "deadline"],
         &["prize", "link"],
         card(
             "You won a giveaway!",
@@ -4638,6 +4638,7 @@ fn giveaways(out: &mut Vec<Def>) {
             &[
                 "{e:trophy} You won **{prize}** in `{server}`.",
                 "{e:star} **Sponsored by:** {sponsor}",
+                "{e:clock} Press **Claim** before {deadline}, or the prize goes to another entrant.",
                 "[Go to the giveaway]({link})",
             ],
         ),
@@ -4656,6 +4657,9 @@ fn giveaways(out: &mut Vec<Def>) {
     let rows: &[(&str, &str, &[&'static str], &str)] = &[
         ("giveaway.entry_ok", "Enter: entered", &["prize", "entries", "why"], "{e:success} You entered **{prize}**. You have **{entries}** entries.\n{why}"),
         ("giveaway.entry_again", "Enter: already in", &["prize", "entries"], "You are already in **{prize}**, with **{entries}** entries."),
+        ("giveaway.claimed", "Claim: claimed", &["prize"], "{e:success} You claimed **{prize}**."),
+        ("giveaway.claim_denied", "Claim: refused", &["prize", "reason"], "{e:error} You cannot claim **{prize}**: {reason}"),
+        ("reply.giveaway.claim_time", "claim time set", &["id", "claim"], "Winners of giveaway `#{id}` now have {claim} to claim."),
         ("giveaway.entry_denied", "Enter: refused", &["prize", "reason"], "{e:error} You cannot enter **{prize}**: {reason}"),
         ("reply.giveaway.started", "started", &["id", "prize", "channel", "ends"], "Giveaway `#{id}` for **{prize}** started in {channel}. It ends {ends}."),
         ("reply.giveaway.not_found", "no such giveaway", &["id"], "There is no giveaway `#{id}` on this server."),
@@ -4669,6 +4673,7 @@ fn giveaways(out: &mut Vec<Def>) {
         ("reply.giveaway.off", "giveaways are off", &[], "Giveaways are off on this server."),
         ("reply.giveaway.confirm", "confirm question", &["action", "id", "prize"], "{action} giveaway `#{id}` (**{prize}**)? Press Yes to go on."),
         ("reply.giveaway.stale", "question out of date", &[], "This question is out of date: the giveaway changed since. Run the command again."),
+        ("reply.giveaway.paused", "paused during an attack", &["id"], "Giveaway `#{id}` is paused while the server is under attack. End it when the attack is over."),
         ("reply.giveaway.busy", "another draw ran first", &["id"], "Another draw of giveaway `#{id}` ran at the same time. Look at the giveaway and try again."),
     ];
     for (key, name, vars, text) in rows {
@@ -6346,6 +6351,12 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "https://discord.com/channels/1/2/3",
     ),
     ("server", "Server name", "My Server"),
+    ("claim", "How long a winner has to press Claim", "48 hours"),
+    (
+        "deadline",
+        "When the winner's claim time ends (time left and date)",
+        "in 2 days (25 November 2026 20:00)",
+    ),
     (
         "permissions",
         "Brim's dangerous Discord permissions, one per line",

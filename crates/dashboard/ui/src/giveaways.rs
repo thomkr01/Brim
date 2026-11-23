@@ -137,7 +137,10 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             .with_untracked(|v| v.as_ref().map(|v| v["defaults"].clone()))
             .unwrap_or_else(|| json!({}));
         length.set("1d".into());
-        open_form(json!({"id": null, "channel": "", "prize": "", "winners": 1, "req": defaults}));
+        let claim = data
+            .with_untracked(|v| v.as_ref().map(|v| v["limits"]["claim_default"].clone()))
+            .unwrap_or_else(|| json!(48));
+        open_form(json!({"id": null, "channel": "", "prize": "", "winners": 1, "req": defaults, "claim_hours": claim}));
     };
     let save_form = move || {
         let mut v = d.get_untracked();
@@ -181,7 +184,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             };
             let num = move |key: &'static str| move |e: leptos::ev::Event| {
                 let n: i64 = event_target_value(&e).parse().unwrap_or(0);
-                d.update(|v| if key == "winners" { v["winners"] = json!(n) } else { v["req"][key] = json!(n.max(0)) })
+                d.update(|v| if key == "winners" || key == "claim_hours" { v[key] = json!(n) } else { v["req"][key] = json!(n.max(0)) })
             };
             let r = NodeRef::<leptos::html::Div>::new();
             focus_on_open(r);
@@ -199,6 +202,9 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                     {new.then(|| view! {
                         <div class="row"><label for="gw-length">"Runs for"</label>
                             <input id="gw-length" prop:value=move || length.get() on:input=move |e| length.set(event_target_value(&e)) placeholder="2d, 12h or 1h 30m" /></div>
+                        <div class="row"><label for="gw-claim">"Claim time (hours)"</label>
+                            <input id="gw-claim" type="number" min="1" max=limits["claim_hours"].as_i64().unwrap_or(720).to_string() prop:value=move || d.with(|v| v["claim_hours"].to_string()) on:change=num("claim_hours") /></div>
+                        <p class="muted small hint">"Each winner presses Claim within this time. If not, Brim draws that place again (at most 3 times); a new winner has 24 hours."</p>
                         <div class="row"><label>"Host"</label>{one_member(host)}</div>
                         <div class="row"><label>"Sponsor"</label>{one_member(sponsor)}</div>
                         <p class="muted small hint">"Both are optional. The host cannot enter. The sponsor is shown on the message and cannot enter; the winners' message names them."</p>
@@ -301,6 +307,14 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         let missing = running && x["message"].is_null() && issue.is_some();
         let pick = RwSignal::new(String::new());
         let winners = crate::form::strs(&x["winner_ids"]);
+        let claims = x["claims"].as_array().cloned().unwrap_or_default();
+        let claim_of = move |w: &str| -> String {
+            match claims.iter().find(|c| c["user"] == w) {
+                Some(c) if !c["claimed"].is_null() => "claimed".into(),
+                Some(c) => format!("claim {}", crate::discord::relative(c["deadline"].as_i64().unwrap_or(0) - now())),
+                None => String::new(),
+            }
+        };
         let (p1, p2, p3) = (prize.clone(), prize.clone(), prize.clone());
         let x2 = x.clone();
         view! {
@@ -317,7 +331,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                 {(!winners.is_empty()).then(|| view! {
                     <div class="row"><span class="muted">"Winners:"</span>
                         {winners.clone().into_iter().map(|w| { let w2 = w.clone(); let p = p3.clone(); view! {
-                            <span class="chip">{who(names, w.clone())}" "
+                            <span class="chip">{who(names, w.clone())}" "{let c = claim_of(&w); (!c.is_empty()).then(|| view! { <span class="muted small">{c}" "</span> })}
                                 <button class="link" aria-label="redraw this winner" disabled=move || busy.get() on:click=move |_| {
                                     let w = w2.clone();
                                     ask(Ask::new(format!("Redraw a winner of “{p}”?")).text("Brim draws a new winner for this place and tells them. Reason (staff only, in the log):").input("").yes("Redraw"),
@@ -342,6 +356,12 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                         <button class="danger" disabled=move || busy.get() on:click=move |_| ask(Ask::new(format!("Cancel “{p2}”?")).text("No winners are drawn. The message says the giveaway was cancelled.").yes("Cancel giveaway").danger(), move |_| act(format!("{id}/cancel"), json!({}), "Cancelled."))>"Cancel"</button>
                     })}
                     {(x["status"] == "ended").then(|| { let p = prize.clone(); view! {
+                        <button class="ghost" disabled=move || busy.get() on:click=move |_| ask(Ask::new("Change the claim time").text("Hours from now that every winner who has not claimed yet has to press Claim (1 to 720).").input("48").yes("Change"), move |t| {
+                            match t.trim().parse::<i64>() {
+                                Ok(h) if (1..=720).contains(&h) => act(format!("{id}/claim"), json!({"hours": h}), "Claim time changed."),
+                                _ => msg.err("Type a number of hours from 1 to 720."),
+                            }
+                        })>"Claim time"</button>
                         <button class="ghost" disabled=move || busy.get() on:click=move |_| { let p = p.clone(); ask(Ask::new(format!("Reroll “{p}”?")).text("Brim draws all winners again. Past winners cannot win again.").yes("Reroll"), move |_| act(format!("{id}/reroll"), json!({}), "Rerolling. The new winners show here in a few seconds.")) }>"Reroll"</button>
                     } })}
                 </div>

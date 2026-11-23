@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route(&format!("{g}/{{id}}/cancel"), post(cancel))
         .route(&format!("{g}/{{id}}/reroll"), post(reroll))
         .route(&format!("{g}/{{id}}/time"), post(time))
+        .route(&format!("{g}/{{id}}/claim"), post(claim_time))
         .route(&format!("{g}/{{id}}/channel"), post(channel))
         .route(&format!("{g}/{{id}}/entries"), get(entries))
 }
@@ -72,6 +73,19 @@ fn ids(v: &[i64]) -> Vec<String> {
 }
 
 fn row(g: &Giveaway, entries: i64) -> Value {
+    row_with(g, entries, &[])
+}
+
+/// A giveaway for the page, with the claim state of each winner place.
+fn row_with(g: &Giveaway, entries: i64, claims: &[store::Claim]) -> Value {
+    let claims: Vec<Value> = claims
+        .iter()
+        .filter(|c| c.giveaway_id == g.id)
+        .map(|c| {
+            json!({"place": c.place, "user": c.user_id.to_string(), "deadline": c.deadline.timestamp(),
+                   "claimed": c.claimed_at.map(|t| t.timestamp()), "redraws": c.redraws})
+        })
+        .collect();
     let id = |v: Option<i64>| v.map(|x| x.to_string());
     json!({
         "id": g.id, "channel": g.channel_id.to_string(), "message": id(g.message_id),
@@ -80,14 +94,16 @@ fn row(g: &Giveaway, entries: i64) -> Value {
         "ended_at": g.ended_at.map(|t| t.timestamp()), "paused": g.paused_at.is_some(),
         "req": g.req.0, "winner_ids": ids(&g.winner_ids), "draws": g.draws,
         "needs_repost": g.needs_repost, "issue": g.issue, "entries": entries,
+        "claim_hours": g.claim_hours, "claims": claims,
     })
 }
 
 async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
     staff(&st, &s, guild).await?;
     let all = store::list(&st.db, guild, 25).await?;
-    let counts =
-        store::entry_counts(&st.db, guild, &all.iter().map(|g| g.id).collect::<Vec<_>>()).await?;
+    let all_ids: Vec<i64> = all.iter().map(|g| g.id).collect();
+    let counts = store::entry_counts(&st.db, guild, &all_ids).await?;
+    let claims = store::claims(&st.db, guild, &all_ids).await?;
     let n = |id| counts.iter().find(|c| c.0 == id).map_or(0, |c| c.1);
     // The start form begins with the server's default rules.
     let (_, c) = crate::store::current(&st.db, guild).await?;
@@ -100,12 +116,13 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
         ..Req::default()
     };
     Ok(Json(json!({
-        "giveaways": all.iter().map(|g| row(g, n(g.id))).collect::<Vec<_>>(),
+        "giveaways": all.iter().map(|g| row_with(g, n(g.id), &claims)).collect::<Vec<_>>(),
         "defaults": defaults,
         "on": settings(&st, guild).await?.is_some(),
         "limits": {
             "winners": store::WINNERS.1, "max_secs": store::DURATION.1, "min_secs": store::DURATION.0,
             "prize": store::MAX_PRIZE, "roles": store::MAX_ROLES, "extra": store::EXTRA.1,
+            "claim_hours": store::CLAIM_HOURS.1, "claim_default": d.claim_hours,
         },
     })))
 }
@@ -142,6 +159,9 @@ struct Start {
     sponsor: Option<String>,
     #[serde(default)]
     req: Req,
+    /// Hours the winners have to claim; empty: the server's default.
+    #[serde(default)]
+    claim_hours: Option<i64>,
 }
 
 async fn start(
@@ -168,7 +188,7 @@ async fn start(
         req: b.req,
         button_label: cfg.button_label.clone(),
         button_emoji: cfg.button_emoji.clone(),
-        claim_hours: cfg.claim_hours as i64,
+        claim_hours: b.claim_hours.unwrap_or(cfg.claim_hours as i64),
         post_job: true,
     };
     let g = store::create(&st.db, &new, cfg.max_running as i64)
@@ -229,8 +249,14 @@ fn chrono_now() -> i64 {
 
 async fn end(State(st): State<AppState>, s: Sess, Path((guild, id)): Path<(i64, i64)>) -> Res {
     writer(&st, &s, guild).await?;
-    if store::end_now(&st.db, guild, id).await? == EndNow::NotRunning {
-        return Err(bad("this giveaway is not running"));
+    match store::end_now(&st.db, guild, id).await? {
+        EndNow::NotRunning => return Err(bad("this giveaway is not running")),
+        EndNow::Paused => {
+            return Err(bad(
+                "this giveaway is paused while the server is under attack; end it when the attack is over",
+            ))
+        }
+        _ => {}
     }
     audit(&st, &s, guild, format!("ended the giveaway #{id}")).await?;
     Ok(Json(json!({"ok": true})))
@@ -328,6 +354,39 @@ async fn time(
     )
     .await?;
     Ok(Json(json!({"ends_at": ends.timestamp()})))
+}
+
+#[derive(Deserialize)]
+struct ClaimTime {
+    hours: i64,
+}
+
+/// Staff set the claim time by hand: on an ended giveaway, every winner who has not claimed has
+/// that long from now.
+async fn claim_time(
+    State(st): State<AppState>,
+    s: Sess,
+    Path((guild, id)): Path<(i64, i64)>,
+    Json(b): Json<ClaimTime>,
+) -> Res {
+    writer(&st, &s, guild).await?;
+    if !store::set_claim_time(&st.db, guild, id, b.hours)
+        .await?
+        .map_err(bad)?
+    {
+        return Err(bad("this giveaway was cancelled or is gone"));
+    }
+    audit(
+        &st,
+        &s,
+        guild,
+        format!(
+            "set the claim time of the giveaway #{id} to {} hours",
+            b.hours
+        ),
+    )
+    .await?;
+    Ok(Json(json!({"ok": true})))
 }
 
 #[derive(Deserialize)]

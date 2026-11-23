@@ -232,7 +232,9 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
         "raider_check" => crate::raiders::check_job(app, gid, &job.payload).await?,
         "raider_scan" => crate::raiders::scan_job(app, gid).await?,
         "raider_lift" => crate::raiders::lift_job(app, gid, &job.payload).await?,
-        brim_core::giveaways::END_JOB => crate::giveaways::end_job(app, gid, &job.payload).await?,
+        brim_core::giveaways::END_JOB => {
+            crate::giveaways::end_job(app, gid, job.id, &job.payload).await?
+        }
         brim_core::giveaways::REFRESH_JOB => crate::giveaways::refresh_job(app, gid).await?,
         brim_core::giveaways::REPOST_JOB => {
             crate::giveaways::repost_job(app, gid, &job.payload).await?
@@ -244,6 +246,9 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
             crate::giveaways::action_job(app, gid, &job.payload).await?
         }
         brim_core::giveaways::DM_JOB => crate::giveaways::dm_job(app, gid, &job.payload).await?,
+        brim_core::giveaways::CLAIM_JOB => {
+            crate::giveaways::claim_job(app, gid, &job.payload).await?
+        }
         "ticket_close_check" => crate::tickets::close_check(app, gid, &job.payload).await?,
         other => tracing::warn!(kind = other, "unknown job kind"),
     }
@@ -526,6 +531,15 @@ pub async fn run(app: Arc<App>) {
                 }
                 if let Err(e) = brim_core::persondata::sweep_kept(&app.pool).await {
                     tracing::warn!(?e, "finishing done data delete requests failed");
+                }
+            });
+        }
+        // Own task: with many servers the first round after a start reads each one's locks.
+        if n.is_multiple_of(3) {
+            let app = app.clone();
+            tokio::spawn(async move {
+                if let Err(e) = crate::giveaways::sync_pauses(&app).await {
+                    tracing::warn!(?e, "the giveaway pause check failed");
                 }
             });
         }

@@ -96,6 +96,7 @@ pub enum Refusal {
     BlockedRole,
     Quarantined,
     Flagged,
+    TimedOut,
     RaidJoiner,
     Unverified,
     AccountAge(u32),
@@ -113,6 +114,7 @@ impl Refusal {
             Self::BlockedRole => "you have a role that cannot enter this giveaway.".into(),
             Self::Quarantined => "you are in quarantine.".into(),
             Self::Flagged => "Brim's raid protection flagged your account.".into(),
+            Self::TimedOut => "you are timed out.".into(),
             Self::RaidJoiner => "you joined during a raid.".into(),
             Self::Unverified => "you are not verified yet.".into(),
             Self::AccountAge(d) => format!("your Discord account must be at least {d} days old."),
@@ -130,6 +132,8 @@ pub struct Facts<'a> {
     pub quarantined: bool,
     /// On the Raider List (not let back in here) or acted on by the join checks in this stay.
     pub flagged: bool,
+    /// In a Discord timeout now.
+    pub timed_out: bool,
     pub raid_joiner: bool,
     pub unverified: bool,
     /// Join time of the current stay, in ms.
@@ -139,7 +143,7 @@ pub struct Facts<'a> {
 
 const DAY_MS: i64 = 86_400_000;
 
-/// The first rule that keeps `f` out. Moderation first (blocked roles, quarantine, flags), then
+/// The first rule that keeps `f` out. Moderation first (blocked roles, quarantine, flags, timeout), then
 /// the bypass, which skips only the account age, the time in the server and the required roles.
 pub fn refusal(req: &Req, host: Option<i64>, sponsor: Option<i64>, f: &Facts) -> Option<Refusal> {
     let has = |list: &[Id<RoleMarker>]| f.roles.iter().any(|r| list.contains(r));
@@ -151,6 +155,7 @@ pub fn refusal(req: &Req, host: Option<i64>, sponsor: Option<i64>, f: &Facts) ->
         (has(&req.blocked), Refusal::BlockedRole),
         (f.quarantined, Refusal::Quarantined),
         (f.flagged, Refusal::Flagged),
+        (f.timed_out, Refusal::TimedOut),
         (req.block_raid_joiners && f.raid_joiner, Refusal::RaidJoiner),
         (f.unverified, Refusal::Unverified),
     ];
@@ -517,7 +522,8 @@ pub async fn set_weight(pool: &PgPool, guild: i64, id: i64, user: i64, weight: u
 pub async fn claim_end(pool: &PgPool, guild: i64, id: i64) -> Result<Option<Giveaway>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE giveaways SET status = 'ended', ended_at = COALESCE(ended_at, now()), paused_at = NULL
-         WHERE id = $1 AND guild_id = $2 AND (status = 'running' OR (status = 'ended' AND draws = 0))
+         WHERE id = $1 AND guild_id = $2
+           AND ((status = 'running' AND paused_at IS NULL) OR (status = 'ended' AND draws = 0))
          RETURNING {COLS}"
     )))
     .bind(id)
@@ -529,7 +535,9 @@ pub async fn claim_end(pool: &PgPool, guild: i64, id: i64) -> Result<Option<Give
 /// Saves a draw: the winners now, and that they won once. `seen` is the `draws` count the draw
 /// started from: when another draw saved first, nothing changes and the result is false. In the
 /// same transaction it queues the announcement (`key`: the message to post) and one DM job per
-/// new winner, so a restart after the save still announces, and nothing is sent twice.
+/// new winner, so a restart after the save still announces, and nothing is sent twice. The claim
+/// places follow the winners ([`sync_claims`]); `auto`: a redraw because a claim time ran out.
+#[allow(clippy::too_many_arguments)]
 pub async fn save_draw(
     pool: &PgPool,
     guild: i64,
@@ -538,6 +546,7 @@ pub async fn save_draw(
     winners: &[i64],
     new: &[i64],
     key: &str,
+    auto: bool,
 ) -> Result<bool> {
     let mut tx = pool.begin().await?;
     let saved = sqlx::query(
@@ -556,6 +565,7 @@ pub async fn save_draw(
     if !saved {
         return Ok(false);
     }
+    sync_claims(&mut tx, guild, id, seen == 0, winners, new, auto).await?;
     let (now, draws) = (Utc::now().timestamp(), seen + 1);
     let payload = serde_json::json!({ "id": id, "draws": draws, "key": key, "won": new });
     crate::jobs::enqueue(&mut *tx, guild, ANNOUNCE_JOB, payload, now).await?;
@@ -565,6 +575,243 @@ pub async fn save_draw(
     }
     tx.commit().await?;
     Ok(true)
+}
+
+/// The job that redraws one place when its claim time ran out.
+pub const CLAIM_JOB: &str = "giveaway_claim";
+/// Hours a redrawn or rerolled winner has to claim.
+pub const REDRAW_HOURS: i32 = 24;
+/// Redraws of one place because nobody claimed it; then staff are told.
+pub const MAX_REDRAWS: i16 = 3;
+
+/// One winner place and its claim.
+#[derive(Clone, Debug, sqlx::FromRow, Serialize)]
+pub struct Claim {
+    pub giveaway_id: i64,
+    pub place: i16,
+    pub user_id: i64,
+    pub deadline: DateTime<Utc>,
+    pub claimed_at: Option<DateTime<Utc>>,
+    pub redraws: i16,
+}
+
+/// Gives each new winner a place: a place a replaced winner left keeps its redraw count, other
+/// winners keep theirs. The first draw gives the giveaway's claim time, a later draw 24 hours.
+/// Queues one claim job per new place at its deadline.
+async fn sync_claims(
+    tx: &mut sqlx::PgConnection,
+    guild: i64,
+    id: i64,
+    first: bool,
+    winners: &[i64],
+    new: &[i64],
+    auto: bool,
+) -> Result<()> {
+    let mut free: Vec<(i16, i16)> = sqlx::query_as(
+        "DELETE FROM giveaway_claims WHERE giveaway_id = $1 AND NOT (user_id = ANY($2))
+         RETURNING place, redraws",
+    )
+    .bind(id)
+    .bind(winners)
+    .fetch_all(&mut *tx)
+    .await?;
+    let held: Vec<(i16, i64)> =
+        sqlx::query_as("SELECT place, user_id FROM giveaway_claims WHERE giveaway_id = $1")
+            .bind(id)
+            .fetch_all(&mut *tx)
+            .await?;
+    free.sort();
+    let mut taken: Vec<i16> = held.iter().map(|h| h.0).collect();
+    taken.extend(free.iter().map(|f| f.0));
+    let mut next = 1i16;
+    let hours: i32 = match first {
+        true => {
+            sqlx::query_scalar("SELECT claim_hours FROM giveaways WHERE id = $1")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?
+        }
+        false => REDRAW_HOURS,
+    };
+    for &u in new.iter().filter(|u| !held.iter().any(|h| h.1 == **u)) {
+        let (place, redraws) = match free.is_empty() {
+            false => free.remove(0),
+            true => {
+                while taken.contains(&next) {
+                    next += 1;
+                }
+                taken.push(next);
+                (next, 0)
+            }
+        };
+        let deadline: DateTime<Utc> = sqlx::query_scalar(
+            "INSERT INTO giveaway_claims (giveaway_id, guild_id, place, user_id, deadline, redraws)
+             VALUES ($1, $2, $3, $4, now() + make_interval(hours => $5), $6) RETURNING deadline",
+        )
+        .bind(id)
+        .bind(guild)
+        .bind(place)
+        .bind(u)
+        .bind(hours)
+        .bind(redraws + auto as i16)
+        .fetch_one(&mut *tx)
+        .await?;
+        let job = serde_json::json!({"id": id, "place": place, "user": u});
+        crate::jobs::enqueue(&mut *tx, guild, CLAIM_JOB, job, deadline.timestamp()).await?;
+    }
+    Ok(())
+}
+
+/// What a Claim press did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Claimed {
+    /// Claimed now; the server of the giveaway.
+    Done(i64),
+    Already,
+    /// The claim time is over.
+    Late,
+    NotWinner,
+}
+
+/// Claims the prize of giveaway `id` for `user`, once and only in time. `guild`: the server the
+/// press came from (None in a DM).
+pub async fn claim(pool: &PgPool, id: i64, user: i64, guild: Option<i64>) -> Result<Claimed> {
+    let done: Option<i64> = sqlx::query_scalar(
+        "UPDATE giveaway_claims SET claimed_at = now()
+         WHERE giveaway_id = $1 AND user_id = $2 AND claimed_at IS NULL AND deadline > now()
+           AND ($3::bigint IS NULL OR guild_id = $3)
+         RETURNING guild_id",
+    )
+    .bind(id)
+    .bind(user)
+    .bind(guild)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(g) = done {
+        return Ok(Claimed::Done(g));
+    }
+    let row: Option<bool> = sqlx::query_scalar(
+        "SELECT claimed_at IS NOT NULL FROM giveaway_claims WHERE giveaway_id = $1 AND user_id = $2",
+    )
+    .bind(id)
+    .bind(user)
+    .fetch_optional(pool)
+    .await?;
+    Ok(match row {
+        Some(true) => Claimed::Already,
+        Some(false) => Claimed::Late,
+        None => Claimed::NotWinner,
+    })
+}
+
+/// The redraw count of place `place` when `user` still holds it unclaimed and its time is over.
+/// It also closes the claim at once, so a press during the redraw cannot claim a place that is
+/// being drawn again.
+pub async fn claim_due(
+    pool: &PgPool,
+    guild: i64,
+    id: i64,
+    place: i16,
+    user: i64,
+) -> Result<Option<i16>> {
+    Ok(sqlx::query_scalar(
+        "UPDATE giveaway_claims SET deadline = LEAST(deadline, now())
+         WHERE giveaway_id = $1 AND guild_id = $2 AND place = $3 AND user_id = $4
+           AND claimed_at IS NULL AND deadline <= now() + interval '10 seconds'
+         RETURNING redraws",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(place)
+    .bind(user)
+    .fetch_optional(pool)
+    .await?)
+}
+
+/// Every place of giveaway `id` whose claim time is over and that may be drawn again (fewer than
+/// [`MAX_REDRAWS`]): their winners, so one redraw replaces them all. Closes their claims.
+pub async fn claims_due(pool: &PgPool, guild: i64, id: i64) -> Result<Vec<i64>> {
+    Ok(sqlx::query_scalar(
+        "UPDATE giveaway_claims SET deadline = LEAST(deadline, now())
+         WHERE giveaway_id = $1 AND guild_id = $2 AND claimed_at IS NULL
+           AND deadline <= now() + interval '10 seconds' AND redraws < $3
+         RETURNING user_id",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(MAX_REDRAWS)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// The claim places of `ids`, by giveaway and place.
+pub async fn claims(pool: &PgPool, guild: i64, ids: &[i64]) -> Result<Vec<Claim>> {
+    Ok(sqlx::query_as(
+        "SELECT giveaway_id, place, user_id, deadline, claimed_at, redraws FROM giveaway_claims
+         WHERE guild_id = $1 AND giveaway_id = ANY($2) ORDER BY giveaway_id, place",
+    )
+    .bind(guild)
+    .bind(ids)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Staff set the claim time by hand: a running giveaway gives it to its winners; on an ended
+/// one every winner who has not claimed yet has `hours` from now. False when it was cancelled
+/// or is not found.
+pub async fn set_claim_time(
+    pool: &PgPool,
+    guild: i64,
+    id: i64,
+    hours: i64,
+) -> Result<Result<bool, String>> {
+    if !(CLAIM_HOURS.0..=CLAIM_HOURS.1).contains(&hours) {
+        return Ok(Err(format!(
+            "The claim time is {} to {} hours.",
+            CLAIM_HOURS.0, CLAIM_HOURS.1
+        )));
+    }
+    let mut tx = pool.begin().await?;
+    let n = sqlx::query(
+        "UPDATE giveaways SET claim_hours = $3
+         WHERE id = $1 AND guild_id = $2 AND status IN ('running', 'ended')",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(hours as i32)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if n == 0 {
+        return Ok(Ok(false));
+    }
+    let moved: Vec<(i16, i64, DateTime<Utc>)> = sqlx::query_as(
+        "UPDATE giveaway_claims SET deadline = now() + make_interval(hours => $3)
+         WHERE giveaway_id = $1 AND guild_id = $2 AND claimed_at IS NULL
+         RETURNING place, user_id, deadline",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(hours as i32)
+    .fetch_all(&mut *tx)
+    .await?;
+    // The new deadlines get new jobs; free old ones go, and a held one finds its deadline not
+    // reached and does nothing.
+    sqlx::query(
+        "DELETE FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3
+           AND (locked_until IS NULL OR locked_until < now())",
+    )
+    .bind(guild)
+    .bind(CLAIM_JOB)
+    .bind(id.to_string())
+    .execute(&mut *tx)
+    .await?;
+    for (place, user, deadline) in moved {
+        let job = serde_json::json!({"id": id, "place": place, "user": user});
+        crate::jobs::enqueue(&mut *tx, guild, CLAIM_JOB, job, deadline.timestamp()).await?;
+    }
+    tx.commit().await?;
+    Ok(Ok(true))
 }
 
 /// Cancels a running giveaway and drops its end job; false when it was not running.
@@ -607,21 +854,26 @@ pub enum EndNow {
     /// The end job runs already.
     Running,
     NotRunning,
+    /// Paused during an attack: it can end once the attack is over.
+    Paused,
 }
 
 /// Moves the end job of a running giveaway to now. Only one end job exists per giveaway: a job
 /// the scheduler holds is left alone, and a lost job is made again.
 pub async fn end_now(pool: &PgPool, guild: i64, id: i64) -> Result<EndNow> {
     let mut tx = pool.begin().await?;
-    let running: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM giveaways WHERE id = $1 AND guild_id = $2 AND status = 'running' FOR UPDATE",
+    let paused: Option<bool> = sqlx::query_scalar(
+        "SELECT paused_at IS NOT NULL FROM giveaways
+         WHERE id = $1 AND guild_id = $2 AND status = 'running' FOR UPDATE",
     )
     .bind(id)
     .bind(guild)
     .fetch_optional(&mut *tx)
     .await?;
-    if running.is_none() {
-        return Ok(EndNow::NotRunning);
+    match paused {
+        None => return Ok(EndNow::NotRunning),
+        Some(true) => return Ok(EndNow::Paused),
+        Some(false) => {}
     }
     let jobs: Vec<bool> = sqlx::query_scalar(
         "SELECT locked_until IS NOT NULL AND locked_until > now() FROM scheduled_jobs
@@ -683,7 +935,9 @@ pub async fn shift(pool: &PgPool, guild: i64, id: i64, secs: i64) -> Result<Opti
     Ok(Some(ends))
 }
 
-/// Puts the unleased end job of giveaway `id` at `ends`, or queues one when it is lost.
+/// Puts the unleased end job of giveaway `id` at `ends`, or queues one when there is none. A job
+/// the scheduler holds now is left alone: it is deleted when it ends, so a move of it would be lost
+/// ([`end_due`] makes that run wait).
 async fn move_end_job(
     tx: &mut sqlx::PgConnection,
     guild: i64,
@@ -691,7 +945,8 @@ async fn move_end_job(
     ends: DateTime<Utc>,
 ) -> Result<()> {
     let moved = sqlx::query(
-        "UPDATE scheduled_jobs SET run_at = $4 WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3",
+        "UPDATE scheduled_jobs SET run_at = $4 WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3
+           AND (locked_until IS NULL OR locked_until < now())",
     )
     .bind(guild)
     .bind(END_JOB)
@@ -705,6 +960,93 @@ async fn move_end_job(
         crate::jobs::enqueue(&mut *tx, guild, END_JOB, job, ends.timestamp()).await?;
     }
     Ok(())
+}
+
+/// Whether end job `job` of giveaway `id` may draw now. A paused giveaway, or one whose end moved
+/// later after the job was taken, waits: it keeps one pending end job (made here when no other
+/// exists; a paused one checks again in an hour, and [`resume`] moves it). True when the giveaway
+/// is not running, so [`claim_end`] decides.
+pub async fn end_due(pool: &PgPool, guild: i64, id: i64, job: i64) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    let row: Option<(String, DateTime<Utc>, bool)> = sqlx::query_as(
+        "SELECT status, ends_at, paused_at IS NOT NULL FROM giveaways
+         WHERE id = $1 AND guild_id = $2 FOR UPDATE",
+    )
+    .bind(id)
+    .bind(guild)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((status, ends, paused)) = row else {
+        return Ok(true);
+    };
+    // A few seconds early is the scheduler tick, not a moved end.
+    if status != "running" || (!paused && ends <= Utc::now() + chrono::Duration::seconds(10)) {
+        return Ok(true);
+    }
+    let other: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM scheduled_jobs
+           WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3 AND id <> $4)",
+    )
+    .bind(guild)
+    .bind(END_JOB)
+    .bind(id.to_string())
+    .bind(job)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !other {
+        let at = match paused {
+            true => Utc::now().timestamp() + 3600,
+            false => ends.timestamp(),
+        };
+        crate::jobs::enqueue(&mut *tx, guild, END_JOB, serde_json::json!({"id": id}), at).await?;
+    }
+    tx.commit().await?;
+    Ok(false)
+}
+
+/// Pauses the running giveaways of the server that are not paused yet: a raid, a lockdown, panic
+/// mode or an anti-nuke case started. Entries are refused and no draw runs until [`resume`].
+/// Returns how many it paused.
+pub async fn pause(pool: &PgPool, guild: i64) -> Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE giveaways SET paused_at = now()
+         WHERE guild_id = $1 AND status = 'running' AND paused_at IS NULL",
+    )
+    .bind(guild)
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+/// Ends the pause of the server's giveaways: each one ends later by the time it was paused, and
+/// its end job moves with it. The message shows the new end at the next refresh. Returns the ids.
+pub async fn resume(pool: &PgPool, guild: i64) -> Result<Vec<i64>> {
+    let mut tx = pool.begin().await?;
+    let moved: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(
+        "UPDATE giveaways SET ends_at = ends_at + (now() - paused_at), paused_at = NULL,
+           shown_entries = -1
+         WHERE guild_id = $1 AND status = 'running' AND paused_at IS NOT NULL
+         RETURNING id, ends_at",
+    )
+    .bind(guild)
+    .fetch_all(&mut *tx)
+    .await?;
+    for (id, ends) in &moved {
+        move_end_job(&mut tx, guild, *id, *ends).await?;
+    }
+    tx.commit().await?;
+    Ok(moved.into_iter().map(|(id, _)| id).collect())
+}
+
+/// Per server with running giveaways: (server, all of them paused, any of them paused). One read
+/// for the whole bot, so the pause check costs one query per round, not one per server.
+pub async fn pause_states(pool: &PgPool) -> Result<Vec<(i64, bool, bool)>> {
+    Ok(sqlx::query_as(
+        "SELECT guild_id, bool_and(paused_at IS NOT NULL), bool_or(paused_at IS NOT NULL)
+         FROM giveaways WHERE status = 'running' GROUP BY guild_id",
+    )
+    .fetch_all(pool)
+    .await?)
 }
 
 /// Changes the prize, winner count and rules of a running giveaway. The new rules apply to the
@@ -774,6 +1116,29 @@ pub async fn queue_post(
     }
     tx.commit().await?;
     Ok(n == 1)
+}
+
+/// A role that a restore made again: the rules of the running giveaways name the new id.
+pub async fn relink_roles(pool: &PgPool, guild: i64, old: i64, new: i64) -> Result<u64> {
+    Ok(sqlx::query(
+        "UPDATE giveaways SET req = req
+           || jsonb_build_object('required', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'required') x), '[]'))
+           || jsonb_build_object('blocked', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'blocked') x), '[]'))
+           || jsonb_build_object('bypass', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'bypass') x), '[]'))
+           || jsonb_build_object('extra', COALESCE((SELECT jsonb_agg(CASE WHEN x->>'role' = $2::text
+                THEN jsonb_set(x, '{role}', to_jsonb($3::text)) ELSE x END)
+                FROM jsonb_array_elements(req->'extra') x), '[]'))
+         WHERE guild_id = $1 AND status = 'running' AND strpos(req::text, '\"' || $2::text || '\"') > 0",
+    )
+    .bind(guild)
+    .bind(old.to_string())
+    .bind(new.to_string())
+    .execute(pool)
+    .await?
+    .rows_affected())
 }
 
 /// The entry count of each of `ids` (only those with entries).
@@ -858,6 +1223,7 @@ mod tests {
             bot: false,
             quarantined: false,
             flagged: false,
+            timed_out: false,
             raid_joiner: false,
             unverified: false,
             joined_ms: Some(0),
@@ -899,6 +1265,13 @@ mod tests {
         let mut f = facts(&r7);
         f.flagged = true;
         assert_eq!(refusal(&req, None, None, &f), Some(Refusal::Flagged));
+        let mut t = facts(&r7);
+        t.timed_out = true;
+        assert_eq!(
+            refusal(&req, None, None, &t),
+            Some(Refusal::TimedOut),
+            "a bypass role never skips a timeout"
+        );
         let host = (1i64 << 22, facts(&r5));
         assert_eq!(
             refusal(&req, Some(host.0), None, &host.1),
@@ -1085,7 +1458,8 @@ mod tests {
             claimed.draws,
             &[5],
             &[5],
-            "giveaway.winners"
+            "giveaway.winners",
+            false
         )
         .await
         .unwrap());
@@ -1111,7 +1485,8 @@ mod tests {
             claimed.draws,
             &[6],
             &[6],
-            "giveaway.winners"
+            "giveaway.winners",
+            false
         )
         .await
         .unwrap());
@@ -1152,6 +1527,302 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
+    }
+
+    async fn end_jobs(pool: &PgPool, gid: i64, id: i64) -> Vec<(i64, i64)> {
+        sqlx::query_as(
+            "SELECT id, extract(epoch FROM run_at)::bigint FROM scheduled_jobs
+             WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3 ORDER BY id",
+        )
+        .bind(gid)
+        .bind(END_JOB)
+        .bind(id.to_string())
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
+
+    async fn clean(pool: &PgPool, gid: i64) {
+        for t in ["giveaways", "scheduled_jobs"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {t} WHERE guild_id = $1"
+            )))
+            .bind(gid)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
+
+    /// A pause refuses entries and every draw; the resume moves the end and its job later by the
+    /// paused time. An end job that the scheduler took during the pause waits and keeps one job.
+    #[tokio::test]
+    async fn a_pause_holds_entries_and_the_draw_and_moves_the_end() {
+        let Some((pool, gid)) = db(4).await else {
+            return;
+        };
+        let g = create(&pool, &new(gid), 25).await.unwrap().unwrap();
+        let job = end_jobs(&pool, gid, g.id).await[0].0;
+        assert_eq!(pause(&pool, gid).await.unwrap(), 1);
+        assert_eq!(pause(&pool, gid).await.unwrap(), 0, "paused once");
+        assert_eq!(
+            enter(&pool, gid, g.id, 5, 1).await.unwrap(),
+            Entered::Closed
+        );
+        assert_eq!(end_now(&pool, gid, g.id).await.unwrap(), EndNow::Paused);
+        assert!(
+            !end_due(&pool, gid, g.id, job).await.unwrap(),
+            "no draw while paused"
+        );
+        // The run that waits is deleted when it ends: one new job takes its place.
+        assert_eq!(end_jobs(&pool, gid, g.id).await.len(), 2);
+        sqlx::query("DELETE FROM scheduled_jobs WHERE id = $1")
+            .bind(job)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let job = end_jobs(&pool, gid, g.id).await[0].0;
+        assert!(!end_due(&pool, gid, g.id, -1).await.unwrap());
+        assert_eq!(end_jobs(&pool, gid, g.id).await.len(), 1, "no second job");
+        assert!(claim_end(&pool, gid, g.id).await.unwrap().is_none());
+        let states = pause_states(&pool).await.unwrap();
+        assert_eq!(states.iter().find(|r| r.0 == gid), Some(&(gid, true, true)));
+
+        // The scheduler holds the job while the pause ends: the resume queues a new one.
+        sqlx::query(
+            "UPDATE scheduled_jobs SET locked_until = now() + interval '1 minute' WHERE id = $1",
+        )
+        .bind(job)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE giveaways SET paused_at = now() - interval '10 minutes' WHERE id = $1")
+            .bind(g.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(resume(&pool, gid).await.unwrap(), vec![g.id]);
+        assert!(resume(&pool, gid).await.unwrap().is_empty());
+        let after = get(&pool, gid, g.id).await.unwrap().unwrap();
+        let moved = (after.ends_at - g.ends_at).num_seconds();
+        assert!(
+            (595..=610).contains(&moved),
+            "moved by the pause: {moved} s"
+        );
+        let jobs = end_jobs(&pool, gid, g.id).await;
+        assert_eq!(jobs.len(), 2, "the held job and a new one");
+        assert!(
+            (jobs[1].1 - after.ends_at.timestamp()).abs() <= 1,
+            "at the new end"
+        );
+        // The held run wakes: the end is later now, so it waits and leaves the new job.
+        assert!(!end_due(&pool, gid, g.id, job).await.unwrap());
+        assert_eq!(end_jobs(&pool, gid, g.id).await.len(), 2);
+        sqlx::query("DELETE FROM scheduled_jobs WHERE id = $1")
+            .bind(job)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let last = end_jobs(&pool, gid, g.id).await[0].0;
+        assert_eq!(enter(&pool, gid, g.id, 5, 1).await.unwrap(), Entered::New);
+        assert_eq!(end_now(&pool, gid, g.id).await.unwrap(), EndNow::Queued);
+        assert!(end_due(&pool, gid, g.id, last).await.unwrap());
+        assert!(claim_end(&pool, gid, g.id).await.unwrap().is_some());
+        clean(&pool, gid).await;
+    }
+
+    /// Each winner gets a place with the claim time; a claim works once and only for the winner;
+    /// a redraw of one place keeps the others, gives the new winner 24 hours and counts the
+    /// automatic redraws; staff can move the claim time of an ended giveaway.
+    #[tokio::test]
+    async fn claims_follow_the_winners() {
+        let Some((pool, gid)) = db(7).await else {
+            return;
+        };
+        let mut n = new(gid);
+        n.claim_hours = 5;
+        let g = create(&pool, &n, 25).await.unwrap().unwrap();
+        let c = claim_end(&pool, gid, g.id).await.unwrap().unwrap();
+        assert!(save_draw(
+            &pool,
+            gid,
+            g.id,
+            c.draws,
+            &[5, 6],
+            &[5, 6],
+            "giveaway.winners",
+            false
+        )
+        .await
+        .unwrap());
+        let rows = claims(&pool, gid, &[g.id]).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|c| (c.place, c.user_id))
+                .collect::<Vec<_>>(),
+            [(1, 5), (2, 6)]
+        );
+        let hours = (rows[0].deadline - Utc::now()).num_minutes();
+        assert!(
+            (295..=300).contains(&hours),
+            "the giveaway's claim time: {hours} min"
+        );
+        assert_eq!(
+            claim(&pool, g.id, 7, None).await.unwrap(),
+            Claimed::NotWinner
+        );
+        assert_eq!(
+            claim(&pool, g.id, 5, Some(gid)).await.unwrap(),
+            Claimed::Done(gid)
+        );
+        assert_eq!(
+            claim(&pool, g.id, 5, Some(gid)).await.unwrap(),
+            Claimed::Already
+        );
+        assert_eq!(
+            claim_due(&pool, gid, g.id, 2, 6).await.unwrap(),
+            None,
+            "not over yet"
+        );
+
+        sqlx::query("UPDATE giveaway_claims SET deadline = now() - interval '1 minute' WHERE user_id = 6 AND giveaway_id = $1")
+            .bind(g.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(claim(&pool, g.id, 6, None).await.unwrap(), Claimed::Late);
+        assert_eq!(claim_due(&pool, gid, g.id, 2, 6).await.unwrap(), Some(0));
+        assert_eq!(
+            claim_due(&pool, 1, g.id, 2, 6).await.unwrap(),
+            None,
+            "other server"
+        );
+        let g2 = get(&pool, gid, g.id).await.unwrap().unwrap();
+        assert!(save_draw(
+            &pool,
+            gid,
+            g.id,
+            g2.draws,
+            &[5, 8],
+            &[8],
+            "giveaway.reroll",
+            true
+        )
+        .await
+        .unwrap());
+        let rows = claims(&pool, gid, &[g.id]).await.unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|c| (c.place, c.user_id, c.redraws, c.claimed_at.is_some()))
+                .collect::<Vec<_>>(),
+            [(1, 5, 0, true), (2, 8, 1, false)]
+        );
+        let h = (rows[1].deadline - Utc::now()).num_hours();
+        assert!((23..=24).contains(&h), "a redrawn winner has 24 hours");
+
+        assert!(set_claim_time(&pool, gid, g.id, 0).await.unwrap().is_err());
+        assert_eq!(set_claim_time(&pool, gid, g.id, 2).await.unwrap(), Ok(true));
+        let rows = claims(&pool, gid, &[g.id]).await.unwrap();
+        assert!((rows[1].deadline - Utc::now()).num_minutes() <= 120);
+        assert!(
+            rows[0].claimed_at.is_some(),
+            "a claimed place stays claimed"
+        );
+        let jobs: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(gid)
+        .bind(CLAIM_JOB)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            jobs, 1,
+            "old jobs go when the claim time moves; one unclaimed place"
+        );
+
+        // Fewer winners than places, then a reroll of all: each place number once.
+        let g3 = get(&pool, gid, g.id).await.unwrap().unwrap();
+        assert!(save_draw(
+            &pool,
+            gid,
+            g.id,
+            g3.draws,
+            &[5],
+            &[],
+            "giveaway.reroll",
+            false
+        )
+        .await
+        .unwrap());
+        let g4 = get(&pool, gid, g.id).await.unwrap().unwrap();
+        assert!(save_draw(
+            &pool,
+            gid,
+            g.id,
+            g4.draws,
+            &[10, 11, 12],
+            &[10, 11, 12],
+            "giveaway.reroll",
+            false
+        )
+        .await
+        .unwrap());
+        let mut places: Vec<i16> = claims(&pool, gid, &[g.id])
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| c.place)
+            .collect();
+        places.sort();
+        assert_eq!(places, [1, 2, 3]);
+        sqlx::query("UPDATE giveaway_claims SET deadline = now() WHERE giveaway_id = $1")
+            .bind(g.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut due = claims_due(&pool, gid, g.id).await.unwrap();
+        due.sort();
+        assert_eq!(
+            due,
+            [10, 11, 12],
+            "one redraw takes every place that ran out"
+        );
+        clean(&pool, gid).await;
+    }
+
+    /// A remade role takes the place of the old one in every role list of a running giveaway.
+    #[tokio::test]
+    async fn a_remade_role_moves_into_the_rules() {
+        let Some((pool, gid)) = db(6).await else {
+            return;
+        };
+        let mut n = new(gid);
+        n.req = Req {
+            required: vec![r(11)],
+            blocked: vec![r(11), r(12)],
+            bypass: vec![r(13)],
+            extra: vec![Extra {
+                role: r(11),
+                entries: 3,
+            }],
+            ..Req::default()
+        };
+        let g = create(&pool, &n, 25).await.unwrap().unwrap();
+        assert_eq!(relink_roles(&pool, gid, 11, 21).await.unwrap(), 1);
+        assert_eq!(relink_roles(&pool, gid, 99, 98).await.unwrap(), 0);
+        let req = get(&pool, gid, g.id).await.unwrap().unwrap().req.0;
+        assert_eq!(req.required, vec![r(21)]);
+        assert_eq!(req.blocked, vec![r(21), r(12)]);
+        assert_eq!(req.bypass, vec![r(13)]);
+        assert_eq!(
+            req.extra,
+            vec![Extra {
+                role: r(21),
+                entries: 3
+            }]
+        );
+        clean(&pool, gid).await;
     }
 
     /// The running cap holds under parallel creates.

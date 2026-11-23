@@ -36,6 +36,34 @@ use crate::{
 
 const ENTER: &str = "gw:e:";
 const ANSWER: &str = "gw:a:";
+const CLAIM: &str = "gw:c:";
+
+/// The Claim button under the winners post and in the winner DM.
+fn claim_row(id: i64) -> Component {
+    Component::ActionRow(ActionRow {
+        id: None,
+        components: vec![Component::Button(Button {
+            id: None,
+            custom_id: Some(format!("{CLAIM}{id}")),
+            disabled: false,
+            emoji: Some(EmojiReactionType::Unicode {
+                name: "🏆".into()
+            }),
+            label: Some("Claim".into()),
+            style: ButtonStyle::Success,
+            url: None,
+            sku_id: None,
+        })],
+    })
+}
+
+/// "48 hours", for the claim time in the posts.
+fn hours_text(h: i64) -> String {
+    match h {
+        1 => "1 hour".into(),
+        h => format!("{h} hours"),
+    }
+}
 
 fn when(t: sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>) -> String {
     let s = t.timestamp();
@@ -528,8 +556,10 @@ async fn check(
     bot: bool,
     member_roles: &[Id<RoleMarker>],
     joined_ms: Option<i64>,
+    timeout: Option<Timestamp>,
 ) -> Result<Option<Refusal>> {
     let gid = Id::new(g.guild_id as u64);
+    let now_ms = crate::automod::now_ms();
     let cfg = app.cfg(gid.get()).await?;
     let (quarantined, flagged, raid_joiner) = flags(app, gid, user, joined_ms).await?;
     let v = &cfg.verification;
@@ -541,10 +571,11 @@ async fn check(
         bot,
         quarantined,
         flagged,
+        timed_out: ms(timeout).is_some_and(|t| t > now_ms),
         raid_joiner,
         unverified,
         joined_ms,
-        now_ms: crate::automod::now_ms(),
+        now_ms,
     };
     Ok(store::refusal(&g.req, g.host_id, g.sponsor_id, &f))
 }
@@ -575,6 +606,23 @@ pub async fn handle(app: &App, i: &Interaction) -> Result<bool> {
         answer(app, i, rest).await?;
         return Ok(true);
     }
+    if let Some(id) = c.custom_id.strip_prefix(CLAIM) {
+        let id: i64 = id.parse().unwrap_or(0);
+        let text = match claim(app, i, id).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(?e, "a giveaway claim failed");
+                "Something went wrong. Try again in a moment.".into()
+            }
+        };
+        let answer = crate::verify::ephemeral(
+            InteractionResponseType::ChannelMessageWithSource,
+            Some(&text),
+        );
+        let client = app.http.interaction(Id::new(app.me.get()));
+        client.create_response(i.id, &i.token, &answer).await?;
+        return Ok(true);
+    }
     Ok(false)
 }
 
@@ -603,7 +651,11 @@ async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
     if !app.cfg(gid.get()).await?.giveaways.enabled {
         return Ok(reply::say_line(app, gid, "reply.giveaway.off", &[]).await);
     }
-    if g.paused_at.is_some() {
+    // The live state, not only the mark: the round that sets `paused_at` runs every 15 s.
+    if g.paused_at.is_some() || attacked(app, gid).await {
+        if g.paused_at.is_none() {
+            store::pause(&app.pool, g.guild_id).await?;
+        }
         return Ok(denied(PAUSED).await);
     }
     // A repeat press (the most common one in a rush) needs no checks: the draw checks again.
@@ -623,8 +675,17 @@ async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
         let vars = [("prize", g.prize.as_str()), ("entries", &entries)];
         return Ok(line(app, gid, "giveaway.entry_again", &vars).await);
     }
-    let joined = ms(member.joined_at);
-    let refused = check(app, &g, user.id.get(), user.bot, &member.roles, joined).await?;
+    let (joined, timeout) = (ms(member.joined_at), member.communication_disabled_until);
+    let refused = check(
+        app,
+        &g,
+        user.id.get(),
+        user.bot,
+        &member.roles,
+        joined,
+        timeout,
+    )
+    .await?;
     if let Some(r) = refused {
         return Ok(denied(&r.text()).await);
     }
@@ -656,6 +717,212 @@ async fn enter(app: &App, i: &Interaction, id: i64) -> Result<String> {
     }
 }
 
+/// The private answer to a Claim press, in the server or in the DM. Only the winner who holds
+/// the place can claim it, once, before the claim time ends.
+async fn claim(app: &App, i: &Interaction, id: i64) -> Result<String> {
+    let Some(user) = i
+        .member
+        .as_ref()
+        .and_then(|m| m.user.as_ref())
+        .or(i.user.as_ref())
+    else {
+        return Ok("Something went wrong. Try again in a moment.".into());
+    };
+    let from = i.guild_id.map(|g| g.get() as i64);
+    let r = store::claim(&app.pool, id, user.id.get() as i64, from).await?;
+    let guild = match &r {
+        store::Claimed::Done(g) => *g,
+        _ => sqlx::query_scalar("SELECT guild_id FROM giveaways WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&app.pool)
+            .await?
+            .unwrap_or(0),
+    };
+    let Some(gid) = Id::<GuildMarker>::new_checked(guild as u64) else {
+        return Ok("This giveaway is gone.".into());
+    };
+    // A press in another server's channel cannot reach this giveaway.
+    if i.guild_id.is_some_and(|g| g != gid) {
+        return Ok("This giveaway is gone.".into());
+    }
+    let prize = store::get(&app.pool, guild, id)
+        .await?
+        .map_or(String::new(), |g| g.prize);
+    let denied = async |reason: &str| {
+        line(
+            app,
+            gid,
+            "giveaway.claim_denied",
+            &[("prize", &prize), ("reason", reason)],
+        )
+        .await
+    };
+    Ok(match r {
+        store::Claimed::Done(_) => {
+            let log = Log::new("Giveaway Prize Claimed", ORANGE)
+                .line("Giveaway", &format!("`#{id}` {}", reply::md(&prize)))
+                .line("Winner", &format!("<@{}> `{}`", user.id, user.id));
+            if let Err(e) = send_log(app, gid.get(), LogKind::Server, log).await {
+                tracing::warn!(?e, "the giveaway claim log failed");
+            }
+            line(app, gid, "giveaway.claimed", &[("prize", &prize)]).await
+        }
+        store::Claimed::Already => denied("you claimed it already.").await,
+        store::Claimed::Late => denied("the claim time is over.").await,
+        store::Claimed::NotWinner => denied("you are not a winner of this giveaway.").await,
+    })
+}
+
+/// The `giveaway_claim` job, at the claim deadline of one place: when its winner did not claim,
+/// that place alone is drawn again (the new winner has 24 hours). After 3 redraws of a place, or
+/// when nobody is left, staff are told in the log and on the dashboard. Waits during an attack.
+pub(crate) async fn claim_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let (Some(id), Some(place), Some(user)) =
+        (p["id"].as_i64(), p["place"].as_i64(), p["user"].as_i64())
+    else {
+        return Ok(());
+    };
+    let guild = gid.get() as i64;
+    let Some(redraws) = store::claim_due(&app.pool, guild, id, place as i16, user).await? else {
+        return Ok(());
+    };
+    if attacked(app, gid).await {
+        jobs::enqueue(
+            &app.pool,
+            guild,
+            store::CLAIM_JOB,
+            p.clone(),
+            now_secs() + 600,
+        )
+        .await?;
+        return Ok(());
+    }
+    let Some(g) = store::get(&app.pool, guild, id).await? else {
+        return Ok(());
+    };
+    let tell = async |why: &str| -> Result<()> {
+        store::set_issue(&app.pool, guild, id, Some(why)).await?;
+        let log = Log::new("Giveaway Prize Not Claimed", ORANGE)
+            .line("Giveaway", &format!("`#{id}` {}", reply::md(&g.prize)))
+            .line("Last winner", &format!("<@{user}> `{user}`"))
+            .text(why);
+        if let Err(e) = send_log(app, gid.get(), LogKind::Server, log).await {
+            tracing::warn!(?e, "the giveaway claim log failed");
+        }
+        Ok(())
+    };
+    if redraws >= store::MAX_REDRAWS {
+        let why = format!(
+            "Place {place} was not claimed after {} redraws. Redraw it by hand, or give the prize another way.",
+            store::MAX_REDRAWS
+        );
+        return tell(&why).await;
+    }
+    // Places of one draw run out at the same time: one redraw, one post, for all of them.
+    let mut due = store::claims_due(&app.pool, guild, id).await?;
+    if !due.contains(&user) {
+        due.push(user);
+    }
+    let reason = Some("the claim time ran out");
+    match redraw(app, &g, &due, app.me, reason, true).await? {
+        Redrawn::Done(_) | Redrawn::NotEnded => Ok(()),
+        Redrawn::NoneLeft => {
+            tell(&format!(
+                "Place {place} was not claimed, and no entrant is left who can win."
+            ))
+            .await
+        }
+        // Another draw saved first: look again in a minute.
+        Redrawn::Busy => {
+            jobs::enqueue(
+                &app.pool,
+                guild,
+                store::CLAIM_JOB,
+                p.clone(),
+                now_secs() + 60,
+            )
+            .await?;
+            Ok(())
+        }
+    }
+}
+
+/// A join raid, a server lockdown (a lock of one channel does not count), panic mode or an open
+/// anti-nuke case: giveaways pause. Memory reads, and the cached locks; a failed lock read counts
+/// as an attack.
+pub(crate) async fn attacked(app: &App, gid: Id<GuildMarker>) -> bool {
+    let now = crate::automod::now_ms();
+    let raid = app
+        .raids
+        .lock()
+        .unwrap()
+        .get(&gid.get())
+        .is_some_and(|r| r.active(now));
+    if raid || crate::feeds::under_attack(app, gid.get()) {
+        return true;
+    }
+    crate::lockdown::active_locks(app, gid.get())
+        .await
+        .map_or(true, |l| {
+            l.iter().any(|s| {
+                s.kind
+                    .as_ref()
+                    .is_some_and(|k| !matches!(k, brim_automod::lockdown::LockKind::Channel(_)))
+            })
+        })
+}
+
+/// One round of the pause check (every 15 s): pauses the giveaways of a server that came under
+/// attack, and resumes those of a server whose attack is over. One read for all servers; a write
+/// only where the state changes.
+pub(crate) async fn sync_pauses(app: &App) -> Result<()> {
+    // One round at a time: a slow round must not start a second one beside it.
+    static RUNS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if RUNS.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return Ok(());
+    }
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            RUNS.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let _done = Done;
+    for (guild, all, any) in store::pause_states(&app.pool).await? {
+        let gid = Id::new(guild as u64);
+        let r = async {
+            let attack = attacked(app, gid).await;
+            if attack && !all {
+                store::pause(&app.pool, guild).await?;
+            } else if !attack
+                && any
+                && !recent_nuke(app, guild).await?
+                && !store::resume(&app.pool, guild).await?.is_empty()
+            {
+                jobs::enqueue_once(&app.pool, guild, store::REFRESH_JOB, now_secs()).await?;
+            }
+            anyhow::Ok(())
+        };
+        if let Err(e) = r.await {
+            tracing::warn!(?e, guild, "the giveaway pause check of a server failed");
+        }
+    }
+    Ok(())
+}
+
+/// An anti-nuke case started in the last 10 minutes. The open case is kept in memory only, so
+/// after a restart this keeps the pause until the case is old enough to be over.
+async fn recent_nuke(app: &App, guild: i64) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM nuke_incidents WHERE guild_id = $1
+           AND created_at > now() - make_interval(secs => $2))",
+    )
+    .bind(guild)
+    .bind(crate::antinuke::NUKE_GAP.as_secs_f64())
+    .fetch_one(&app.pool)
+    .await?)
+}
+
 /// Why entries are refused while the server is under attack.
 pub(crate) const PAUSED: &str =
     "the giveaway is paused while the server is under attack. Try again when it is over.";
@@ -676,7 +943,9 @@ pub async fn on_member_update(
     // server was checked at the press, and the draw checks it again.
     let joined = ms(m.joined_at).or(Some(0));
     for (g, had) in entered {
-        let refused = check(app, &g, user.get(), m.user.bot, &m.roles, joined).await?;
+        // No timeout here: it ends by itself, so the entry stays and the draw skips the member
+        // while it runs. The other rules are checked as usual.
+        let refused = check(app, &g, user.get(), m.user.bot, &m.roles, joined, None).await?;
         if let Some(r) = refused {
             if store::remove_entry(&app.pool, g.guild_id, g.id, user.get() as i64).await? {
                 queue_refresh(app, gid).await;
@@ -731,8 +1000,8 @@ async fn draw(app: &App, g: &Giveaway, n: usize) -> Result<(Vec<i64>, usize)> {
             tried.push(u);
             let ok = match http_err::member(&app.http, gid, Id::new(u as u64)).await? {
                 Some(m) => {
-                    let joined = ms(m.joined_at);
-                    check(app, g, u as u64, m.user.bot, &m.roles, joined)
+                    let (joined, timeout) = (ms(m.joined_at), m.communication_disabled_until);
+                    check(app, g, u as u64, m.user.bot, &m.roles, joined, timeout)
                         .await?
                         .is_none()
                 }
@@ -749,8 +1018,35 @@ async fn draw(app: &App, g: &Giveaway, n: usize) -> Result<(Vec<i64>, usize)> {
 
 /// The `giveaway_end` job: draws the winners and saves them, which queues the announcement and
 /// the DMs. A run that stops before it saved its winners runs again (`claim_end`).
-pub(crate) async fn end_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+pub(crate) async fn end_job(app: &App, gid: Id<GuildMarker>, job: i64, p: &Value) -> Result<()> {
     let id = p["id"].as_i64().context("job payload has no id")?;
+    // No draw during an attack: the end waits, and moves later by the pause.
+    let attack = attacked(app, gid).await;
+    if attack {
+        store::pause(&app.pool, gid.get() as i64).await?;
+    }
+    if !store::end_due(&app.pool, gid.get() as i64, id, job).await? {
+        return Ok(());
+    }
+    // A draw that failed before it saved (status `ended`, no draw saved) tries again after the
+    // attack; nothing else is left to do for a giveaway that is not running.
+    let unsaved = async {
+        store::get(&app.pool, gid.get() as i64, id)
+            .await
+            .map(|g| g.is_some_and(|g| g.status == "ended" && g.draws == 0))
+    };
+    if attack && unsaved.await? {
+        let job = json!({"id": id});
+        jobs::enqueue(
+            &app.pool,
+            gid.get() as i64,
+            store::END_JOB,
+            job,
+            now_secs() + 300,
+        )
+        .await?;
+        return Ok(());
+    }
     let Some(g) = store::claim_end(&app.pool, gid.get() as i64, id).await? else {
         return Ok(());
     };
@@ -764,6 +1060,7 @@ pub(crate) async fn end_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Resul
         &won,
         &won,
         "giveaway.winners",
+        false,
     );
     if !saved.await? {
         return Ok(());
@@ -834,6 +1131,11 @@ async fn announce(app: &App, g: &Giveaway, won: &[i64], key: &str) {
     let gid = Id::new(g.guild_id as u64);
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let (link, names) = (link(g), winners_text(won));
+    // The first saved draw gives the giveaway's claim time, every later one 24 hours.
+    let claim = hours_text(match g.draws {
+        ..=1 => g.claim_hours as i64,
+        _ => store::REDRAW_HOURS as i64,
+    });
     let (text, embeds) = match won.is_empty() {
         true => {
             let vars = [("prize", g.prize.as_str()), ("link", &link)];
@@ -845,6 +1147,7 @@ async fn announce(app: &App, g: &Giveaway, won: &[i64], key: &str) {
                 ("prize", &g.prize),
                 ("sponsor", &sponsor),
                 ("link", &link),
+                ("claim", &claim),
             ];
             rendered(app, gid, key, &vars).await
         }
@@ -866,6 +1169,10 @@ async fn announce(app: &App, g: &Giveaway, won: &[i64], key: &str) {
         .content(&text)
         .embeds(&embeds)
         .allowed_mentions(Some(&pings));
+    let claim_button = [claim_row(g.id)];
+    if !won.is_empty() {
+        post = post.components(&claim_button);
+    }
     if let Some(m) = g.message_id {
         post = post.reply(Id::new(m as u64)).fail_if_not_exists(false);
     }
@@ -900,14 +1207,24 @@ pub async fn dm_job(app: &App, gid: Id<GuildMarker>, payload: &serde_json::Value
     }
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let link = link(&g);
+    let deadline: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>> =
+        sqlx::query_scalar(
+            "SELECT deadline FROM giveaway_claims WHERE giveaway_id = $1 AND user_id = $2",
+        )
+        .bind(g.id)
+        .bind(user.get() as i64)
+        .fetch_optional(&app.pool)
+        .await?;
+    let deadline = deadline.map(when).unwrap_or_default();
     let vars = [
         ("prize", g.prize.as_str()),
         ("server", &server),
         ("sponsor", &sponsor),
         ("link", &link),
+        ("deadline", &deadline),
     ];
     let (text, embeds) = rendered(app, gid, "giveaway.winner_dm", &vars).await;
-    reply::send_dm(app, user, &text, &embeds, &[]).await;
+    reply::send_dm(app, user, &text, &embeds, &[claim_row(g.id)]).await;
     Ok(())
 }
 
@@ -930,6 +1247,7 @@ pub(crate) async fn redraw(
     places: &[i64],
     by: Id<UserMarker>,
     reason: Option<&str>,
+    auto: bool,
 ) -> Result<Redrawn> {
     // Also with no draw saved: a draw whose job gave up can be taken again here.
     if g.status != "ended" {
@@ -972,6 +1290,7 @@ pub(crate) async fn redraw(
         &all,
         &new,
         "giveaway.reroll",
+        auto,
     );
     if !saved.await? {
         return Ok(Redrawn::Busy);
@@ -1043,7 +1362,7 @@ pub(crate) async fn action_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Re
             if p["draws"].as_i64() != Some(g.draws as i64) {
                 return Ok(());
             }
-            if let Redrawn::NoneLeft = redraw(app, &g, &users, by, reason).await? {
+            if let Redrawn::NoneLeft = redraw(app, &g, &users, by, reason, false).await? {
                 let why = "The reroll found no entrant left who can win.";
                 store::set_issue(&app.pool, g.guild_id, g.id, Some(why)).await?;
             }
@@ -1115,6 +1434,32 @@ pub async fn on_member_remove(app: &App, gid: Id<GuildMarker>, user: Id<UserMark
     Ok(())
 }
 
+/// A restore or an anti-nuke revert made channels and roles again (old id -> new id): running
+/// giveaways in a remade channel are posted there again with their entries, and their role rules
+/// name the new roles, so a remade blocked role still keeps its members out. Only logs a failure.
+pub async fn relink(app: &App, gid: Id<GuildMarker>, map: &std::collections::HashMap<u64, u64>) {
+    let guild = gid.get() as i64;
+    for (old, new) in map {
+        let r = store::relink_roles(&app.pool, guild, *old as i64, *new as i64).await;
+        if let Err(e) = r {
+            tracing::warn!(?e, "moving giveaway rules to a remade role failed");
+        }
+        let ids: Result<Vec<i64>, _> = sqlx::query_scalar(
+            "SELECT id FROM giveaways WHERE guild_id = $1 AND channel_id = $2 AND status = 'running'",
+        )
+        .bind(guild)
+        .bind(*old as i64)
+        .fetch_all(&app.pool)
+        .await;
+        for id in ids.unwrap_or_default() {
+            let r = store::queue_post(&app.pool, guild, id, Some(*new as i64), false).await;
+            if let Err(e) = r {
+                tracing::warn!(?e, id, "posting a giveaway in a remade channel failed");
+            }
+        }
+    }
+}
+
 /// A deleted channel: its running giveaways keep running and wait for staff to pick a channel.
 pub async fn on_channel_delete(app: &App, gid: Id<GuildMarker>, channel: u64) -> Result<()> {
     let ids: Vec<i64> = sqlx::query_scalar(
@@ -1153,6 +1498,8 @@ pub(crate) enum Sub {
         reason: Option<String>,
     },
     Time(i64, i64),
+    /// Giveaway, claim time in hours.
+    Claim(i64, i64),
     List,
 }
 
@@ -1243,8 +1590,15 @@ pub(crate) fn parse(args: &[&str]) -> Result<Sub, String> {
                 .ok_or_else(|| format!("`{c}` is not a change of time (+1h, -30m)"))?;
             Ok(Sub::Time(id, sign * secs))
         }
+        Some("claim") => {
+            let id = id_arg(args.get(1))?;
+            let t = args.get(2).ok_or("Give the claim time, e.g. `48h` or `3d`")?;
+            let secs = brim_core::duration::parse(t)
+                .ok_or_else(|| format!("`{t}` is not a duration (12h, 3d)"))?;
+            Ok(Sub::Claim(id, (secs + 3599) / 3600))
+        }
         Some(o) => Err(format!(
-            "`{o}` is not a giveaway command. Use start, end, cancel, reroll, redraw, time or list"
+            "`{o}` is not a giveaway command. Use start, end, cancel, reroll, redraw, time, claim or list"
         )),
     }
 }
@@ -1283,6 +1637,7 @@ pub(crate) fn slash_words(o: &[CommandDataOption]) -> Vec<String> {
             }
         }
         "time" => ["id", "change"].into_iter().for_each(|n| push(get(n))),
+        "claim" => ["id", "duration"].into_iter().for_each(|n| push(get(n))),
         _ => push(get("id")),
     }
     w
@@ -1339,6 +1694,11 @@ pub(crate) fn definition() -> twilight_model::application::command::Command {
         SubCommandBuilder::new("time", "Add or remove time on a running giveaway")
             .option(id())
             .option(StringBuilder::new("change", "+1h or -30m").required(true)),
+    )
+    .option(
+        SubCommandBuilder::new("claim", "Set how long winners have to claim")
+            .option(id())
+            .option(StringBuilder::new("duration", "12h, 2d").required(true)),
     )
     .option(SubCommandBuilder::new(
         "list",
@@ -1529,6 +1889,33 @@ pub(crate) async fn command(
             }
             text(say("reply.giveaway.time", &[("id", &n), ("ends", &when(ends))]).await)
         }
+        Sub::Claim(id, hours) => {
+            let n = id.to_string();
+            match store::set_claim_time(&app.pool, g, id, hours).await? {
+                Err(e) => {
+                    let said = reply::say_wrong(app, gid, &e).await;
+                    Ok((said.text, said.embeds.into_iter().next(), vec![]))
+                }
+                Ok(false) => text(match find(id).await? {
+                    Some(_) => say("reply.giveaway.not_running", &[("id", &n)]).await,
+                    None => say("reply.giveaway.not_found", &[("id", &n)]).await,
+                }),
+                Ok(true) => {
+                    if let Some(gw) = find(id).await? {
+                        let what = format!("Claim time set to {}.", hours_text(hours));
+                        edited_log(app, &gw, invoker, &what).await;
+                    }
+                    let claim = hours_text(hours);
+                    text(
+                        say(
+                            "reply.giveaway.claim_time",
+                            &[("id", &n), ("claim", &claim)],
+                        )
+                        .await,
+                    )
+                }
+            }
+        }
         Sub::List => unreachable!("answered above"),
     }
 }
@@ -1548,7 +1935,7 @@ async fn redraw_reply(
 ) -> Result<String> {
     let gid = Id::new(gw.guild_id as u64);
     let n = gw.id.to_string();
-    let key = match redraw(app, gw, users, by, reason).await? {
+    let key = match redraw(app, gw, users, by, reason, false).await? {
         Redrawn::Done(new) => {
             let names = winners_text(&new);
             let vars = [("id", n.as_str()), ("winners", &names)];
@@ -1690,6 +2077,9 @@ async fn answer(app: &App, i: &Interaction, rest: &str) -> Result<()> {
                 store::EndNow::NotRunning => {
                     reply::say_line(app, gid, "reply.giveaway.not_running", &[("id", &n)]).await
                 }
+                store::EndNow::Paused => {
+                    reply::say_line(app, gid, "reply.giveaway.paused", &[("id", &n)]).await
+                }
                 _ => reply::say_line(app, gid, "reply.giveaway.ending", &[("id", &n)]).await,
             },
             "cancel" => match cancel(app, gid, id, actor).await? {
@@ -1721,6 +2111,9 @@ mod tests {
     #[test]
     fn commands_parse_like_the_other_commands() {
         assert_eq!(parse(&[]).unwrap(), Sub::List);
+        assert_eq!(parse(&["claim", "12", "3d"]).unwrap(), Sub::Claim(12, 72));
+        assert_eq!(parse(&["claim", "12", "90m"]).unwrap(), Sub::Claim(12, 2));
+        assert!(parse(&["claim", "12"]).is_err());
         assert_eq!(
             parse(&["start", "2h", "3w", "Nitro", "for", "a", "month"]).unwrap(),
             Sub::Start {
@@ -1784,5 +2177,74 @@ mod tests {
         assert_eq!(winners_text(&few), "<@1>, <@2>, <@3>");
         let many: Vec<i64> = (1..=26).collect();
         assert_eq!(winners_text(&many), "26 winners");
+    }
+
+    /// Panic mode pauses the server's giveaways within one round: no entry and no draw, and the
+    /// end job waits. When panic ends, the next round resumes them and moves the end later.
+    #[tokio::test]
+    async fn panic_mode_pauses_giveaways_and_the_end_moves_after_it() {
+        let Some(t) = crate::test_support::T::new(301).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let n = store::New {
+            guild_id: g,
+            channel_id: 2,
+            prize: "Nitro".into(),
+            host_id: None,
+            sponsor_id: None,
+            created_by: 9,
+            winners: 1,
+            duration_secs: 120,
+            req: Req::default(),
+            button_label: String::new(),
+            button_emoji: String::new(),
+            claim_hours: 48,
+            post_job: false,
+        };
+        let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+        assert!(!attacked(&t.app, gid).await);
+        t.app.panic_runs.lock().unwrap().insert(
+            gid.get(),
+            crate::app::PanicRun {
+                lock_mod_commands: false,
+                starting: 0,
+            },
+        );
+        assert!(attacked(&t.app, gid).await);
+        sync_pauses(&t.app).await.unwrap();
+        let paused = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
+        assert!(paused.paused_at.is_some());
+        let job: i64 =
+            sqlx::query_scalar("SELECT id FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2")
+                .bind(g)
+                .bind(store::END_JOB)
+                .fetch_one(&t.app.pool)
+                .await
+                .unwrap();
+        end_job(&t.app, gid, job, &json!({"id": gw.id}))
+            .await
+            .unwrap();
+        let still = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
+        assert!(still.running(), "no draw during panic");
+
+        t.app.panic_runs.lock().unwrap().remove(&gid.get());
+        sqlx::query("UPDATE giveaways SET paused_at = now() - interval '5 minutes' WHERE id = $1")
+            .bind(gw.id)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        sync_pauses(&t.app).await.unwrap();
+        let after = store::get(&t.app.pool, g, gw.id).await.unwrap().unwrap();
+        assert!(after.paused_at.is_none());
+        assert!((after.ends_at - gw.ends_at).num_seconds() >= 295);
+        sqlx::query("DELETE FROM giveaways WHERE guild_id = $1")
+            .bind(g)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        t.cleanup().await;
     }
 }
