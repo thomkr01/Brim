@@ -31,7 +31,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
-        ("Make the panel your own", "base", &[P("Preview", &["?Brim adds the buttons itself.", ">Edit message", "?Press Verify or Help, as in Discord."]), E("verify_panel"), M("Mika", "I just joined, what now?"), C("Verify")]),
+        ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|One step left.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
         ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
@@ -152,7 +152,7 @@ fn fit() {
             let Some(st) = html(stars.item(n)) else { continue };
             let (x, y) = slots[n as usize];
             let half = f64::from(st.offset_width()) / 2.0;
-            let _ = st.style().set_property("left", &format!("{}px", (x * k - half).max(0.0).min(if phone { w - half * 2.0 } else { 1e9 })));
+            let _ = st.style().set_property("left", &format!("{}px", { let l = x * k - half; if phone { l.max(0.0).min(w - half * 2.0) } else { l } }));
             let _ = st.style().set_property("top", &format!("{}px", y * k - half));
         }
     }
