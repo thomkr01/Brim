@@ -79,7 +79,8 @@ fn is_voice(t: &[Value], id: &str) -> bool {
 fn siblings(t: &[Value], parent_id: Option<&str>, cat: bool) -> Vec<String> {
     let mut list: Vec<String> = t
         .iter()
-        .filter(|n| is_cat(n) == cat && (cat || parent(t, n).as_deref() == parent_id))
+        // An open ticket's channel keeps its place: a drag never renumbers it.
+        .filter(|n| is_cat(n) == cat && (cat || parent(t, n).as_deref() == parent_id) && n["ticket"] != true)
         .map(|n| s(&n["id"]))
         .collect();
     list.sort_by_key(|x| is_voice(t, x));
@@ -107,7 +108,8 @@ fn access(roles: &[String], staff: bool, limited: bool) -> Value {
 
 /// Puts `id` at index `at` among the siblings in `parent` and renumbers the ones that moved.
 fn place(d: &mut Value, t: &[Value], id: &str, parent_id: Option<String>, at: usize) {
-    let Some(n) = find(t, id) else { return };
+    // An open ticket's channel never moves (the server drops such a move too).
+    let Some(n) = find(t, id).filter(|n| n["ticket"] != true) else { return };
     let cat = is_cat(n);
     let mut list = siblings(t, parent_id.as_deref(), cat);
     list.retain(|x| x != id);
@@ -440,6 +442,9 @@ impl MoveAsk {
         self.fixed.is_some() || (self.can_keep() && self.from <= self.to)
     }
 }
+
+/// The note on an open ticket's channel.
+const TICKET: &str = "An open ticket's channel. It is temporary: it closes with its ticket, so Layout Guard leaves it out and you cannot move, rename or delete it here.";
 
 /// The ⋮ menu on touch screens and for keyboard users: drag is off on touch (plan 3.2a).
 pub(crate) fn coarse_pointer() -> bool {
@@ -795,15 +800,16 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         let (k1, pv2) = (id.clone(), pv.clone());
         let row_label = label(&n);
         let rl = StoredValue::new(row_label.clone());
+        let ticket = n["ticket"] == true;
         let step = move |id: String, p: Option<String>, down: bool| {
-            if (down && at < last) || (!down && at > 0) {
+            if !ticket && ((down && at < last) || (!down && at > 0)) {
                 move_to(id, p, if down { at + 1 } else { at - 1 });
                 // The tree is rebuilt: the moved row gets the focus back, for the next Alt+Arrow.
                 refocus(".cs-grid", rl.get_value());
             }
         };
-        let drag_ok = !ed && !coarse_pointer();
-        let menu = (!deleted).then(|| {
+        let drag_ok = !ed && !ticket && !coarse_pointer();
+        let menu = (!deleted && !ticket).then(|| {
             let (m1, m2, m3) = (id.clone(), id.clone(), id.clone());
             let (p1, p2) = (pv.clone(), pv.clone());
             let close = |e: &leptos::ev::MouseEvent| {
@@ -856,19 +862,20 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                     drop_row(d, &i4)
                 }
                 data-drop=id.clone()
-                on:touchstart={ let id = id.clone(); move |e| { let id = id.clone(); hold.start(&e, !ed && sel.get_untracked().as_deref() == Some(id.as_str()), move || drag.set(Some(id.clone()))) } }
+                on:touchstart={ let id = id.clone(); move |e| { let id = id.clone(); hold.start(&e, !ed && !ticket && sel.get_untracked().as_deref() == Some(id.as_str()), move || drag.set(Some(id.clone()))) } }
                 on:touchmove=move |e| hold.moved(&e, |o| over.set(o))
                 on:touchend=move |e| { if drag.is_disposed() { return } let d = drag.get_untracked(); hold.end(&e, |to| { drag.set(None); over.set(None); if let (Some(d), Some(to)) = (d, to) { drop_at(d, &to) } }); }
                 on:touchcancel=move |_| { if drag.is_disposed() { return } hold.stop(); drag.set(None); over.set(None) }>
-                <span class="h" title="Drag to move">{icon("menu")}</span>
+                <span class="h" title="Drag to move" style:visibility=ticket.then_some("hidden")>{icon("menu")}</span>
                 {icon(kind_icon(n["kind"].as_u64().unwrap_or(0)))}
                 {name}
                 {(n["new"] == true).then(|| view! { <span class="chip blue">"New"</span> })}
                 {(n["exception"] == true).then(|| view! { <span class="exc"><Tip text="Has its own settings. Category changes do not change it.".to_string() /></span> })}
                 {(!issues.is_empty()).then(|| view! { <span class="risk-i"><Tip icon="warning" text=risk /></span> })}
                 <span class="sp"></span>
+                {ticket.then(|| view! { <span class="mini" title=TICKET>"Ticket"</span> })}
                 {chips(&n)}
-                <span class="acts">{acts(i5, deleted, false)}</span>
+                <span class="acts">{(!ticket).then(|| acts(i5, deleted, false))}</span>
                 {menu}
             </div>
         }
@@ -925,7 +932,8 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         } else {
             view! { <h2>{s(&n["name"])}</h2> }.into_any()
         };
-        let head = view! { <div class="ttl">{title}<span class="muted">{kind_name(kind)}</span><span class="sp"></span><span class="acts">{acts(id.clone(), deleted, true)}</span></div> };
+        let ticket = n["ticket"] == true;
+        let head = view! { <div class="ttl">{title}<span class="muted">{kind_name(kind)}</span><span class="sp"></span><span class="acts">{(!ticket).then(|| acts(id.clone(), deleted, true))}</span></div> };
         if deleted {
             return view! { <div class="card cs-panel">{head}<p class="muted">"Deleted when you push. Undo keeps it."</p></div> }.into_any();
         }
@@ -1047,12 +1055,15 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
             })}
             {follow}
             {grid}
-            <div class="lbl">"Position"</div>
-            <div class="row2">
-                <button class="ghost" aria-label="Move up" disabled={at == 0} on:click=move |_| move_to(sid.get_value(), pv.get_value(), at.saturating_sub(1))>{icon("arrow_up")}"Move up"</button>
-                <button class="ghost" aria-label="Move down" disabled={at >= last} on:click=move |_| move_to(sid.get_value(), pv.get_value(), at + 1)>{icon("arrow_down")}"Move down"</button>
-                {cats}
-            </div>
+            {ticket.then(|| view! { <p class="line muted">{TICKET}</p> })}
+            {(!ticket).then(|| view! {
+                <div class="lbl">"Position"</div>
+                <div class="row2">
+                    <button class="ghost" aria-label="Move up" disabled={at == 0} on:click=move |_| move_to(sid.get_value(), pv.get_value(), at.saturating_sub(1))>{icon("arrow_up")}"Move up"</button>
+                    <button class="ghost" aria-label="Move down" disabled={at >= last} on:click=move |_| move_to(sid.get_value(), pv.get_value(), at + 1)>{icon("arrow_down")}"Move down"</button>
+                    {cats}
+                </div>
+            })}
         </div> }.into_any()
     };
 
@@ -1315,6 +1326,21 @@ mod tests {
         assert_eq!(siblings(&tree(), None, false), ["r", "o"]);
         assert_eq!(siblings(&tree(), None, true), ["c1", "c2"]);
         assert_eq!(siblings(&tree(), Some("c1"), false), ["a", "b"]);
+    }
+
+    #[test]
+    fn an_open_tickets_channel_is_never_renumbered_or_a_drop_target() {
+        let mut t = tree();
+        t.push(json!({"id": "tk", "name": "ticket-1", "kind": 0, "parent": "c1", "position": 2, "ticket": true}));
+        assert_eq!(siblings(&t, Some("c1"), false), ["a", "b"]);
+        assert_eq!(drop_target(&t, "r", "tk"), None);
+        let mut d = json!({"items": {}});
+        place(&mut d, &t, "b", Some("c1".into()), 0);
+        assert!(d["items"].get("tk").is_none());
+        // Moving the ticket row itself (Alt+Arrow, long press) changes nothing.
+        let mut d = json!({"items": {}});
+        place(&mut d, &t, "tk", Some("c1".into()), 0);
+        assert_eq!(d, json!({"items": {}}));
     }
 
     #[test]

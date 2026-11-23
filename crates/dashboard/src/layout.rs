@@ -318,6 +318,44 @@ pub(crate) fn settings_of(g: &Value) -> Settings {
     }
 }
 
+/// The ticket channels among `ids`, from Brim's own ticket records (never from a name or a
+/// category, so nobody can hide a channel from the guard): `open` are the channels of tickets
+/// not closed yet, which are temporary and never part of a layout; `all` also holds the channels
+/// of closed tickets, so a layout saved with a ticket channel in it does not miss it once it closes.
+/// One query by the channel ids the page already has, however many tickets are open.
+pub(crate) async fn ticket_channels(
+    db: &sqlx::PgPool,
+    guild: i64,
+    ids: impl Iterator<Item = u64>,
+) -> sqlx::Result<Tickets> {
+    let ids: Vec<i64> = ids.map(|i| i as i64).collect();
+    let rows: Vec<(i64, bool)> = sqlx::query_as(
+        "SELECT channel_id, status <> 'closed' FROM tickets
+         WHERE guild_id = $1 AND channel_id = ANY($2)",
+    )
+    .bind(guild)
+    .bind(&ids)
+    .fetch_all(db)
+    .await?;
+    Ok(Tickets {
+        open: rows.iter().filter(|r| r.1).map(|r| r.0 as u64).collect(),
+        all: rows.iter().map(|r| r.0 as u64).collect(),
+    })
+}
+
+/// See [`ticket_channels`].
+#[derive(Default)]
+pub(crate) struct Tickets {
+    pub open: HashSet<u64>,
+    pub all: HashSet<u64>,
+}
+
+/// `img` without the channels in `ids`.
+pub(crate) fn without(mut img: Image, ids: &HashSet<u64>) -> Image {
+    img.channels.retain(|c| !ids.contains(&c.id));
+    img
+}
+
 /// The live server as a layout image: ranked roles, index channel positions, server settings.
 fn image_of(l: &ops::Live) -> Image {
     Image {
@@ -415,7 +453,10 @@ async fn view(st: &AppState, guild: i64, level: Level) -> Res {
     };
     let (_, config) = store::current(&st.db, guild).await?;
     let l = ops::live(st, guild, &config).await?;
-    let mut out = differences(&saved, &image_of(&l));
+    let live = image_of(&l);
+    let ids = saved.channels.iter().chain(&live.channels).map(|c| c.id);
+    let t = ticket_channels(&st.db, guild, ids).await?;
+    let mut out = differences(&without(saved, &t.all), &without(live, &t.open));
     if !out.is_empty() {
         // shortcut: the newest 100 entries only; a busy server's older changes show no name.
         // Needs View Audit Log; without it the list still shows, with no names.
@@ -466,6 +507,9 @@ async fn save(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     if !blocking.is_empty() {
         return Ok(Json(json!({"saved": false, "blocking": blocking})));
     }
+    let image = image_of(&l);
+    let t = ticket_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
+    let image = without(image, &t.open);
     // Version and the Owner rule in one statement, so two saves cannot both be "the first".
     let version: Option<i32> = sqlx::query_scalar(
         "INSERT INTO server_layouts (guild_id, version, image, source, created_by)
@@ -474,7 +518,7 @@ async fn save(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
          RETURNING version",
     )
     .bind(guild)
-    .bind(sqlx::types::Json(image_of(&l)))
+    .bind(sqlx::types::Json(image))
     .bind(s.user_id)
     .bind(level >= Level::Owner)
     .fetch_optional(&st.db)
@@ -821,12 +865,22 @@ pub(crate) async fn after_push(
     let Some((version, saved)) = p.base else {
         return Recorded::None;
     };
+    // Ticket channels stay out: the live ones cannot be taken in, and an older layout that holds one
+    // drops it.
+    let saved = match ticket_channels(&st.db, guild, saved.channels.iter().map(|c| c.id)).await {
+        Ok(t) => without(saved, &t.all),
+        Err(e) => {
+            tracing::warn!("layout: ticket read after a push in {guild} failed: {e}");
+            return Recorded::Failed;
+        }
+    };
     let live = Image {
         guild: p.w.ctx.guild,
         roles: p.w.ctx.roles.clone(),
         channels: p.w.channels.clone(),
         ..Default::default()
     };
+    let live = without(live, &p.w.tickets);
     let image = match with_draft(&saved, &live, draft, &p.w.ctx, p.made) {
         Ok(Some(i)) => i,
         Ok(None) => return Recorded::None,
@@ -959,6 +1013,9 @@ async fn rollback(
     if !blocking.is_empty() {
         return Ok(Json(json!({"saved": false, "blocking": blocking})));
     }
+    // An older version can hold a ticket channel: it is not taken back into the layout.
+    let t = ticket_channels(&st.db, guild, image.channels.iter().map(|c| c.id)).await?;
+    let image = without(image, &t.all);
     let note = format!("Rolled back to v{version}");
     let Some(new) = record(
         &st,
@@ -1043,6 +1100,57 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    #[test]
+    fn ticket_channels_are_no_difference_open_or_closed() {
+        let saved = server();
+        let mut live = server();
+        live.channels.push(ch(90, "ticket-1", 0, Some(20), 4));
+        let open = HashSet::from([90]);
+        assert!(differences(&saved, &without(live.clone(), &open)).is_empty());
+        // A layout saved with an open ticket in it: the ticket closes and its channel goes.
+        let mut old = server();
+        old.channels.push(ch(90, "ticket-1", 0, Some(20), 4));
+        assert!(differences(&without(old.clone(), &open), &server()).is_empty());
+        // The ticket is closed but its channel was not deleted: it counts like any other channel.
+        assert_eq!(
+            changes(&without(old, &open), &live),
+            [("ticket-1".into(), NEW.into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn ticket_channels_come_from_the_ticket_records() {
+        let Ok(url) = brim_core::db::test_url() else {
+            return;
+        };
+        let db = brim_core::db::connect(&url).await.unwrap();
+        let g = 9_800_000_000 + std::process::id() as i64;
+        let c = g * 10;
+        sqlx::query(
+            "INSERT INTO tickets (guild_id, number, channel_id, user_id, status, closed_at)
+             VALUES ($1, 1, $2, 5, 'open', NULL), ($1, 2, $2 + 1, 5, 'closed', now()),
+                    ($1, 3, $2 + 2, 6, 'closing', NULL)",
+        )
+        .bind(g)
+        .bind(c)
+        .execute(&db)
+        .await
+        .unwrap();
+        let ids = [c, c + 1, c + 2, c + 3].map(|i| i as u64);
+        let t = ticket_channels(&db, g, ids.into_iter()).await.unwrap();
+        sqlx::query("DELETE FROM tickets WHERE guild_id = $1")
+            .bind(g)
+            .execute(&db)
+            .await
+            .unwrap();
+        let c = c as u64;
+        assert_eq!(t.open, HashSet::from([c, c + 2]));
+        assert_eq!(t.all, HashSet::from([c, c + 1, c + 2]));
+        // Another server's ticket record does not count here.
+        let none = ticket_channels(&db, g + 1, ids.into_iter()).await.unwrap();
+        assert!(none.all.is_empty());
     }
 
     #[test]
