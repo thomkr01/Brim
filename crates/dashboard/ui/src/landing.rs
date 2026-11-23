@@ -30,8 +30,8 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Switch on the protection you want", "stk", &[P("Automod status", &["?Do you want Brim to monitor messages?", "Enable Automod", "Moderate invite links posted", "Filter out NSFW links", ">Next step"]), P("Antinuke status", &["?Do you want Brim to monitor moderation actions made by your staff members?", "Enable Antinuke"]), P("Quarantine", &["?Do you want the quarantine system that keeps your server safe from being destroyed?", "Use the auto quarantine module", "Guard the server's vanity url", "Quarantine role|@Quarantine"])]),
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
-        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_simple"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
-        ("A panel they press to start", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_panel"), M("Mika", "I just joined, what now?"), C("Verify")]),
+        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
+        ("Make the panel your own", "base", &[P("Preview", &["?Brim adds the buttons itself.", ">Edit message", "?Press Verify or Help, as in Discord."]), E("verify_panel"), M("Mika", "I just joined, what now?"), C("Verify")]),
         ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
@@ -373,7 +373,7 @@ mod tests {
     /// Every setting, card title and button a scene names exists in the dashboard's own source (schema, wizard cards, pages).
     #[test]
     fn scenes_name_real_settings() {
-        let src: String = [include_str!("../../src/schema.rs"), include_str!("wizard.rs"), include_str!("main.rs"), include_str!("layout.rs"), include_str!("recovery.rs"), include_str!("feeds.rs"), include_str!("channels.rs"), include_str!("embeds.rs"), include_str!("raiders.rs"), include_str!("tickets.rs"), include_str!("pages.rs")].concat();
+        let src: String = [include_str!("../../src/schema.rs"), include_str!("wizard.rs"), include_str!("main.rs"), include_str!("layout.rs"), include_str!("recovery.rs"), include_str!("feeds.rs"), include_str!("channels.rs"), include_str!("embeds.rs"), include_str!("raiders.rs"), include_str!("tickets.rs"), include_str!("pages.rs"), include_str!("discord.rs"), include_str!("form.rs")].concat();
         // Sample data a scene shows (names, ids, times) is not a setting.
         let mut bad = vec![];
         // A field without a title shows its path as words ("ignored_channels" is "Ignored channels"); a backup title carries its id.
