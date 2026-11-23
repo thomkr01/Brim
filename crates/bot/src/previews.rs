@@ -327,6 +327,7 @@ fn added_buttons() -> Value {
         "log.mod_command.raider_list_match": crate::raiders::alert_rows(MEMBER),
         "log.mod_command.case": crate::undo::rows(4151, "ban"),
         "verify.panel": [verify_panel(SERVER, None).1],
+        "verify.banned": [verify::row(crate::welcome::link("Join again", jump()))],
         "verify.kicked": [verify::row(crate::welcome::link("Join again", jump()))],
         "verify.ban_ended": [verify::row(crate::welcome::link("Join again", jump()))],
         "log.report.message_reported": crate::reports::rows(1, jump(), true),
@@ -343,20 +344,10 @@ fn added_buttons() -> Value {
         ("Join", &["dm.invite_link"]),
         ("Open the queue", &["dm.raider_notify"]),
         ("Dashboard", &["reply.help.dashboard"]),
+        // Only ban and timeout DMs carry the appeal link (`commands.rs`).
         (
             "Appeal",
-            &[
-                "dm.punish.warn",
-                "dm.punish.timeout",
-                "dm.punish.quarantine",
-                "dm.punish.kick",
-                "dm.punish.softban",
-                "dm.punish.tempban",
-                "dm.punish.unquarantine",
-                "dm.punish.untimeout",
-                "dm.punish.unban",
-                "dm.punish.ban",
-            ],
+            &["dm.punish.ban", "dm.punish.tempban", "dm.punish.timeout"],
         ),
     ] {
         for k in keys {
