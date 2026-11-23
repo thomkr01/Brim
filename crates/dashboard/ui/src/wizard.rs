@@ -110,6 +110,18 @@ pub const MISC: &[Card] = &[
             view! { <p>"ROLES"</p><div>{names.into_iter().map(|n| view! { <span class="chip">{n}" · Main Role"</span>" " }).collect_view()}</div> }.into_any()
         })
     },
+    Card {
+        notes: &["Before it saves, Brim lists the members who lose roles now. Give them a permit first if they must keep them."],
+        // Switched on here for every server that has not chosen yet; the save lists who loses roles.
+        preset: &["misc.enforce_permits"],
+        ..card("Dangerous roles", "Should Brim take roles with dangerous permissions from members who have no permit?", &[("misc.enforce_permits", "Remove dangerous roles from members without permits")], |c, _| {
+            text(if on(c, "misc.enforce_permits", false) {
+                "Members without a permit lose roles with dangerous permissions. The owner, Extra Owners, Trusted Admins and permit holders keep theirs."
+            } else {
+                "Members without a permit keep the dangerous roles they hold now."
+            })
+        })
+    },
 ];
 
 pub const AUTOMOD: &[Card] = &[

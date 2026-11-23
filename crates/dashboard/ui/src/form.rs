@@ -1105,6 +1105,49 @@ fn not_a_number(bad: RwSignal<bool>) -> impl IntoView {
     }
 }
 
+/// The confirm text before Remove dangerous roles goes on, from `/enforce-permits`: who loses
+/// which roles now, or that the list could not be read (`Err`).
+pub fn enforce_text(r: Result<Value, String>) -> String {
+    const HEAD: &str = "Brim takes roles with dangerous permissions from every member without a permit, the next time their roles or name change. The owner, Extra Owners, Trusted Admins, permit holders and bots keep theirs.";
+    let v = match r {
+        Ok(v) => v,
+        Err(e) => return format!("{HEAD}\n\nBrim could not read who holds such roles now ({e}). Check Permits first."),
+    };
+    let n = v["count"].as_u64().unwrap_or(0);
+    if n == 0 {
+        return format!("{HEAD}\n\nNobody loses a role now.");
+    }
+    let at = if v["more"] == true { "At least " } else { "" };
+    let rows: Vec<String> = v["members"].as_array().into_iter().flatten().map(|m| {
+        let roles: Vec<&str> = m["roles"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        format!("- {}: {}", m["name"].as_str().unwrap_or_default(), roles.join(", "))
+    }).collect();
+    let rest = n.saturating_sub(rows.len() as u64);
+    let tail = if rest > 0 { format!("\n- and {rest} more") } else { String::new() };
+    let who = if n == 1 { "member loses" } else { "members lose" };
+    format!("{HEAD}\n\n{at}{n} {who} roles now. Give a permit first to anyone who must keep them:\n{}{tail}", rows.join("\n"))
+}
+
+/// Reads who loses roles (`busy` is true meanwhile), then asks before `yes` turns Remove
+/// dangerous roles on.
+pub fn ask_enforce(
+    guild: String,
+    yes_label: &'static str,
+    busy: impl Fn(bool) + 'static,
+    yes: impl FnOnce() + 'static,
+) {
+    busy(true);
+    spawn_local(async move {
+        let r = api("GET", &format!("/api/guilds/{guild}/enforce-permits"), None).await;
+        busy(false);
+        let a = Ask::new("Remove dangerous roles from members without permits?")
+            .text(enforce_text(r))
+            .yes(yes_label)
+            .danger();
+        ask(a, move |_| yes());
+    });
+}
+
 /// Schema-driven form for the sections the backend describes; raw JSON stays available underneath.
 /// Fields of other sections (`"section"` in the schema) are shown and saved alongside.
 #[component]
@@ -1463,7 +1506,15 @@ pub fn Section(
     let save = move |()| {
         let public = |v: &Value| v["tickets"]["public_channel"] != json!(false);
         let (cur, before) = (val.get_untracked(), orig.get_untracked());
-        if public(&before) && !public(&cur) && before["tickets"]["public_channel_id"].is_string() {
+        let enforce = |v: &Value| v["misc"]["enforce_permits"] == json!(true);
+        // Turning it on takes roles from members: they are listed first, as Overview's Fix does.
+        if enforce(&cur) && !enforce(&before) {
+            if saving.get_untracked() {
+                return;
+            }
+            let go = do_save.clone();
+            ask_enforce(gs.get_value(), "Turn on and save", move |b| { saving.try_set(b); }, move || go(()));
+        } else if public(&before) && !public(&cur) && before["tickets"]["public_channel_id"].is_string() {
             let go = do_save.clone();
             ask(
                 Ask::new("Delete the public ticket channel?")
@@ -1543,6 +1594,29 @@ pub fn Section(
             <div class="bar"><b>"Changes detected!"</b><button class="ghost" on:click=move |_| val.set(orig.get_untracked())>"Cancel"</button><button disabled=move || saving.get() || failed.get() on:click={ let save = save.clone(); move |_| save(()) }>{busy_label(move || saving.get(), "Save")}</button></div>
         </Fade>
         <Toast msg />
+    }
+}
+
+#[cfg(test)]
+mod enforce_tests {
+    /// The confirm names who loses which role, says how many more, and still warns on a read error.
+    #[test]
+    fn enforce_confirm_lists_who_loses_roles() {
+        use serde_json::json;
+        let t = super::enforce_text(Ok(json!({"count": 27, "more": false, "members": [{"name": "Ada", "roles": ["@Admin", "@Mod"]}]})));
+        assert!(t.contains("27 members lose roles now"), "{t}");
+        assert!(t.contains("- Ada: @Admin, @Mod") && t.contains("- and 26 more"), "{t}");
+        let t = super::enforce_text(Ok(json!({"count": 1, "more": true, "members": [{"name": "Ada", "roles": ["@Admin"]}]})));
+        assert!(t.contains("At least 1 member loses roles now"), "{t}");
+        assert!(super::enforce_text(Ok(json!({"count": 0}))).contains("Nobody loses a role now."));
+        let t = super::enforce_text(Err("timeout".into()));
+        assert!(t.contains("could not read") && t.contains("without a permit"), "{t}");
+    }
+
+    /// The wizard offers the switch where the saved settings have no value for it.
+    #[test]
+    fn wizard_offers_dangerous_role_removal() {
+        assert!(crate::wizard::MISC.iter().any(|c| c.preset == ["misc.enforce_permits"] && c.fields[0].0 == "misc.enforce_permits"));
     }
 }
 

@@ -38,6 +38,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/api/guilds/{guild}/score", get(score))
         .route("/api/guilds/{guild}/score/fix", post(fix))
+        .route(
+            "/api/guilds/{guild}/enforce-permits",
+            get(enforce_permits_preview),
+        )
         .route("/api/guilds/{guild}/actions", get(actions))
         .route("/api/guilds/{guild}/revert", post(revert))
         .route("/api/guilds/{guild}/rescue", get(rescue_status))
@@ -362,6 +366,7 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
             steps: vec![],
         });
     }
+    rows.extend(enforce_permits_check(&config));
     let mut rows = json!(rows);
     // Move into range's confirm names each value and where it goes.
     if let Some(r) = rows
@@ -475,6 +480,105 @@ const CLAMP: &str = "clamp_stored";
 
 /// The [`Fix::setting`] that turns on the automod's Suspicious account filter.
 const SUSPICION: &str = "enable_suspicion";
+
+/// The [`Fix::setting`] that turns on Remove dangerous roles from members without permits.
+const ENFORCE_PERMITS: &str = "enforce_permits";
+
+/// The Overview row while Remove dangerous roles is off (also with no value saved): offered
+/// here with the list of who loses roles, never turned on by itself (`MiscCfg::enforce_permits`).
+fn enforce_permits_check(config: &Value) -> Option<Check> {
+    (config["misc"]["enforce_permits"] != true).then(|| Check {
+        id: "enforce_permits_off".into(),
+        severity: Severity::Warn,
+        title: "Dangerous roles kept without a permit",
+        detail: "Members without a permit keep the roles with dangerous permissions they hold now. Brim only takes back such a role when someone gives it.".into(),
+        fix: Some(Fix {
+            label: "Remove dangerous roles",
+            role_id: None,
+            channel_id: None,
+            setting: Some(ENFORCE_PERMITS),
+            move_under_bot: false,
+        }),
+        steps: vec![],
+    })
+}
+
+/// The members (not bots) who lose roles once `misc.enforce_permits` is on: no permit, Owner,
+/// Extra Owner or Trusted Admin, and a role with dangerous permissions below Brim that is not
+/// managed. The same rule as the bot's `antinuke::enforce_permits`. Names only, at most 25.
+async fn enforce_permits_preview(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+) -> Res {
+    require(&st, &s, guild, crate::access::write_bar("misc").0, false).await?;
+    let g = st
+        .discord
+        .call(Method::GET, &format!("/guilds/{guild}"), None)
+        .await?;
+    let owner = g["owner_id"]
+        .as_str()
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(0);
+    let holders = brim_core::permits::holders(&st.db, guild, owner).await?;
+    let (roles, bot_pos) = roles_and_bot_pos(&st, guild).await?;
+    // A role lock strips the bits it holds: judge by what the role had before, as the bot does
+    // (`lockdown::unlocked_info`), since it is dangerous again once the lock ends.
+    let locks: Vec<(sqlx::types::Json<brim_automod::lockdown::Snapshot>,)> =
+        sqlx::query_as("select snapshot from lock_snapshots where guild_id = $1")
+            .bind(guild)
+            .fetch_all(&st.db)
+            .await?;
+    let saved = |id: &str| {
+        locks
+            .iter()
+            .flat_map(|(l,)| &l.0.role_perms)
+            .filter(|(r, _)| r.to_string() == id)
+            .fold(0, |a, (_, p)| a | p)
+    };
+    let dangerous: std::collections::HashMap<&str, &str> = roles
+        .iter()
+        .filter(|r| {
+            !r.managed
+                && r.position < bot_pos
+                && brim_antinuke::has_dangerous(r.perms() | saved(&r.id))
+        })
+        .map(|r| (r.id.as_str(), r.name.as_str()))
+        .collect();
+    let (mut count, mut members) = (0u64, vec![]);
+    let more = member_pages(&st, guild, |m| {
+        let id = m["user"]["id"].as_str().and_then(|x| x.parse::<i64>().ok());
+        if m["user"]["bot"] == true || id.is_none_or(|u| holders.contains(&u)) {
+            return;
+        }
+        let lose: Vec<String> = m["roles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| dangerous.get(r.as_str()?))
+            .map(|n| format!("@{n}"))
+            .collect();
+        if lose.is_empty() {
+            return;
+        }
+        count += 1;
+        if members.len() < 25 {
+            let name = [
+                &m["nick"],
+                &m["user"]["global_name"],
+                &m["user"]["username"],
+            ]
+            .into_iter()
+            .find_map(|v| v.as_str())
+            .unwrap_or("Unknown member");
+            members.push(json!({"name": name, "roles": lose}));
+        }
+    })
+    .await?;
+    Ok(Json(
+        json!({"count": count, "more": more, "members": members}),
+    ))
+}
 
 /// The [`Fix::setting`] that gives back one thing the previous owner set (`role_id` names it:
 /// `eo:<user>`, `ta:<user>`, `member:<user>:<permit>`, `role:<role>:<permit>`), or with `role_id` "done" closes the card.
@@ -1426,6 +1530,28 @@ async fn setup_fix(
                 cur,
                 &config,
                 "turned on the Suspicious account filter",
+            )
+            .await?;
+            done(json!({"ok": true, "version": version}))
+        }
+        ENFORCE_PERMITS => {
+            if level < crate::access::write_bar("misc").0 {
+                return Err(ApiError::Forbidden("you cannot change Miscellaneous"));
+            }
+            if config.get("misc").is_some_and(|m| !m.is_object()) {
+                return Err(ApiError::BadRequest(
+                    "the Miscellaneous settings could not be read".into(),
+                ));
+            }
+            config["misc"]["enforce_permits"] = json!(true);
+            crate::api::validate("misc", &config["misc"], &c["misc"])?;
+            let version = save_fix(
+                st,
+                s,
+                guild,
+                cur,
+                &config,
+                "turned on Remove dangerous roles from members without permits",
             )
             .await?;
             done(json!({"ok": true, "version": version}))
@@ -2830,6 +2956,92 @@ mod tests {
             setting: Some(setting.into()),
             move_under_bot: false,
         })
+    }
+
+    /// Remove dangerous roles: offered (never forced) while not saved on, the confirm lists who
+    /// loses which role (a Role lock's saved bits count), and the Fix writes it on.
+    #[tokio::test]
+    async fn dangerous_role_removal_is_offered_listed_and_fixed() {
+        let Some((mut st, s, g)) = crate::api::g3_handler_tests::setup(9_901_200_000).await else {
+            return;
+        };
+        let roles = json!([
+            {"id": g.to_string(), "name": "@everyone", "permissions": "1024", "position": 0},
+            // Administrator taken off by a Role lock: the lock's snapshot holds it.
+            {"id": "50", "name": "Admin", "permissions": "1024", "position": 1},
+            {"id": "60", "name": "Brim", "permissions": "8", "position": 2, "managed": true},
+        ]);
+        mock_discord(&mut st, g, roles).await;
+        wipe(&st, g).await;
+        sqlx::query("delete from trusted_admins where guild_id = $1")
+            .bind(g)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        // No saved version: off, and the row offers it.
+        let (v, c) = crate::store::current(&st.db, g).await.unwrap();
+        assert_eq!(v, 0);
+        assert!(enforce_permits_check(&c).is_some());
+        let c = json!({"misc": {"prefix": "t!"}});
+        sqlx::query("insert into guild_config (guild_id, version, config) values ($1, 1, $2)")
+            .bind(g)
+            .bind(&c)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let row = enforce_permits_check(&c).unwrap();
+        assert_eq!(row.fix.as_ref().unwrap().setting, Some(ENFORCE_PERMITS));
+        assert!(enforce_permits_check(&json!({"misc": {"enforce_permits": false}})).is_some());
+        let p = enforce_permits_preview(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(p["count"], 0, "no lock: role 50 is not dangerous now {p}");
+        let lock = json!({"kind": null, "role_perms": [[50, 8]], "channel_denies": [], "join_lock": false, "invites_paused": false});
+        sqlx::query(
+            "insert into lock_snapshots (guild_id, kind, snapshot) values ($1, 'role', $2)",
+        )
+        .bind(g)
+        .bind(&lock)
+        .execute(&st.db)
+        .await
+        .unwrap();
+        // Member 4 holds Admin below Brim with no permit; 2 holds nothing, 3 is a bot.
+        let p = enforce_permits_preview(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(p["count"], 1, "{p}");
+        assert_eq!(p["members"][0]["roles"], json!(["@Admin"]), "{p}");
+        // A Trusted Admin keeps the role, so nobody is listed.
+        sqlx::query("insert into trusted_admins (guild_id, user_id) values ($1, 4)")
+            .bind(g)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let p = enforce_permits_preview(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(p["count"], 0, "{p}");
+        sqlx::query("delete from lock_snapshots where guild_id = $1")
+            .bind(g)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let r = fix(State(st.clone()), s.clone(), Path(g), body(ENFORCE_PERMITS))
+            .await
+            .unwrap();
+        assert_eq!(r.0["version"], 2, "{}", r.0);
+        let (_, c) = crate::store::current(&st.db, g).await.unwrap();
+        assert_eq!(c["misc"], json!({"prefix": "t!", "enforce_permits": true}));
+        assert!(enforce_permits_check(&c).is_none());
+        sqlx::query("delete from trusted_admins where guild_id = $1")
+            .bind(g)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        wipe(&st, g).await;
     }
 
     /// Move to main roles: each main role gets @everyone's bits, @everyone ends with none, and

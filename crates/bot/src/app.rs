@@ -759,6 +759,26 @@ mod tests {
         assert_eq!(c.fallbacks, ["joingate"]);
     }
 
+    /// Remove dangerous roles: off unless a saved config says true, so no server starts unseen.
+    #[test]
+    fn dangerous_role_removal_needs_a_saved_true() {
+        assert!(!GuildCfg::default().misc.enforce_permits);
+        for c in [
+            json!({}),
+            json!({"misc": {}}),
+            json!({"misc": "not an object"}),
+            json!({"misc": {"enforce_permits": false}}),
+            json!({"misc": {"prefix": 5}}),
+        ] {
+            assert!(!GuildCfg::parse(&c).misc.enforce_permits, "{c}");
+        }
+        assert!(
+            GuildCfg::parse(&json!({"misc": {"enforce_permits": true}}))
+                .misc
+                .enforce_permits
+        );
+    }
+
     /// A module switched off turns its parts off for the bot; a missing switch is on.
     #[test]
     fn a_module_off_turns_its_parts_off() {

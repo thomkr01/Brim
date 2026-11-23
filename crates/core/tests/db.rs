@@ -1150,3 +1150,28 @@ async fn case_proofs_and_edit_history() {
     assert_eq!(cases::proof_kind("see https://a.b/c"), "text");
     cleanup(&p, g).await;
 }
+
+/// `holders` lists exactly the users `resolve` gives a level, in one query.
+#[tokio::test]
+async fn holders_match_resolve() {
+    let Some(p) = pool().await else { return };
+    let g = gid(403);
+    cleanup(&p, g).await;
+    permit(&p, g, "Moderators", 2, &[], 100).await;
+    member(&p, g, "Moderators", 11).await;
+    member(&p, g, "Moderators", 12).await;
+    for sql in [
+        "INSERT INTO extra_owners (guild_id, user_id) VALUES ($1, 13)",
+        "INSERT INTO trusted_admins (guild_id, user_id) VALUES ($1, 14)",
+        // A quarantine takes the permit away, as in `top_permit`.
+        "INSERT INTO quarantines (guild_id, user_id, saved_roles) VALUES ($1, 12, '{}')",
+    ] {
+        sqlx::query(sql).bind(g).execute(&p).await.unwrap();
+    }
+    let all = permits::holders(&p, g, 10).await.unwrap();
+    for u in 10..=15 {
+        let level = permits::resolve(&p, g, 10, u, false).await.unwrap();
+        assert_eq!(all.contains(&u), level != permits::Level::None, "user {u}");
+    }
+    cleanup(&p, g).await;
+}

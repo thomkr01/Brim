@@ -1098,7 +1098,9 @@ pub struct MiscCfg {
     pub enforce_quarantine_perms: bool,
     /// Ignore commands from members without a permit.
     pub ignore_no_permit: bool,
-    /// Take dangerous-permission roles from members who have no permit.
+    /// Take dangerous-permission roles from members who have no permit. Off until a save turns it
+    /// on: the wizard switches it on for the owner and Overview offers it, and both list who loses
+    /// roles first, so no server starts removing roles unseen.
     pub enforce_permits: bool,
     /// Shown instead of the default appeal line in ban and timeout DMs.
     pub ban_appeal_message: String,

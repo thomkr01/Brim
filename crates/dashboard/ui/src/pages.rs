@@ -517,6 +517,9 @@ fn action(r: &Value) -> String {
         }
         (Some("mod_log_channel"), _) => "Create a private #mod-logs channel".into(),
         (Some("fallback_log_channel"), _) => "Create a private #brim-logs channel".into(),
+        (Some("enforce_permits"), _) => {
+            "Turn on: remove dangerous roles from members without permits".into()
+        }
         (Some(x), _) if x.starts_with("enable_") => {
             format!("Turn on {title} with its default settings")
         }
@@ -628,7 +631,8 @@ pub fn Score(guild: String) -> impl IntoView {
             .into_iter()
             .filter(|x| x["severity"] != "ok" && x["fix"].is_object())
             .filter(|x| {
-                !["everyone_to_main", "clamp_stored"]
+                // Remove dangerous roles takes roles from members: its own confirm lists them.
+                !["everyone_to_main", "clamp_stored", "enforce_permits"]
                     .contains(&x["fix"]["setting"].as_str().unwrap_or_default())
             })
             .filter(|x| {
@@ -760,12 +764,15 @@ pub fn Score(guild: String) -> impl IntoView {
             let (l, id, title, detail) = (l.to_string(), id.clone(), title.clone(), detail.clone());
             let label = l.clone();
             let me = id.clone();
-            // The fix route needs a Trusted Admin, like Roll back on History.
-            view! { <button disabled=move || access.rank() < 3 || busy.get().is_some() title=move || (access.rank() < 3).then_some("Needs a Trusted Admin or the owner") on:click=move |_| {
+            // The fix route needs a Trusted Admin, like Roll back on History; Miscellaneous (Remove
+            // dangerous roles) needs the owner or an Extra Owner.
+            let (bar, why) = if body["setting"] == "enforce_permits" { (4, "Needs the owner or an Extra Owner") } else { (3, "Needs a Trusted Admin or the owner") };
+            view! { <button disabled=move || access.rank() < bar || busy.get().is_some() title=move || (access.rank() < bar).then_some(why) on:click=move |_| {
                 let (g, body, load, l, id, title) = (g.clone(), body.clone(), load.clone(), l.clone(), id.clone(), title.clone());
+                let enforce = (body["setting"] == "enforce_permits").then(|| (g.clone(), id.clone()));
                 let a = Ask::new(format!("{l}?")).text(confirm_text(&r2, &detail)).yes(l.clone());
                 let a = if danger(&l) { a.danger() } else { a };
-                ask(a, move |_| {
+                let go = move || {
                     // Resumed after a 2FA code with this row's own fix, also if the row was drawn again meanwhile.
                     let make = move || {
                         let (g, body, id) = (g.clone(), body.clone(), id.clone());
@@ -777,7 +784,13 @@ pub fn Score(guild: String) -> impl IntoView {
                         }
                     };
                     run_resumable(make, msg, need, move |v| { match refused(&v) { None => msg.done(format!("Done. {title} has been fixed.")), Some(why) => msg.err(format!("{title} was only partly fixed: {why}.")) } load() })
-                }) }>{move || if busy.get().as_deref() == Some(me.as_str()) { view! { <Working /> }.into_any() } else { label.clone().into_any() }}</button> }
+                };
+                // Its confirm lists who loses which roles, read live when clicked.
+                if let Some((g, me)) = enforce {
+                    crate::form::ask_enforce(g, "Turn on", move |b| { busy.try_set(b.then(|| me.clone())); }, go)
+                } else {
+                    ask(a, move |_| go())
+                } }>{move || if busy.get().as_deref() == Some(me.as_str()) { view! { <Working /> }.into_any() } else { label.clone().into_any() }}</button> }
         });
         let steps: Vec<String> = r["steps"].as_array().into_iter().flatten().map(s).collect();
         // Rows fixed on another dashboard page link there; the rest are done in Discord.

@@ -954,6 +954,30 @@ pub async fn resolve(
     Ok(custom(top_permit(pool, guild_id, user_id).await?))
 }
 
+/// Every user [`resolve`] gives a level above `None` (bot accounts aside), read in one query: the
+/// bot owner, Extra Owners, Trusted Admins and permit members who are not quarantined. For a
+/// whole-server list, where a [`resolve`] per member would be one query each.
+pub async fn holders(
+    pool: &sqlx::PgPool,
+    guild_id: i64,
+    discord_owner: i64,
+) -> sqlx::Result<std::collections::HashSet<i64>> {
+    let mut all: std::collections::HashSet<i64> = sqlx::query_scalar(
+        "SELECT user_id FROM extra_owners WHERE guild_id = $1
+         UNION SELECT user_id FROM trusted_admins WHERE guild_id = $1
+         UNION SELECT pm.user_id FROM permit_members pm JOIN permits p ON p.id = pm.permit_id
+          WHERE p.guild_id = $1
+            AND NOT EXISTS (SELECT 1 FROM quarantines q WHERE q.guild_id = $1 AND q.user_id = pm.user_id)",
+    )
+    .bind(guild_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .collect();
+    all.insert(bot_owner(pool, guild_id, discord_owner).await?);
+    Ok(all)
+}
+
 /// A [`top_permit`] row as its [`Level`].
 fn custom(row: Option<(i32, Vec<String>, Vec<String>, serde_json::Value)>) -> Level {
     row.map_or(Level::None, |(rank, perms, whitelist, limits)| {
