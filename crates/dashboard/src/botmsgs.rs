@@ -158,7 +158,7 @@ async fn added_buttons(
     // Panels that Brim builds from the live settings are not drawn: the notice says so.
     for d in botmsg::defs() {
         let k = d.key.as_str();
-        if k.starts_with("reply.panel.")
+        if k.split('.').take(2).eq(["reply", "panel"])
             || matches!(k, "reply.help.panel" | "reply.whitelist.prompt")
         {
             all[k] = json!("panel");
