@@ -10,8 +10,10 @@
 /* Colours come from design/tokens.css (the Brim design system, dark slate). The old short names map onto it; --line, --ok, --bad, --warn and --info are tokens of the same name. */
 :root { --b1:var(--page); --b2:var(--surface); --b3:var(--page); --fg:var(--text); --muted:var(--text-secondary); --primary:var(--accent); --on-primary:var(--on-accent); --focus:var(--text); --spring:cubic-bezier(.34,1.56,.64,1); }
 :root { color-scheme:dark; } /* native scrollbars, selects and date pickers follow the dark-only design */
-/* One screen scale (owner decision 2026-11-20): `zoom` on the root grows text, cards, controls, sidebar and page width together, in steps with the window width. Media queries still see the real window, so phone and desktop layouts switch where they did. Lengths in vw/vh are not zoomed by the browser, so they go through --vw and --vh (1vw and 1vh in zoomed px); never write a bare vw/vh. */
-:root { --z:1.05; --vw:calc(1vw / var(--z)); --vh:calc(1vh / var(--z)); zoom:var(--z); }
+/* One screen scale (owner decision 2026-11-20): `zoom` on the app box grows text, cards, controls, sidebar and page width together, in steps with the window width. Media queries still see the real window, so phone and desktop layouts switch where they did. Lengths in vw/vh are not zoomed by the browser, so they go through --vw and --vh (1vw and 1vh in zoomed px); never write a bare vw/vh. */
+:root { --z:1.05; --vw:calc(1vw / var(--z)); --vh:calc(1vh / var(--z)); }
+/* The zoom sits on the app's box, not the root: a password manager adds its button to the page outside it and places it from the field's rectangle, which a zoomed root would scale a second time. */
+#app { zoom:var(--z); }
 @media (min-width:900px) { :root { --z:1.1; } } @media (min-width:1800px) { :root { --z:1.2; } } @media (min-width:1920px) { :root { --z:1.25; } }
 .tb-page { min-height:calc(100 * var(--vh)); }
 :root { --fs-figure:26px; --fs-page-title-phone:32px; --w-wide:1200px; } /* big figures (score, stats) and the page title on a phone: sizes the design system's components use */

@@ -1186,6 +1186,15 @@ fn main() {
         }
     }));
     ASK_MOTION.set(restore_motion());
-    leptos::mount::mount_to_body(App);
+    // The app gets its own box: the screen scale (`zoom`) sits there, not on the page root, so a
+    // password manager's button added to the page is not scaled twice (style.css, --z).
+    let app = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id("app"))
+        .and_then(|e| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlElement>(e).ok());
+    match app {
+        Some(el) => leptos::mount::mount_to(el, App).forget(),
+        None => leptos::mount::mount_to_body(App),
+    }
 }
 

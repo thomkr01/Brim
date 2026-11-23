@@ -88,5 +88,8 @@
       }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
     })();
   </script>
+  <!-- The app mounts here, not on body: the screen scale (`zoom`) sits on this box (style.css, --z).
+       Last in body, so the page's own parts keep their order before the app. -->
+  <div id="app"></div>
 </body>
 </html>

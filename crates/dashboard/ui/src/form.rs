@@ -227,7 +227,7 @@ pub fn ListPick(
     let follow = move || {
         let Some(el) = field.get_untracked() else { return };
         let (r, vh) = (el.get_bounding_client_rect(), window().inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(800.0));
-        // The page is scaled (`--z` zoom on the root): fixed offsets are in unscaled units, rects in scaled ones.
+        // The page is scaled (`--z` zoom on `#app`): fixed offsets are in unscaled units, rects in scaled ones.
         let z = if el.offset_width() > 0 { (r.width() / f64::from(el.offset_width())).max(0.1) } else { 1.0 };
         let (below, above) = ((vh - r.bottom()) / z - 12.0, r.top() / z - 12.0);
         let up = below < 160.0 && above > below;

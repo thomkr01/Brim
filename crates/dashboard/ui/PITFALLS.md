@@ -563,7 +563,7 @@ One backup opened inside the Backups page from a signal: the page drew a second 
 
 The dashboard used fixed pixel sizes, so on a 2560 px monitor the page was a small column of 14 px text.
 
-**Rule:** the screen scale is one `zoom` on `:root`, stepped by window width through `--z` (`design/README.md`, "Screen scale"). Chrome and Firefox do not zoom `vw` and `vh`, so a bare `100vh` is `--z` times too tall; use `calc(N * var(--vh))` / `var(--vw)`. Window coordinates (`getBoundingClientRect`, `client_x`, `scroll_y`, `inner_width`) are real pixels while a `left`, `top` or `--dx` set from them is a zoomed length: divide by `screen_zoom` (`common.rs`) or the popup lands `--z` times too far (tooltips, the message editor's emoji and variable menus). Ratios inside one rectangle (the colour picker) are fine. `tools/ui-sizes.mjs` fails on a bare `vw`/`vh` and on a second `zoom` in `style.css`.
+**Rule:** the screen scale is one `zoom` on `#app` (`--z` is set on `:root`), stepped by window width through `--z` (`design/README.md`, "Screen scale"). Chrome and Firefox do not zoom `vw` and `vh`, so a bare `100vh` is `--z` times too tall; use `calc(N * var(--vh))` / `var(--vw)`. Window coordinates (`getBoundingClientRect`, `client_x`, `scroll_y`, `inner_width`) are real pixels while a `left`, `top` or `--dx` set from them is a zoomed length: divide by `screen_zoom` (`common.rs`) or the popup lands `--z` times too far (tooltips, the message editor's emoji and variable menus). Ratios inside one rectangle (the colour picker) are fine. `tools/ui-sizes.mjs` fails on a bare `vw`/`vh` and on a second `zoom` in `style.css`.
 ## Each list drew its own hover and drag look (sortable list, 2026-11-20)
 
 The saved messages list had an orange outline on hover, Channel Setup a background only, and Permits up and down buttons: three looks for one idea, and orange on hover said "selected" when nothing was. Native HTML drag also does nothing on a touch screen, so a whole-row drag can not be the phone way.
@@ -726,3 +726,9 @@ Stars placed against the group of the scene that was open covered text in other 
 The emoji pictures got an orange gradient (`fill="url(#name-grad)"`, `stroke` the same). The dashboard draws the same SVG through `icon`, so the backup page's green Load and red Delete buttons, and the green and red arrows of the setup wizard, showed orange on green and on red. The icon was hard to see.
 
 **Rule:** on a filled button an icon takes the button's text colour. `style.css` sets `fill` and `stroke` to `currentColor` for the gradient parts under `button.go`, `button.danger`, `a.btn` (not ghost) and `.wiz .nav`, as the active menu link already did. A new filled button style with an icon joins that list. Check: a browser sweep of every page found no other filled button that still shows the gradient.
+
+## A password manager's button sat far from the 2FA code field
+
+The screen scale was a `zoom` on the page root. A password manager adds its own button to the page and places it from the field's `getBoundingClientRect`. That rectangle is already scaled, and the button sits under the zoomed root too, so the browser scaled its place a second time: at scale 1.25 the button landed about 25% too far right and down (seen in Firefox, measured the same in Chromium).
+
+**Rule:** the zoom sits on the app's own box, `#app` in `index.html` (the app mounts there, last in body), never on `html` or `body`. Anything a browser extension adds to the page then keeps real pixels. Check: a browser sweep of every page at three widths in Chromium and Firefox showed no change; a button placed from a dialog field's rectangle lands on it.

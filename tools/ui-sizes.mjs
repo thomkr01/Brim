@@ -42,7 +42,7 @@ for (const file of ['style.css', 'design/bundle.css']) {
 }
 // Screen scale: one `zoom` (the :root rule) and no bare vw/vh, which the browser does not zoom (design/README.md, "Screen scale").
 css.split('\n').forEach((line, i) => {
-  if (/(^|[;{\s])zoom\s*:/.test(line) && !/--z\b/.test(line)) bad.push(`style.css:${i + 1}: zoom is set only on :root from var(--z)`);
+  if (/(^|[;{\s])zoom\s*:/.test(line) && !/--z\b/.test(line)) bad.push(`style.css:${i + 1}: zoom is set only on #app from var(--z)`);
   if (/(?<![\w.-])\d+(?:\.\d+)?(vh|vw)\b/.test(line.replace(/--v[wh]:[^;]*;/g, ''))) bad.push(`style.css:${i + 1}: a bare vw/vh is not zoomed; use calc(N * var(--vw)) or var(--vh)`);
 });
 const SIZES = new Set(['page-title', 'page-title-phone', 'figure', 'section-title', 'ui', 'ui-strong', 'caption']);
