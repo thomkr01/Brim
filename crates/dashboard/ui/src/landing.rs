@@ -31,7 +31,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
-        ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{server}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
+        ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
         ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
@@ -370,14 +370,16 @@ mod tests {
         assert!(appeal_login("").is_none());
     }
 
-    /// The editor text of the verification panel scene is the bot's own default (botmsg.rs), so a change there fails this test until the scene follows.
+    /// The editor text of the verification panel scene is the bot's own default (botmsg.rs) in its public form, so a change there fails this test until the scene follows.
     #[test]
     fn verification_scene_text_is_the_bot_default() {
         let bot = include_str!("../../../logging/src/botmsg.rs");
         let rows: Vec<&str> = SECTIONS.iter().flat_map(|(_, t)| t.iter()).flat_map(|(_, _, items)| items.iter()).filter_map(|it| match it { Item::P(_, rows) => Some(rows.iter().copied()), _ => None }).flatten().collect();
         let desc = rows.iter().find_map(|r| r.strip_prefix("Description|To access")).expect("the verification scene has the panel description");
-        let text = format!("To access{desc}").replace('{', "{{").replace('}', "}}");
-        assert!(bot.contains(&text), "default verify.panel text changed: {text}");
+        // The editor shows the public name (`{guild.name}`); the code holds `{server}` and maps it (`DISCORD_NAMES`).
+        assert!(bot.contains("(\"server\", \"guild.name\")"), "the public name of server changed");
+        let code_text = format!("To access{desc}").replace("{guild.name}", "{server}").replace('{', "{{").replace('}', "}}");
+        assert!(bot.contains(&code_text), "default verify.panel text changed: {code_text}");
     }
 
     /// Every setting, card title and button a scene names exists in the dashboard's own source (schema, wizard cards, pages).
