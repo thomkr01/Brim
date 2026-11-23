@@ -240,6 +240,9 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
         brim_core::giveaways::ANNOUNCE_JOB => {
             crate::giveaways::announce_job(app, gid, &job.payload).await?
         }
+        brim_core::giveaways::ACTION_JOB => {
+            crate::giveaways::action_job(app, gid, &job.payload).await?
+        }
         brim_core::giveaways::DM_JOB => crate::giveaways::dm_job(app, gid, &job.payload).await?,
         "ticket_close_check" => crate::tickets::close_check(app, gid, &job.payload).await?,
         other => tracing::warn!(kind = other, "unknown job kind"),

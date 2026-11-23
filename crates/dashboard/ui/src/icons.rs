@@ -98,6 +98,10 @@ icons!(
     "select",
     "notifications_feed",
     "video_new",
+    "trophy",
+    "user_id",
+    "star",
+    "members",
     "more"
 );
 

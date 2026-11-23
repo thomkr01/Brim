@@ -428,7 +428,11 @@ pub(crate) async fn repost_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Re
     if !g.running() || !g.needs_repost {
         return Ok(());
     }
-    if post(app, &g).await?.is_some() {
+    let posted = post(app, &g).await?.is_some();
+    // A giveaway made on the dashboard: its first post.
+    if p["first"] == true {
+        started_log(app, &g).await;
+    } else if posted {
         let log = Log::new("Giveaway Message Problem", ORANGE)
             .line("Giveaway", &format!("`#{}` {}", g.id, reply::md(&g.prize)))
             .line("Channel", &format!("<#{}>", g.channel_id))
@@ -1011,6 +1015,44 @@ pub(crate) async fn cancel(
     Ok(true)
 }
 
+/// The `giveaway_action` job: a cancel, reroll or redraw from the dashboard, which checked the
+/// permit perm when it queued it. Its result shows on the dashboard and in the log.
+pub(crate) async fn action_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
+    let (Some(id), Some(by)) = (
+        p["id"].as_i64(),
+        p["by"].as_i64().and_then(|b| Id::new_checked(b as u64)),
+    ) else {
+        return Ok(());
+    };
+    match p["op"].as_str() {
+        Some("cancel") => {
+            cancel(app, gid, id, by).await?;
+        }
+        Some("reroll") => {
+            let users: Vec<i64> = p["users"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_i64)
+                .collect();
+            let reason = p["reason"].as_str().filter(|r| !r.is_empty());
+            let Some(g) = store::get(&app.pool, gid.get() as i64, id).await? else {
+                return Ok(());
+            };
+            // A press from before another draw (a second tab, a double click) does nothing.
+            if p["draws"].as_i64() != Some(g.draws as i64) {
+                return Ok(());
+            }
+            if let Redrawn::NoneLeft = redraw(app, &g, &users, by, reason).await? {
+                let why = "The reroll found no entrant left who can win.";
+                store::set_issue(&app.pool, g.guild_id, g.id, Some(why)).await?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Logs a new giveaway.
 pub(crate) async fn started_log(app: &App, g: &Giveaway) {
     let mut log = Log::new("Giveaway Started", ORANGE)
@@ -1375,6 +1417,7 @@ pub(crate) async fn command(
                 button_label: d.button_label.clone(),
                 button_emoji: d.button_emoji.clone(),
                 claim_hours: d.claim_hours as i64,
+                post_job: false,
             };
             let made = store::create(&app.pool, &new, d.max_running as i64).await?;
             let gw = match made {

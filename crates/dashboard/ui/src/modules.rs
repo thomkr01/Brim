@@ -31,7 +31,7 @@ pub fn group_of(p: &str) -> Option<&'static str> {
 
 /// The config section whose `enabled` switch says whether a part is on. Parts without one always show an arrow.
 fn flag(page: &str) -> Option<&'static str> {
-    ["automod", "antinuke", "joingate", "joinraid", "verification", "tickets", "catch", "raider_list"].into_iter().find(|k| *k == page)
+    ["automod", "antinuke", "joingate", "joinraid", "verification", "tickets", "catch", "raider_list", "giveaways"].into_iter().find(|k| *k == page)
 }
 
 /// The module key a part belongs to (same as `brim_core::sections::module_of`).
@@ -39,6 +39,7 @@ fn module_key(part: &str) -> Option<&'static str> {
     match part {
         "joingate" | "joinraid" | "verification" | "raider_list" => Some("server_joins"),
         "catch" => Some("moderation"),
+        "giveaways" => Some("messages"),
         _ => None,
     }
 }
@@ -195,6 +196,7 @@ pub fn blurb(p: &str) -> &'static str {
         "embeds" => "Build your own messages, then post them now, on a schedule or by tag.",
         "bot_messages" => "The messages Brim sends by itself, which you can edit.",
         "feeds" => "New YouTube videos and RSS posts, posted in your channels.",
+        "giveaways" => "Members press Enter to join; Brim draws the winners at the end time.",
         "permits" => "Who may do what with Brim.",
         "backups" => "Backups of your server, by hand or on a schedule.",
         "logging/brim" => "The channel for Brim's logs and mod logs, and what to ignore.",

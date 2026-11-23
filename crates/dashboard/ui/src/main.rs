@@ -12,6 +12,7 @@ mod discord;
 mod histdiff;
 mod embeds;
 mod form;
+mod giveaways;
 mod guard;
 mod help;
 mod home;
@@ -123,7 +124,7 @@ const NAV: &[(&str, &[(&str, &str)])] = &[
     ),
     (
         "Messages",
-        &[("embeds", "Saved messages"), ("bot_messages", "Default messages"), ("feeds", "Feeds")],
+        &[("embeds", "Saved messages"), ("bot_messages", "Default messages"), ("feeds", "Feeds"), ("giveaways", "Giveaways")],
     ),
     (
         "Tools",
@@ -176,6 +177,7 @@ fn page_icon(p: &str) -> &'static str {
         "embeds" => "palette",
         "bot_messages" => "message",
         "feeds" => "notifications_feed",
+        "giveaways" => "trophy",
         "rescue" => "rescue_key",
         "bot_profile" => "bot",
         "spam_text" => "chat_shield",
@@ -1092,6 +1094,7 @@ fn App() -> impl IntoView {
                                 ("embeds", _) => view! { <Embeds guild=g.clone() open_id=rest.first().cloned().unwrap_or_default() /> }.into_any(),
                                 ("bot_messages", _) => view! { <botmsgs::BotMessages guild=g.clone() open_key=rest.first().cloned().unwrap_or_default() from_tickets=rest.get(1).is_some_and(|r| r == "from-tickets") /> }.into_any(),
                                 ("feeds", _) => view! { <feeds::Feeds guild=g.clone() /> }.into_any(),
+                                ("giveaways", _) => view! { <giveaways::Giveaways guild=g.clone() /> }.into_any(),
                                 ("history", _) => view! { <History guild=g.clone() /> }.into_any(),
                                 ("overview", _) => view! { <Score guild=g.clone() /> }.into_any(),
                                 ("wizard", _) => view! { <Wizard guild=g.clone() /> }.into_any(),

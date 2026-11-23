@@ -85,7 +85,7 @@ const CMDS: &[Cmd] = &[
         &["gw", "giveaways"],
         "giveaways",
         "giveaway [start [CHANNEL] TIME WINNERS PRIZE | end ID | cancel ID | reroll ID | redraw ID [MEMBERS] [?r REASON] | time ID CHANGE | list]",
-        "Start, end, cancel, reroll and redraw giveaways, change their end time, and list them (Manage Giveaways permit)",
+        "Start, end, cancel, reroll and redraw giveaways, change their end time, and list them (Manage Giveaways permit perm)",
         "giveaway start #giveaways 2d 1 Nitro",
     ),
     ("ping", &[], "", "ping", "Latency, uptime and memory", ""),

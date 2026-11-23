@@ -111,6 +111,7 @@ pub const PAGES: &[&str] = &[
     "feeds",
     "bot_profile",
     "rescue",
+    "giveaways",
 ];
 
 /// Mirrors the checks of the routes each page calls (`api::staff`, `require`, `write_bar`).
@@ -130,8 +131,10 @@ pub fn page(page: &str, l: Level, perms: &[String]) -> PageAccess {
         "notes" if has(&["notes_view"]) => Read,
         "report_list" | "report_blacklist" if has(&["reports"]) => Full,
         "appeal_list" | "appeal_blacklist" if has(&["appeals"]) => Full,
+        // The list and every action need Manage Giveaways (`giveaways::staff`).
+        "giveaways" if has(&["giveaways"]) => Full,
         "cases" | "raid_log" | "joingate_log" | "notes" | "report_list" | "report_blacklist"
-        | "appeal_list" | "appeal_blacklist" => Hidden,
+        | "appeal_list" | "appeal_blacklist" | "giveaways" => Hidden,
         "rescue" if l < Level::Owner => Hidden,
         // Owners and Extra Owners (`profile::guard`).
         "bot_profile" if l < Level::Owner => Hidden,
@@ -226,6 +229,12 @@ mod tests {
         assert_eq!(page("permits", Level::Editor, &[]), PageAccess::Read);
         assert_eq!(page("rescue", Level::Admin, &[]), PageAccess::Hidden);
         assert_eq!(page("cases", Level::Admin, &[]), PageAccess::Full);
+        assert_eq!(page("giveaways", Level::Editor, &[]), PageAccess::Hidden);
+        assert_eq!(
+            page("giveaways", Level::Viewer, &p(&["giveaways"])),
+            PageAccess::Full
+        );
+        assert_eq!(page("giveaways", Level::Admin, &[]), PageAccess::Full);
         for l in [Level::Viewer, Level::Editor, Level::Admin] {
             assert_eq!(page("mod_stats", l, &p(&["cases"])), PageAccess::Hidden);
             assert_eq!(page("mod_stats", l, &p(&["mod_stats"])), PageAccess::Full);

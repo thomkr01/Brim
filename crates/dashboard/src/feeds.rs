@@ -130,7 +130,7 @@ fn id_of(v: &Option<String>) -> Result<Option<i64>, ApiError> {
 }
 
 /// A text channel or announcement channel of this server that is not one of Brim's own.
-async fn check_channel(st: &AppState, guild: i64, channel: i64) -> Result<(), ApiError> {
+pub(crate) async fn check_channel(st: &AppState, guild: i64, channel: i64) -> Result<(), ApiError> {
     let ch = discord(st, Method::GET, &format!("/channels/{channel}"), None)
         .await?
         .unwrap_or_default();

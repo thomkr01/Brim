@@ -239,6 +239,8 @@ pub struct New {
     pub button_label: String,
     pub button_emoji: String,
     pub claim_hours: i64,
+    /// Queue the first post in the same transaction (the dashboard); the command posts at once.
+    pub post_job: bool,
 }
 
 /// The first value of `n` outside its limit, as a sentence for the person who typed it.
@@ -303,8 +305,8 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     }
     let g: Giveaway = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO giveaways (guild_id, channel_id, prize, host_id, sponsor_id, created_by,
-           winners, ends_at, req, button_label, button_emoji, claim_hours)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12)
+           winners, ends_at, req, button_label, button_emoji, claim_hours, needs_repost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12, $13)
          RETURNING {COLS}"
     )))
     .bind(n.guild_id)
@@ -319,8 +321,20 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     .bind(n.button_label.trim())
     .bind(n.button_emoji.trim())
     .bind(n.claim_hours as i32)
+    .bind(n.post_job)
     .fetch_one(&mut *tx)
     .await?;
+    if n.post_job {
+        let payload = serde_json::json!({"id": g.id, "first": true});
+        crate::jobs::enqueue(
+            &mut *tx,
+            n.guild_id,
+            REPOST_JOB,
+            payload,
+            Utc::now().timestamp(),
+        )
+        .await?;
+    }
     crate::jobs::enqueue(
         &mut *tx,
         n.guild_id,
@@ -343,6 +357,8 @@ pub const REPOST_JOB: &str = "giveaway_repost";
 pub const DM_JOB: &str = "giveaway_dm";
 /// Job that writes the drawn message and posts the winners.
 pub const ANNOUNCE_JOB: &str = "giveaway_announce";
+/// Job that runs a dashboard action that needs Discord: cancel, reroll or redraw.
+pub const ACTION_JOB: &str = "giveaway_action";
 
 pub async fn get(pool: &PgPool, guild: i64, id: i64) -> Result<Option<Giveaway>> {
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
@@ -731,6 +747,69 @@ pub async fn edit(
         == 1))
 }
 
+/// Marks a running giveaway to be posted (again), in `channel` when given, and queues the post.
+/// `first`: a new giveaway (the bot logs it as started). False when it is not running.
+pub async fn queue_post(
+    pool: &PgPool,
+    guild: i64,
+    id: i64,
+    channel: Option<i64>,
+    first: bool,
+) -> Result<bool> {
+    let mut tx = pool.begin().await?;
+    let n = sqlx::query(
+        "UPDATE giveaways SET channel_id = COALESCE($3, channel_id), message_id = NULL,
+           needs_repost = true, issue = NULL
+         WHERE id = $1 AND guild_id = $2 AND status = 'running'",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(channel)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if n == 1 {
+        let payload = serde_json::json!({ "id": id, "first": first });
+        crate::jobs::enqueue(&mut *tx, guild, REPOST_JOB, payload, Utc::now().timestamp()).await?;
+    }
+    tx.commit().await?;
+    Ok(n == 1)
+}
+
+/// The entry count of each of `ids` (only those with entries).
+pub async fn entry_counts(pool: &PgPool, guild: i64, ids: &[i64]) -> Result<Vec<(i64, i64)>> {
+    Ok(sqlx::query_as(
+        "SELECT giveaway_id, count(*) FROM giveaway_entries
+         WHERE guild_id = $1 AND giveaway_id = ANY($2) GROUP BY giveaway_id",
+    )
+    .bind(guild)
+    .bind(ids)
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Entries shown per page on the dashboard.
+pub const ENTRIES_PAGE: i64 = 50;
+
+/// One page of a giveaway's entrants (user, weight), by user id.
+pub async fn entries_page(
+    pool: &PgPool,
+    guild: i64,
+    id: i64,
+    page: i64,
+) -> Result<Vec<(i64, i16)>> {
+    Ok(sqlx::query_as(
+        "SELECT user_id, weight FROM giveaway_entries WHERE giveaway_id = $1 AND guild_id = $2
+         ORDER BY user_id LIMIT $3 OFFSET $4",
+    )
+    .bind(id)
+    .bind(guild)
+    .bind(ENTRIES_PAGE)
+    .bind(page.clamp(0, 100_000) * ENTRIES_PAGE)
+    .fetch_all(pool)
+    .await?)
+}
+
 /// Saves where the message is now and clears the re-post mark and the issue.
 pub async fn set_posted(
     pool: &PgPool,
@@ -886,6 +965,7 @@ mod tests {
             button_label: String::new(),
             button_emoji: String::new(),
             claim_hours: 48,
+            post_job: false,
         };
         assert_eq!(new_problem(&n), None);
         let bad = [
@@ -959,6 +1039,7 @@ mod tests {
             button_label: String::new(),
             button_emoji: String::new(),
             claim_hours: 48,
+            post_job: false,
         }
     }
 

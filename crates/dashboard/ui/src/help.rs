@@ -28,6 +28,12 @@ pub fn steps(page: &str) -> Option<&'static [&'static str]> {
             "The time limit pauses while the member is timed out.",
             "If the verification channel is deleted, Brim makes it again and quarantines whoever deleted it. Extra Owners and Trusted Admins get one warning first.",
         ],
+        "giveaways" => &[
+            "Turn giveaways on, set what a new giveaway starts with, then click Start a giveaway. Brim posts it with an Enter button.",
+            "Members press Enter and get a private answer. Brim checks the entry rules at the press and again for each winner at the draw. Quarantined members, Raider List entries and members the Join Gate caught never enter or win.",
+            "At the end time Brim draws the winners, posts them and sends each one a DM. Reroll draws all winners again, Redraw replaces one; a past winner never wins the same giveaway again.",
+            "Change the look of each message in the Message Builder with the buttons under Messages. Members whose permit has the Manage Giveaways permit perm, and Trusted Admins and up, run giveaways here and with the giveaway command.",
+        ],
         "feeds" => &[
             "Paste the address of a website, a YouTube channel, or a GitHub or GitLab repository, and pick the channel to post in. Brim finds a website's feed itself. The first check only remembers what is already there.",
             "A GitHub or GitLab feed gets an address and a secret to paste in the repository's webhook settings. Each event then posts at once, with the look of GitHub's own Discord webhook; pick which events post with the switches.",
