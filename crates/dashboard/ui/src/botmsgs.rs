@@ -182,7 +182,6 @@ pub fn BotMessages(
     let cur = RwSignal::new(json!({"body": {}}));
     let orig = RwSignal::new(Value::Null);
     let dirty = Memo::new(move |_| cur.with(|c| c["body"].clone()) != orig.get());
-    let editing = RwSignal::new(false);
     let busy = RwSignal::new(false);
     // Search text and the opened areas and sub-groups (all closed at first); kept for this visit only.
     let query = RwSignal::new(String::new());
@@ -238,7 +237,7 @@ pub fn BotMessages(
         orig.set(body.clone());
         cur.set(json!({"body": body, "added": r["buttons"]}));
         ed.reset();
-        editing.set(false);
+        ed.edit.set((!(r["locked"] == true || !may(&r))).then_some(false));
         open.set(Some(r));
     };
     Effect::new(move |_| {
@@ -655,10 +654,10 @@ pub fn BotMessages(
             </div>
             {locked.then(|| view! { <p class="muted">{crate::icons::icon("lock")}" It is shown here, but it cannot be changed."</p> })}
             {(!locked && !can_edit).then(|| view! { <p class="muted">{if r["security"] == true { "Trusted Admins and above can change security texts, with a 2FA code." } else { "Only the Owner, Extra Owners and Trusted Admins can change bot messages." }}</p> })}
-            {can_edit.then(|| view! { <p class="muted small">"Type { or press { } for the values Brim fills in."</p> })}
+            {move || (ed.edit.get() == Some(true)).then(|| view! { <p class="muted small">"Type { or press { } for the values Brim fills in."</p> })}
             {bot_text}
             {warn}
-            {crate::embeds::split(editing, can_edit, cur, message_tab, preview_tab)}
+            {crate::embeds::split(ed.edit, message_tab, preview_tab)}
             {pop_view}
             {crate::msgparts::sub_view(ed.parts)}
             <Show when=move || can_edit && dirty.get()>

@@ -893,7 +893,7 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 @media (min-width:761px) { .land .scene > .win.mm.mm.mm.mm:nth-of-type(3) { width:calc(var(--space-56) * 4.4); } }
 .land .pane .tog > label { flex:none; }
 /* Message page: the preview on the right, the editor on the left behind "Edit message". */
-.msplit { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:var(--space-16); align-items:start; } .msplit:has(.mside:empty) { grid-template-columns:minmax(0,1fr); }
-.mview { position:sticky; top:var(--space-16); } .mtop { display:flex; align-items:center; gap:var(--space-8); margin-bottom:var(--space-8); } .editbtn { display:inline-flex; align-items:center; gap:var(--space-8); }
+.msplit { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-16); align-items:start; } .msplit.two { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .mside { min-width:0; } .vchip { max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
+.msplit.two .mview { position:sticky; top:var(--space-16); } .mtop { display:flex; align-items:center; gap:var(--space-8); margin-bottom:var(--space-8); } .editbtn { display:inline-flex; align-items:center; gap:var(--space-8); }
 .added-note { display:flex; gap:var(--space-8); align-items:flex-start; margin:0 0 var(--space-12); padding:var(--space-8) var(--space-12); border:1px solid var(--accent); border-radius:var(--radius-row); background:var(--b2); font-size:var(--fs-ui); }
-@media (max-width:900px) { .msplit { grid-template-columns:minmax(0,1fr); } .mview { position:static; order:-1; } }
+@media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { position:static; order:-1; } }

@@ -209,7 +209,6 @@ pub fn Feeds(guild: String) -> impl IntoView {
     let cur = RwSignal::new(json!({"body": {}}));
     let orig = RwSignal::new(Value::Null);
     let dirty = Memo::new(move |_| cur.with(|c| c["body"].clone()) != orig.get());
-    let editing = RwSignal::new(false);
     let ed = Editor::new(cur, g, true);
     let (message_tab, preview_tab, pop_view) = ed.views();
     on_cleanup(|| crate::msgparts::set_bot_vars(&[]));
@@ -388,7 +387,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             orig.set(body.clone());
             cur.set(json!({"body": body}));
             ed.reset();
-            editing.set(false);
+            ed.edit.set(admin().then_some(false));
             open.set(Some((f, row)));
         })
     };
@@ -660,7 +659,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             } })}
             <p class="muted small">"Only this feed sends this version. The entry on the Bot messages page is the version for every other feed of this kind. Edits apply to posts sent after the save."</p>
             {move || gone().then(|| view! { <p class="err">"{link} is missing: keep {link} in the message text or the first embed, or this cannot be saved."</p> })}
-            {crate::embeds::split(editing, can, cur, message_tab, preview_tab)}
+            {crate::embeds::split(ed.edit, message_tab, preview_tab)}
             {pop_view}
             {crate::msgparts::sub_view(ed.parts)}
             <Show when=move || can && dirty.get()>

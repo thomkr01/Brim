@@ -102,35 +102,26 @@ pub fn added_notice(c: &Value) -> Option<AnyView> {
         .flat_map(|r| r["components"].as_array().into_iter().flatten())
         .filter_map(|b| b["label"].as_str().map(String::from))
         .collect();
-    (!names.is_empty()).then(|| view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds these buttons itself when it posts: "</b>{names.join(", ")}". They are not part of the message text, so you cannot edit or press them here."</span></p> }.into_any())
+    (!names.is_empty()).then(|| view! { <p class="added-note">{crate::icons::icon("info")}<span><b>"Brim adds these buttons itself: "</b>{names.join(", ")}". What they do is fixed."</span></p> }.into_any())
 }
 
 /// The message preview on the right, as members see it, and the editor on the left behind an
 /// "Edit message" button. One shared layout for every place that has a message; on a phone the
 /// preview sits on top and the editor opens below it.
 pub fn split(
-    editing: RwSignal<bool>,
-    can_edit: bool,
-    cur: RwSignal<Value>,
+    edit: RwSignal<Option<bool>>,
     message: impl Fn() -> AnyView + Copy + Send + Sync + 'static,
     preview: impl Fn() -> AnyView + Copy + Send + Sync + 'static,
 ) -> AnyView {
     view! {
-        <div class="msplit">
-            <div class="mside">
-                {move || if !can_edit {
-                    ().into_any()
-                } else if editing.get() {
-                    view! {
-                        <div class="mtop"><b>"Edit message"</b><span class="sp"></span>
-                            <button class="ghost" on:click=move |_| editing.set(false)>"Close editor"</button></div>
-                        {move || cur.with(added_notice)}
-                        {message()}
-                    }.into_any()
-                } else {
-                    view! { <button class="editbtn" on:click=move |_| editing.set(true)>{crate::icons::icon("edit")}"Edit message"</button> }.into_any()
-                }}
-            </div>
+        <div class="msplit" class:two=move || edit.get() == Some(true)>
+            {move || (edit.get() == Some(true)).then(|| view! {
+                <div class="mside">
+                    <div class="mtop"><b>"Edit message"</b><span class="sp"></span>
+                        <button class="ghost" on:click=move |_| edit.set(Some(false))>"Close editor"</button></div>
+                    {message()}
+                </div>
+            })}
             <div class="mview">{preview()}</div>
         </div>
     }.into_any()
@@ -888,6 +879,8 @@ pub(crate) struct Editor {
     pub parts: Parts,
     /// A built-in bot message: no buttons, menus or embed times (Brim adds its own buttons).
     plain: bool,
+    /// None: this message cannot be edited. Some(open): the editor is open (Edit message opens it).
+    pub edit: RwSignal<Option<bool>>,
 }
 
 impl Editor {
@@ -927,6 +920,7 @@ impl Editor {
             answer,
             parts,
             plain,
+            edit: RwSignal::new(None),
         }
     }
 
@@ -958,6 +952,7 @@ impl Editor {
             answer,
             parts,
             plain,
+            edit,
         } = self;
         // Opens a popup under the control that was clicked (where it was clicked, for an embed's tall edge).
         let open_pop = move |e: ev::MouseEvent, p: Pop| {
@@ -1232,7 +1227,8 @@ impl Editor {
         let preview_tab = move || {
             view! {
                 <div class="card mcard">
-                    <div class="pvtop"><h2>"As members see it"</h2><span class="muted small">"Press buttons, links, menus and spoilers to test them. Variables show example values."</span><span class="sp"></span>
+                    <div class="pvtop"><h2>"As members see it"</h2><span class="muted small">"Links, menus and spoilers work here. Variables show example values."</span><span class="sp"></span>
+                        {move || (edit.get() == Some(false)).then(|| view! { <button class="editbtn" on:click=move |_| edit.set(Some(true))>{crate::icons::icon("edit")}"Edit message"</button> })}
                         <div class="seg" role="group" aria-label="preview width">
                             <button class:on=move || !phone.get() on:click=move |_| phone.set(false)>"Desktop"</button>
                             <button class:on=move || phone.get() on:click=move |_| phone.set(true)>"Phone"</button>
@@ -1295,12 +1291,12 @@ pub fn Embeds(
     // false: the list of messages; true: the builder for `cur`.
     let open = RwSignal::new(false);
     let tab = RwSignal::new("message");
-    let editing = RwSignal::new(false);
     let q = RwSignal::new(String::new());
     let (cur, msg) = (RwSignal::new(blank()), Msg::default());
     let orig = RwSignal::new(snapshot(&blank()));
     let dirty = Memo::new(move |_| cur.with(snapshot) != orig.get());
     let ed = Editor::new(cur, g, false);
+    ed.edit.set(Some(true));
     let Editor {
         pop,
         json_view,
@@ -1404,7 +1400,7 @@ pub fn Embeds(
         orig.set(snapshot(&m));
         cur.set(m);
         tab.set("message");
-        editing.set(true);
+        ed.edit.set(Some(true));
         json_view.set(false);
         pop.set(None);
         parts.sub.set(None);
@@ -1798,7 +1794,7 @@ pub fn Embeds(
             {move || match tab.get() {
                 "send" => send_tab().into_any(),
                 "automate" => automate_tab().into_any(),
-                _ => split(editing, true, cur, message_tab, preview_tab),
+                _ => split(ed.edit, message_tab, preview_tab),
             }}
             {pop_view}
             {crate::msgparts::sub_view(parts)}

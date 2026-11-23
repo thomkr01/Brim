@@ -239,7 +239,7 @@ pub fn chip(tok: &str) -> String {
             None => label.into(),
         };
         let red = if member_only(name) { " mem" } else { "" };
-        return format!("<span class=\"vchip{red}\" {attrs}>{}</span>", esc(&label));
+        return format!("<span class=\"vchip{red}\" {attrs} title=\"{}\">{}</span>", esc(&label), esc(&label));
     }
     if let Some((n, plus, style, _)) = time_at(tok) {
         return format!(
