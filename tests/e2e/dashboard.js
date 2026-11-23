@@ -534,6 +534,24 @@ fs.mkdirSync(out, { recursive: true });
   await pub.fill('');
   if ((await page.locator('.lpl li[role=option]').count()) !== all) failed.push('tickets: Publish panels channel box lost its list after clearing the search');
   await page.keyboard.press('Escape');
+  // A picker in a dialog: the open list is drawn on top of the dialog, fully inside the window, never cut at the dialog's edge.
+  await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1feeds')}`);
+  await page.click('button:has-text("Add new feed")', { timeout: 5000 }).catch(() => failed.push('picker in dialog: no Add new feed button'));
+  for (const [w, h] of [[1400, 900], [390, 500]]) {
+    await page.setViewportSize({ width: w, height: h });
+    await page.locator('.modal .lp input').first().click();
+    await page.locator('.lpl li[role=option]').first().waitFor({ timeout: 5000 }).catch(() => failed.push(`picker in dialog: no list at ${w}`));
+    await page.waitForTimeout(150);
+    const r = await page.evaluate(() => {
+      const l = document.querySelector('.lpl'); if (!l) return null;
+      const b = l.getBoundingClientRect(), f = document.querySelector('.modal .lp input').getBoundingClientRect();
+      const top = document.elementFromPoint(b.left + b.width / 2, b.top + Math.min(b.height / 2, 20));
+      return { inside: b.top >= 0 && b.bottom <= innerHeight && b.left >= 0 && b.right <= innerWidth, onTop: !!top && !!top.closest('.lpl'), gap: Math.min(Math.abs(b.top - f.bottom), Math.abs(f.top - b.bottom)) };
+    });
+    if (!r || !r.inside || !r.onTop || r.gap > 12) failed.push(`picker in dialog: list not fully visible, on top and attached at ${w}x${h} (${JSON.stringify(r)})`);
+    await page.keyboard.press('Escape');
+  }
+  await page.setViewportSize({ width: 1400, height: 900 });
   // Bot messages: the grouped list, a message opens in the editor, Revert asks first.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1bot_messages')}`);
   // Six main areas, all closed at first; an area opens to its sub-groups, a sub-group to its messages.

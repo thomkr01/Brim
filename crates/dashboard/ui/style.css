@@ -113,7 +113,7 @@ progress { width:100%; height:10px; accent-color:var(--primary); }
 pre { overflow:auto; border:1px solid var(--line); border-radius:var(--radius-row); padding:var(--space-8); }
 td code { overflow-wrap:anywhere; } /* long JSON or ids in a table cell wrap on a phone */
 .lp { position:relative; flex:1; min-width:120px; } .lp input { width:100%; }
-.lpl { position:absolute; z-index:20; left:0; right:0; top:100%; margin:4px 0 0; padding:var(--space-4) 0; list-style:none; max-height:240px; overflow:auto; background:var(--b2); border:1px solid var(--muted); border-radius:var(--radius-row); box-shadow:var(--lift); }
+.lpl { position:fixed; z-index:100; margin:0; padding:var(--space-4) 0; list-style:none; overflow:auto; overscroll-behavior:contain; background:var(--b2); border:1px solid var(--muted); border-radius:var(--radius-row); box-shadow:var(--lift); }
 .lpl li { padding:var(--space-8) var(--space-12); cursor:pointer; } .lpl li.hi, .lpl li:hover { background:color-mix(in srgb, var(--primary) 18%, transparent); } .lpl li[aria-selected=true] { font-weight:600; } .lpl li.muted { cursor:default; }
 .pick { display:flex; flex-wrap:wrap; gap:4px 12px; max-height:140px; overflow:auto; flex:1; }
 details { margin:12px 0; }

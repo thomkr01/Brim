@@ -221,6 +221,26 @@ pub fn ListPick(
     #[prop(optional, into)] disabled: Signal<bool>,
 ) -> impl IntoView {
     let (open, q, hi) = (RwSignal::new(false), RwSignal::new(String::new()), RwSignal::new(0usize));
+    let (field, place) = (NodeRef::<leptos::html::Input>::new(), RwSignal::new(String::new()));
+    // The list is `position:fixed`, so no dialog or scrolling card clips it. It is placed from the box
+    // each frame while open (follows any scroll or resize), below it, or above when there is no room.
+    let follow = move || {
+        let Some(el) = field.get_untracked() else { return };
+        let (r, vh) = (el.get_bounding_client_rect(), window().inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(800.0));
+        // The page is scaled (`--z` zoom on the root): fixed offsets are in unscaled units, rects in scaled ones.
+        let z = if el.offset_width() > 0 { (r.width() / f64::from(el.offset_width())).max(0.1) } else { 1.0 };
+        let (below, above) = ((vh - r.bottom()) / z - 12.0, r.top() / z - 12.0);
+        let up = below < 160.0 && above > below;
+        let side = if up { format!("bottom:{}px;max-height:{}px", (vh - r.top()) / z + 4.0, above.clamp(80.0, 320.0)) } else { format!("top:{}px;max-height:{}px", r.bottom() / z + 4.0, below.clamp(80.0, 320.0)) };
+        place.set(format!("left:{}px;width:{}px;{side}", r.left() / z, r.width() / z));
+    };
+    Effect::new(move || {
+        fn run(open: RwSignal<bool>, follow: impl Fn() + Copy + 'static) {
+            follow();
+            request_animation_frame(move || if open.get_untracked() { run(open, follow) });
+        }
+        if open.get() { run(open, follow) }
+    });
     let name = move |v: &str| {
         if v.is_empty() {
             return none.to_string();
@@ -242,7 +262,7 @@ pub fn ListPick(
     let input = |e: &web_sys::Event| event_target::<web_sys::HtmlInputElement>(e);
     view! {
         <div class="lp">
-            <input role="combobox" aria-expanded=move || open.get().to_string() aria-label=label autocomplete="off" prop:disabled=disabled
+            <input node_ref=field role="combobox" aria-expanded=move || open.get().to_string() aria-label=label autocomplete="off" prop:disabled=disabled
                 placeholder=move || Some(name(&get.get())).filter(|n| !n.is_empty()).unwrap_or_else(|| "Search".into()) prop:value=move || if open.get() { q.get() } else { name(&get.get()) }
                 on:focus=move |_| { q.set(String::new()); hi.set(0); open.set(true) }
                 on:click=move |_| open.set(true)
@@ -252,11 +272,11 @@ pub fn ListPick(
                     "ArrowDown" => { e.prevent_default(); open.set(true); hi.update(|h| *h = (*h + 1).min(rows.with(Vec::len).saturating_sub(1))) }
                     "ArrowUp" => { e.prevent_default(); hi.update(|h| *h = h.saturating_sub(1)) }
                     "Enter" => { e.prevent_default(); if let Some((id, _)) = rows.with(|r| r.get(hi.get_untracked()).cloned()).filter(|_| open.get_untracked()) { choose(id); let _ = input(&e.into()).blur(); } }
-                    "Escape" => { open.set(false); let _ = input(&e.into()).blur(); }
+                    "Escape" => { if open.get_untracked() { e.stop_propagation() } open.set(false); let _ = input(&e.into()).blur(); }
                     _ => {}
                 } />
             <Show when=move || open.get()>
-                <ul class="lpl" role="listbox" aria-label=label>
+                <ul class="lpl" role="listbox" aria-label=label style=move || place.get()>
                     {move || rows.with(Vec::is_empty).then(|| view! { <li class="muted">"No match"</li> })}
                     {move || rows.get().into_iter().enumerate().map(|(i, (id, n))| {
                         let on = id == get.get_untracked();
