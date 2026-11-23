@@ -830,3 +830,9 @@ The owner saw the new scene sit a little to the right while it moved, with no re
 The white layer of a pressed front page button (`::before`, `z-index:-1`) lay over the button's own fill, because the press transform makes the button a stacking context. Light labels became white on white. Fixed by removing the layer.
 
 **Rule:** a state that changes a button's fill sets the label colour with it. Look at the pressed, hover and focus still of every button style in both browsers before reporting.
+
+## A front page star sat on top of text (2026-11-23)
+
+`fit` clamped a star's left place to 0 on a desktop. In a block whose widest scene fills the box (verification, and the block with the dashboard cards at 1280 px and wider) the star's place is left of the box, so the clamp pushed it into the first piece, on its text ("Mika joined", "Brim adds the buttons itself."). The old check only looked at the first scene's sizes. Found by looking at a still of the new scene.
+
+**Rule:** a star keeps its place outside the group; only a phone clamps it into the box. Check with a script that lists, for every block, scene, and width from 820 to 2560 px, the stars whose rectangle lies over any text of the scene or of the block's copy (it must list none), not by eye on one still.
