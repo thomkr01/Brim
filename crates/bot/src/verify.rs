@@ -1213,7 +1213,10 @@ const NOTES: &str = "\n\n**Additional Notes:**\n› Type out the traced colored 
 pub(crate) fn challenge_embed(body: &str, notes: bool, png: bool, limit_ms: i64) -> Embed {
     let mut e = EmbedBuilder::new()
         .color(GREEN)
-        .title("🧩 Hello! Are you human? Let's find out!")
+        .title(format!(
+            "{} Hello! Are you human? Let's find out!",
+            brim_logging::emoji::CAPTCHA
+        ))
         .description(format!(
             "```\n{body}\n```{}",
             if notes { NOTES } else { "" }

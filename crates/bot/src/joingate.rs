@@ -407,7 +407,16 @@ pub(crate) fn raid_trigger_log(
         duration(raid.active_ms / 1000),
         punished(raid.action)
     );
-    trigger_log(("🕵 Join Raid Trigger!", "join"), &next, flagged, code, url)
+    trigger_log(
+        (
+            &format!("{} Join Raid Trigger!", brim_logging::emoji::RAID_ALERT),
+            "join",
+        ),
+        &next,
+        flagged,
+        code,
+        url,
+    )
 }
 
 /// "timed out", "banned", ...: what a raid action does to a member.
@@ -470,7 +479,14 @@ pub(crate) fn trigger_log(
 
 /// The report when a join raid ends; `code` names the raid when the full report has a link.
 pub(crate) fn raid_report_log(caught: i64, code: Option<&str>) -> Log {
-    report_log(("🕵 Join Raid Report!", "join raid"), caught, code)
+    report_log(
+        (
+            &format!("{} Join Raid Report!", brim_logging::emoji::RAID_ALERT),
+            "join raid",
+        ),
+        caught,
+        code,
+    )
 }
 
 /// A raid report (join or voice): `(title, raid)`.

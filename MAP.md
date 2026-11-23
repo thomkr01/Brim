@@ -37,7 +37,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 
 ## Emojis and icons
 - Source images: `assets/icons/<name>.svg` (128x128, one name = one emoji). Mascot: `assets/mascot/brim.svg`, `assets/mascot/poses/*.webp`; logo `assets/logo/`; banners `assets/banner/`; Unicode list `assets/emoji/emoji.json`.
-- Names to ids and the Unicode fallback: `crates/logging/src/emoji.rs` (`load`, `id_of`, `for_label`). Lint rules and upload: `tools/emojis.mjs` (`check [names] [--sheet out.png]`, `upload [--replace]`; needs `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`).
+- Names to ids and the Unicode fallback: `crates/logging/src/emoji.rs` (`load`, `id_of`, `for_label`). A message Brim posts never has a typed Unicode emoji: use a constant from this file (see PITFALLS.md, "Stock emoji in bot messages"). Lint rules and upload: `tools/emojis.mjs` (`check [names] [--sheet out.png]`, `upload [--replace]`; needs `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`).
 - In the dashboard: `crates/dashboard/ui/src/icons.rs` (`icon`), `Pose` and the `Brim` pose enum in `common.rs`.
 
 ## Design

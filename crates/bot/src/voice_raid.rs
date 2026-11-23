@@ -188,7 +188,10 @@ async fn triggered(
     let flagged: Vec<(u64, &str)> = flagged.iter().map(|(u, n)| (*u, n.as_str())).collect();
     let url = crate::invites::raid_url(code);
     let log = joingate::trigger_log(
-        ("🎙 Voice Raid Trigger!", "voice join"),
+        (
+            &format!("{} Voice Raid Trigger!", brim_logging::emoji::VOICE),
+            "voice join",
+        ),
         &next,
         &flagged,
         code,
@@ -246,7 +249,10 @@ pub async fn end(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
             .await?;
     let url = crate::invites::raid_url(code).filter(|_| caught > 0);
     let log = joingate::report_log(
-        ("🎙 Voice Raid Report!", "voice raid"),
+        (
+            &format!("{} Voice Raid Report!", brim_logging::emoji::VOICE),
+            "voice raid",
+        ),
         caught,
         url.is_some().then_some(code),
     );

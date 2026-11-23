@@ -230,7 +230,10 @@ pub(crate) fn note_text(id: &str, user: u64, by: u64, ai: Option<&str>, text: &s
         Some(ai) => format!("<@{by}> ({})", ai_label(ai)),
         None => format!("<@{by}>"),
     };
-    format!("Note: {id} ✅\nMember: <@{user}>\nModerator: {by}\nContent: {text}")
+    format!(
+        "Note: {id} {}\nMember: <@{user}>\nModerator: {by}\nContent: {text}",
+        brim_logging::emoji::YES
+    )
 }
 
 pub(crate) fn note_embed(text: &str) -> Embed {

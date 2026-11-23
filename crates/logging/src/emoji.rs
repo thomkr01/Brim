@@ -152,6 +152,27 @@ pub const SERVERS: Emoji = e("server", "▸");
 
 pub const CLOCK: Emoji = e("clock", "▸");
 
+/// Icons for the first line or title of a message; the fallback is the Unicode emoji it replaced.
+pub const KICK: Emoji = e("kick", "👢");
+pub const PURGE: Emoji = e("purge", "🧹");
+pub const BAN: Emoji = e("ban", "⛔");
+pub const TIMEOUT: Emoji = e("timeout", "⏳");
+pub const CHAIN: Emoji = e("link", "🔗");
+pub const CAPTCHA: Emoji = e("captcha", "🧩");
+pub const APPEAL: Emoji = e("appeal", "📨");
+pub const REPLY: Emoji = e("reply", "💬");
+pub const QUESTION: Emoji = e("question", "❓");
+pub const KEY: Emoji = e("key", "🔑");
+pub const FINGERPRINT: Emoji = e("fingerprint", "🔐");
+pub const ALARM: Emoji = e("alarm", "🚨");
+pub const BOT: Emoji = e("bot", "🤖");
+pub const RAID_ALERT: Emoji = e("suspicion", "🕵");
+pub const VOICE: Emoji = e("voice_join", "🎙");
+pub const PIN: Emoji = e("pin", "📌");
+pub const WHITELIST: Emoji = e("whitelist", "📋");
+pub const TRASH: Emoji = e("trash", "🗑️");
+pub const REFRESH: Emoji = e("refresh", "🔄");
+
 pub const TICKET: Emoji = e("modmail", "📨");
 pub const TICKET_NEW: Emoji = e("modmail_new", "📬");
 pub const TICKET_REPLY: Emoji = e("modmail_reply", "💬");
@@ -364,6 +385,25 @@ mod tests {
             TICKET_REPLY,
             TICKET_CLOSE,
             TICKET_BLOCK,
+            KICK,
+            PURGE,
+            BAN,
+            TIMEOUT,
+            CHAIN,
+            CAPTCHA,
+            APPEAL,
+            REPLY,
+            QUESTION,
+            KEY,
+            FINGERPRINT,
+            ALARM,
+            BOT,
+            RAID_ALERT,
+            VOICE,
+            PIN,
+            WHITELIST,
+            TRASH,
+            REFRESH,
         ];
         let names = consts
             .iter()

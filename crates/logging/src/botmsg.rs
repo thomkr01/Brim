@@ -3,6 +3,10 @@
 //! server may store its own copy (`bot_messages`); [`render`] takes that or the default and fills the
 //! `{variables}`. Locked messages (security texts) never take an override.
 use crate::embed::{label_head, ALERT, BLUE, DONE, GREEN, ORANGE, RED};
+use crate::emoji::{
+    APPEAL, BAN, CAPTCHA, CHAIN, FINGERPRINT, KICK, LOCK, NO, PURGE, QUESTION, REPLY, TIMEOUT,
+    WARNING, WHITELIST, YES,
+};
 use serde_json::{json, Value};
 use std::sync::OnceLock;
 
@@ -333,70 +337,72 @@ fn build() -> Vec<Def> {
             "Warn",
             "You have been warned in {server}!",
             ORANGE,
-            "⚠️ You got a warning in `{server}`.",
+            &format!("{WARNING} You got a warning in `{{server}}`."),
         ),
         (
             "timeout",
             "Timeout",
             "You have been timed out in {server}!",
             RED,
-            "⏳ You cannot talk in `{server}` for a while.",
+            &format!("{TIMEOUT} You cannot talk in `{{server}}` for a while."),
         ),
         (
             "quarantine",
             "Quarantine",
             "You have been quarantined in {server}!",
             RED,
-            "🔒 You were put in quarantine in `{server}`.",
+            &format!("{LOCK} You were put in quarantine in `{{server}}`."),
         ),
         (
             "kick",
             "Kick",
             "You have been kicked in {server}!",
             RED,
-            "👢 You were removed from `{server}`.",
+            &format!("{KICK} You were removed from `{{server}}`."),
         ),
         (
             "softban",
             "Softban",
             "You have been softbanned in {server}!",
             RED,
-            "🧹 You were removed from `{server}` and your recent messages were deleted.",
+            &format!(
+                "{PURGE} You were removed from `{{server}}` and your recent messages were deleted."
+            ),
         ),
         (
             "tempban",
             "Temporary ban",
             "You have been temporarily banned in {server}!",
             RED,
-            "⛔ You are banned from `{server}` for a set time.",
+            &format!("{BAN} You are banned from `{{server}}` for a set time."),
         ),
         (
             "unquarantine",
             "Unquarantine",
             "You have been unquarantined in {server}!",
             GREEN,
-            "✅ Your quarantine in `{server}` was lifted.",
+            &format!("{YES} Your quarantine in `{{server}}` was lifted."),
         ),
         (
             "untimeout",
             "Timeout removed",
             "Your timeout was removed in {server}!",
             GREEN,
-            "✅ You can talk in `{server}` again.",
+            &format!("{YES} You can talk in `{{server}}` again."),
         ),
         (
             "unban",
             "Unban",
             "You have been unbanned in {server}!",
             GREEN,
-            "✅ You can join `{server}` again.",
+            &format!("{YES} You can join `{{server}}` again."),
         ),
         (
             "ban",
             "Ban",
             "You have been banned in {server}!",
             RED,
-            "⛔ You can no longer join `{server}`.",
+            &format!("{BAN} You can no longer join `{{server}}`."),
         ),
     ] {
         let mut lines = vec![
@@ -433,9 +439,9 @@ fn build() -> Vec<Def> {
         &["server"],
         "You have been quarantined",
         RED,
-        "🔒 You have been quarantined in `{server}`. You can DM Brim to reach this server's staff.",
+        &format!("{LOCK} You have been quarantined in `{{server}}`. You can DM Brim to reach this server's staff."),
     ));
-    out.push(plain("dm.invite_link", "Your invite link", g, &["code", "expiry", "uses"], "Your invite link", BLUE, "🔗 Your invite link: https://discord.gg/{code}\nIt {expiry}, {uses}. Joins through it count for you."));
+    out.push(plain("dm.invite_link", "Your invite link", g, &["code", "expiry", "uses"], "Your invite link", BLUE, &format!("{CHAIN} Your invite link: https://discord.gg/{{code}}\nIt {{expiry}}, {{uses}}. Joins through it count for you.")));
     out.push(plain(
         "dm.automod_timeout",
         "Automod timeout",
@@ -443,14 +449,14 @@ fn build() -> Vec<Def> {
         &["why", "note"],
         "You were timed out",
         RED,
-        "⏳ You were timed out by automod{why}{note}",
+        &format!("{TIMEOUT} You were timed out by automod{{why}}{{note}}"),
     ));
-    out.push(plain("dm.verify_reminder", "Verification reminder", g, &["server", "time"], "Verification needed", ORANGE, "⚠️ You have not verified in `{server}`, so you cannot see its channels. Verify in its verification channel within {time}, or you will be removed from the server."));
+    out.push(plain("dm.verify_reminder", "Verification reminder", g, &["server", "time"], "Verification needed", ORANGE, &format!("{WARNING} You have not verified in `{{server}}`, so you cannot see its channels. Verify in its verification channel within {{time}}, or you will be removed from the server.")));
     for (key, name, color) in [
         ("dm.appeal_approved", "Appeal approved", GREEN),
         ("dm.appeal_denied", "Appeal denied", RED),
     ] {
-        let text = "📨 Your {kind} appeal (#{id}) was {verdict}.\n💬 Reply from the staff: {reply}";
+        let text = &format!("{APPEAL} Your {{kind}} appeal (#{{id}}) was {{verdict}}.\n{REPLY} Reply from the staff: {{reply}}");
         out.push(plain(
             key,
             name,
@@ -468,7 +474,7 @@ fn build() -> Vec<Def> {
         &["kind", "id", "staff_question", "appeal_link"],
         "Question about your appeal",
         BLUE,
-        "❓ Staff have a question about your {kind} appeal (#{id}):\n{staff_question}\nAnswer it on the appeal page: {appeal_link}",
+        &format!("{QUESTION} Staff have a question about your {{kind}} appeal (#{{id}}):\n{{staff_question}}\nAnswer it on the appeal page: {{appeal_link}}"),
     ));
     out.push(frame(
         "dm.join_gate",
@@ -542,8 +548,8 @@ fn build() -> Vec<Def> {
         ORANGE,
     ));
     // Locked (owner decision 2026-11-21): no rescue key text is editable.
-    out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["name", "page"], embed("Rescue key expired", ORANGE, &["⚠️ The rescue key of **{name}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {page}. It needs your dashboard 2FA.".into()])));
-    out.push(def("dm.dashboard_2fa", "Dashboard 2FA setup code", s, false, &["code"], embed("Your setup code", BLUE, &["🔐 Your Brim authenticator setup code is **{code}**. If you didn't start this, don't share it: someone may have your dashboard session.".into()])));
+    out.push(def("dm.rescue_expired", "Rescue key expired", s, true, &["name", "page"], embed("Rescue key expired", ORANGE, &[format!("{WARNING} The rescue key of **{{name}}** stopped working: it was made before the server changed owner 7 days ago. Make a new one at {{page}}. It needs your dashboard 2FA.")])));
+    out.push(def("dm.dashboard_2fa", "Dashboard 2FA setup code", s, false, &["code"], embed("Your setup code", BLUE, &[format!("{FINGERPRINT} Your Brim authenticator setup code is **{{code}}**. If you didn't start this, don't share it: someone may have your dashboard session.")])));
     feeds(&mut out);
     giveaways(&mut out);
     mod_entries(&mut out);
@@ -3713,7 +3719,7 @@ fn security_answers(out: &mut Vec<Def>) {
             ),
         );
     }
-    let wl = "📋 Interactive Whitelist";
+    let wl = &format!("{WHITELIST} Interactive Whitelist");
     set(
         out,
         ("reply.whitelist.prompt", "Answer: whitelist menu", SECURITY),
@@ -5511,7 +5517,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         embed(
             &format!("{TICKET} Confirmation"),
             BLUE,
-            &["📨 You are sending this message to `{server}` (ID: `{server_id}`).".into(), "Press **Send** to confirm, **Other server** to pick another server, or **Cancel** to stop.".into()],
+            &[format!("{TICKET} You are sending this message to `{{server}}` (ID: `{{server_id}}`)."), "Press **Send** to confirm, **Other server** to pick another server, or **Cancel** to stop.".into()],
         ),
     );
     c.template["embeds"][0]["footer"] = json!({"text": "Tip: you can turn confirmation messages off with the t!confirmation command."});
@@ -5582,7 +5588,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
             &format!("{TICKET_CLOSE} Ticket Closed"),
             BLUE,
             &[
-                "📪 Your ticket in `{server}` was closed.".into(),
+                format!("{TICKET_CLOSE} Your ticket in `{{server}}` was closed."),
                 format!("{} {{reason}}", label_head("Reason")),
             ],
         ),
@@ -5632,7 +5638,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Wrong captcha answer",
         g,
         &[],
-        "❌ Unsuccessful Operation!",
+        &format!("{NO} Unsuccessful Operation!"),
         RED,
         &format!("{ARROW} Wrong answer, try again before it's too late."),
     ));
@@ -5641,7 +5647,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Too many wrong answers",
         g,
         &[],
-        "❌ Unsuccessful Operation!",
+        &format!("{NO} Unsuccessful Operation!"),
         RED,
         &format!("{ARROW} Too many wrong answers. Press **Verify** again for a new captcha."),
     ));
@@ -5651,9 +5657,13 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         g,
         false,
         &["steps"],
-        embed("🧩 Verification Help", BLUE, &["{steps}".into()]),
+        embed(
+            &format!("{CAPTCHA} Verification Help"),
+            BLUE,
+            &["{steps}".into()],
+        ),
     ));
-    out.push(def("verify.kicked", "Removed for not verifying", g, false, &["server", "again"], embed("Timed out. Try again", RED, &["⏳ You did not finish the verification of `{server}` in time, so you were removed from the server.".into(), format!("{ARROW} {{again}}")])));
+    out.push(def("verify.kicked", "Removed for not verifying", g, false, &["server", "again"], embed("Timed out. Try again", RED, &[format!("{TIMEOUT} You did not finish the verification of `{{server}}` in time, so you were removed from the server."), format!("{ARROW} {{again}}")])));
     out.push(say(
         "reply.verify.not_set_up",
         "Reply: verification is not set up",
@@ -5769,7 +5779,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
     d.required = vec!["permissions"];
     out.push(d);
     let g = "Verification";
-    out.push(plain("verify.banned", "Banned for not verifying", g, &["server"], "Timed out. Try again", RED, "⛔ You did not finish the verification of `{server}` in time 3 times in 24 hours, so you were banned for 7 days.\nWhen the ban ends, Brim sends you a new invite here, valid for 24 hours."));
+    out.push(plain("verify.banned", "Banned for not verifying", g, &["server"], "Timed out. Try again", RED, &format!("{BAN} You did not finish the verification of `{{server}}` in time 3 times in 24 hours, so you were banned for 7 days.\nWhen the ban ends, Brim sends you a new invite here, valid for 24 hours.")));
     out.push(plain(
         "verify.ban_ended",
         "Verification ban ended",
@@ -5777,7 +5787,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         &["server"],
         "Your ban has ended",
         GREEN,
-        "✅ You can join `{server}` again and verify. The invite below works once, for 24 hours.",
+        &format!("{YES} You can join `{{server}}` again and verify. The invite below works once, for 24 hours."),
     ));
 
     out.push(def(

@@ -91,7 +91,7 @@ pub(crate) async fn drop_bots(app: &App, gid: Id<GuildMarker>, members: &[Member
     }
     if !unread.is_empty() {
         let log = brim_logging::overlay::security_log(
-            "🤖 Bot check failed",
+            &format!("{} Bot check failed", brim_logging::emoji::BOT),
             "log.anti_nuke.bot_check_failed",
             &[("accounts", &unread.join(", "))],
         );
@@ -135,7 +135,10 @@ pub(crate) async fn drop_bots(app: &App, gid: Id<GuildMarker>, members: &[Member
         removed.join(", ")
     );
     let log = brim_logging::overlay::security_log(
-        "🤖 Bots removed from user-only lists",
+        &format!(
+            "{} Bots removed from user-only lists",
+            brim_logging::emoji::BOT
+        ),
         "log.anti_nuke.bots_removed",
         &[("accounts", &removed.join(", "))],
     );

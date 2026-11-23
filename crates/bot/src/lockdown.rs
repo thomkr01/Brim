@@ -952,7 +952,11 @@ fn updates_text(updates: &[(i64, String)]) -> String {
         .enumerate()
         .skip(skip)
         .map(|(n, (author, text))| {
-            format!("\n📌 **UPDATE {}** (<@{author}>):\n{ARROW} {text}", n + 1)
+            format!(
+                "\n{} **UPDATE {}** (<@{author}>):\n{ARROW} {text}",
+                brim_logging::emoji::PIN,
+                n + 1
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")

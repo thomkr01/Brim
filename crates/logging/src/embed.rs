@@ -356,7 +356,7 @@ pub fn button(label: &str, id: &str, style: ButtonStyle) -> Component {
 pub fn verify_panel(server: &str) -> (Embed, Component) {
     let embed = EmbedBuilder::new()
         .color(GREEN)
-        .title("🧩 Verification Required!")
+        .title(format!("{} Verification Required!", crate::emoji::CAPTCHA))
         .description(format!(
             "To access `{server}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."
         ))

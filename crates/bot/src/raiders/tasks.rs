@@ -54,9 +54,12 @@ pub async fn fan_out(app: &App, job: &jobs::Job) -> Result<()> {
     // token change): its text as it is, under its own title, never through an editable entry.
     // `secure_url` (every "Not you?" alert) adds the Secure my account button. A closed DM is not retried.
     if job.kind == "raider_notify" {
-        let text = job.payload["text"]
-            .as_str()
-            .context("job payload has no text")?;
+        // The dashboard writes Brim emojis as `{e:name}`; only the bot knows their ids.
+        let text = &brim_logging::emoji::fill(
+            job.payload["text"]
+                .as_str()
+                .context("job payload has no text")?,
+        );
         let sent = async {
             let dm = app.http.create_private_channel(Id::new(user)).await?;
             let ch = dm.model().await?.id;
