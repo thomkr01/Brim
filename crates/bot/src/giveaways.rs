@@ -4,6 +4,7 @@
 //! `brim_core::giveaways`; the dashboard makes and changes giveaways through the same rows.
 use anyhow::{Context, Result};
 use brim_core::{
+    giveaway_plans as plans,
     giveaways::{self as store, CodeTry, Entered, Facts, Giveaway, Refusal, Req},
     jobs,
     permits::Level,
@@ -365,6 +366,8 @@ const CHANNEL_GONE: &str =
     "The channel was deleted. Pick a new channel on the dashboard, and Brim posts the giveaway there.";
 const BAD_PRIZE: &str =
     "The prize breaks a filter of this server (words, scam, phishing or invite links). Change the prize.";
+const PLAN_CHANNEL_GONE: &str =
+    "The channel of this plan was deleted. Pick a channel and turn the plan on again.";
 const NO_ACCESS: &str =
     "Brim cannot post in the channel. Give Brim View Channel, Send Messages and Embed Links there.";
 
@@ -1671,23 +1674,30 @@ async fn give_role(
         problem_log(app, g, ROLE_UNSAFE).await;
         return Ok(());
     }
-    // A member who had the role before keeps it: no give and no removal later.
-    match http_err::member(&app.http, gid, user).await? {
-        Some(m) if !m.roles.contains(&role) => {}
-        _ => return Ok(()),
+    // A member who had the role before keeps it: no give and no removal later. A role an earlier
+    // giveaway gave (its removal waits) is not "before": this win adds its own removal.
+    let (u, r) = (user.get() as i64, role.get() as i64);
+    let has = match http_err::member(&app.http, gid, user).await? {
+        Some(m) => m.roles.contains(&role),
+        None => return Ok(()),
+    };
+    if has && !store::role_off_waits(&app.pool, g.guild_id, g.id, u, r, false).await? {
+        return Ok(());
     }
-    if let Err(e) = app.http.add_guild_member_role(gid, user, role).await {
-        let e = anyhow::Error::from(e);
-        return match http_err::code(&e) {
-            // The winner left.
-            Some(10007) => Ok(()),
-            Some(10011 | 50001 | 50013) => {
-                store::set_issue(&app.pool, g.guild_id, g.id, Some(ROLE_NO_ACCESS)).await?;
-                problem_log(app, g, ROLE_NO_ACCESS).await;
-                Ok(())
-            }
-            _ => Err(e),
-        };
+    if !has {
+        if let Err(e) = app.http.add_guild_member_role(gid, user, role).await {
+            let e = anyhow::Error::from(e);
+            return match http_err::code(&e) {
+                // The winner left.
+                Some(10007) => Ok(()),
+                Some(10011 | 50001 | 50013) => {
+                    store::set_issue(&app.pool, g.guild_id, g.id, Some(ROLE_NO_ACCESS)).await?;
+                    problem_log(app, g, ROLE_NO_ACCESS).await;
+                    Ok(())
+                }
+                _ => Err(e),
+            };
+        }
     }
     // A redraw during the give may have replaced this winner: its removal job ran before the give.
     let still = store::get(&app.pool, g.guild_id, g.id)
@@ -1703,9 +1713,8 @@ async fn give_role(
     Ok(())
 }
 
-/// The `giveaway_role_off` job: the role time is over, or a redraw replaced the winner.
-/// shortcut: takes the role also when the member won it again in another giveaway since; give
-/// each giveaway its own role if that matters.
+/// The `giveaway_role_off` job: the role time is over, or a redraw replaced the winner. A member
+/// who won the role in another giveaway since keeps it until that role time is over too.
 pub(crate) async fn role_off_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> Result<()> {
     let (Some(user), Some(role)) = (
         p["user"].as_i64().and_then(|u| Id::new_checked(u as u64)),
@@ -1713,6 +1722,18 @@ pub(crate) async fn role_off_job(app: &App, gid: Id<GuildMarker>, p: &Value) -> 
     ) else {
         return Ok(());
     };
+    if store::role_off_waits(
+        &app.pool,
+        gid.get() as i64,
+        p["id"].as_i64().unwrap_or(0),
+        user.get() as i64,
+        role.get() as i64,
+        true,
+    )
+    .await?
+    {
+        return Ok(());
+    }
     let Err(e) = app.http.remove_guild_member_role(gid, user, role).await else {
         return Ok(());
     };
@@ -2200,6 +2221,9 @@ pub async fn relink(app: &App, gid: Id<GuildMarker>, map: &std::collections::Has
         if let Err(e) = r {
             tracing::warn!(?e, "moving giveaway rules to a remade role failed");
         }
+        if let Err(e) = plans::relink_channel(&app.pool, guild, *old as i64, *new as i64).await {
+            tracing::warn!(?e, "moving giveaway plans to a remade channel failed");
+        }
         let ids: Result<Vec<i64>, _> = sqlx::query_scalar(
             "SELECT id FROM giveaways WHERE guild_id = $1 AND channel_id = $2 AND status = 'running'",
         )
@@ -2218,6 +2242,13 @@ pub async fn relink(app: &App, gid: Id<GuildMarker>, map: &std::collections::Has
 
 /// A deleted channel: its running giveaways keep running and wait for staff to pick a channel.
 pub async fn on_channel_delete(app: &App, gid: Id<GuildMarker>, channel: u64) -> Result<()> {
+    plans::channel_gone(
+        &app.pool,
+        gid.get() as i64,
+        channel as i64,
+        PLAN_CHANNEL_GONE,
+    )
+    .await?;
     let ids: Vec<i64> = sqlx::query_scalar(
         "UPDATE giveaways SET message_id = NULL, needs_repost = true, issue = $3
          WHERE guild_id = $1 AND channel_id = $2 AND status = 'running' RETURNING id",
@@ -3287,6 +3318,121 @@ mod tests {
         wipe(&t, g).await;
     }
 
+    /// A member who won the same role in two giveaways keeps it until the later role time is over.
+    #[tokio::test]
+    async fn the_winner_role_stays_until_the_latest_role_end() {
+        let Some(t) = crate::test_support::T::new(307).await else {
+            return;
+        };
+        t.server_config(0, t.owner(), json!({"giveaways": {"enabled": true}}))
+            .await;
+        let (gid, g) = (t.g(0), t.g(0).get() as i64);
+        let winner = t.base + 11;
+        t.set(|m| {
+            m.roles.insert(
+                gid.get(),
+                vec![
+                    (gid.get(), false, 0, 0),
+                    (601, false, 0, 1),
+                    (699, false, 0, 9),
+                ],
+            );
+            m.members.insert((gid.get(), winner), vec![]);
+            m.members
+                .insert((gid.get(), crate::test_support::ME), vec![699]);
+        });
+        t.app.invalidate_guild(gid);
+        let w = winner as i64;
+        let mut ids = vec![];
+        for hours in [24, 72] {
+            let mut n = plain(g);
+            n.extras = store::Extras {
+                winner_role: Some(Id::new(601)),
+                role_hours: hours,
+                ..Default::default()
+            };
+            let gw = store::create(&t.app.pool, &n, 25).await.unwrap().unwrap();
+            store::claim_end(&t.app.pool, g, gw.id)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(store::save_draw(
+                &t.app.pool,
+                g,
+                gw.id,
+                0,
+                &[w],
+                &[w],
+                "giveaway.winners",
+                false
+            )
+            .await
+            .unwrap());
+            dm_job(&t.app, gid, &json!({"id": gw.id, "draws": 1, "user": w}))
+                .await
+                .unwrap();
+            ids.push(gw.id);
+        }
+        let jobs: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2",
+        )
+        .bind(g)
+        .bind(store::ROLE_OFF_JOB)
+        .fetch_one(&t.app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            jobs, 2,
+            "the second win adds its own removal, the role was not there before"
+        );
+        let has = || t.mock.lock().unwrap().members[&(gid.get(), winner)].contains(&601);
+        assert!(has());
+        // The first role time ends while the second still runs: the member keeps the role.
+        sqlx::query("UPDATE scheduled_jobs SET run_at = now() - interval '1 minute' WHERE guild_id = $1 AND payload->>'id' = $2")
+            .bind(g)
+            .bind(ids[0].to_string())
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        let payload = |id: i64| json!({"id": id, "user": w, "role": 601});
+        role_off_job(&t.app, gid, &payload(ids[0])).await.unwrap();
+        assert!(has(), "the later role time has not ended");
+        // That job is done. The second role time ends: now the role goes.
+        sqlx::query("DELETE FROM scheduled_jobs WHERE guild_id = $1 AND payload->>'id' = $2")
+            .bind(g)
+            .bind(ids[0].to_string())
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE scheduled_jobs SET run_at = now() - interval '1 minute' WHERE guild_id = $1",
+        )
+        .bind(g)
+        .execute(&t.app.pool)
+        .await
+        .unwrap();
+        role_off_job(&t.app, gid, &payload(ids[1])).await.unwrap();
+        assert!(!has(), "the latest role time is over");
+        // A replaced winner loses the role at once, though the same giveaway's long job waits.
+        t.mock
+            .lock()
+            .unwrap()
+            .members
+            .get_mut(&(gid.get(), winner))
+            .unwrap()
+            .push(601);
+        sqlx::query("INSERT INTO scheduled_jobs (guild_id, kind, payload, run_at) VALUES ($1, $2, $3, now() + interval '3 days')")
+            .bind(g)
+            .bind(store::ROLE_OFF_JOB)
+            .bind(payload(ids[1]))
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        role_off_job(&t.app, gid, &payload(ids[1])).await.unwrap();
+        assert!(!has(), "its own later job does not keep the role");
+        wipe(&t, g).await;
+    }
+
     /// A winner gets a safe winner role and loses it at the end of the role time; a role with
     /// dangerous permissions is never given. The first draw makes the private winner thread with
     /// the winners and the host, and queues its close.
@@ -3354,6 +3500,13 @@ mod tests {
         .map(|b: bool| b as i64)
         .unwrap();
         assert_eq!(off, 1, "the role goes after 7 days");
+        // The scheduler runs the job when it is due.
+        sqlx::query("UPDATE scheduled_jobs SET run_at = now() - interval '1 minute' WHERE guild_id = $1 AND kind = $2")
+            .bind(g)
+            .bind(store::ROLE_OFF_JOB)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
         role_off_job(&t.app, gid, &json!({"id": gw.id, "user": w, "role": 601}))
             .await
             .unwrap();

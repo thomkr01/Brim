@@ -12,6 +12,7 @@ mod discord;
 mod histdiff;
 mod embeds;
 mod form;
+mod giveaway_plans;
 mod giveaways;
 mod guard;
 mod help;

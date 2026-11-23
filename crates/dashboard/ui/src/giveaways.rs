@@ -3,16 +3,17 @@
 //! their actions. Needs the Manage Giveaways permit perm (the server says so on refusal).
 use crate::common::*;
 use crate::form::{items, one_member, ListPick, Section};
+use crate::giveaway_plans as plans;
 use crate::records::{learn_names, who};
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-fn s(v: &Value) -> String {
+pub(crate) fn s(v: &Value) -> String {
     v.as_str().unwrap_or("").to_string()
 }
 
-fn now() -> i64 {
+pub(crate) fn now() -> i64 {
     (js_sys::Date::now() / 1000.0) as i64
 }
 
@@ -35,6 +36,21 @@ fn parse_duration(t: &str) -> Option<i64> {
         any = true;
     }
     any.then_some(total)
+}
+
+/// Seconds as the text the "Runs for" box reads: "2d 3h 5m".
+fn fmt_duration(secs: i64) -> String {
+    let (d, h, m) = (secs / 86_400, secs % 86_400 / 3600, secs % 3600 / 60);
+    let t: Vec<String> = [(d, "d"), (h, "h"), (m, "m")]
+        .into_iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, u)| format!("{n}{u}"))
+        .collect();
+    if t.is_empty() {
+        "1m".into()
+    } else {
+        t.join(" ")
+    }
 }
 
 /// Role chips plus the shared picker, for one role list of the entry rules.
@@ -108,11 +124,12 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             dc.try_set(v);
         }
     });
+    let plans_url = move || format!("/api/guilds/{}/giveaway-plans", g.get_value());
     // One action at a time; the list reads again after it.
-    let act = move |path: String, body: Value, done: &'static str| {
+    let send = move |url: String, body: Value, done: &'static str| {
         busy.set(true);
         spawn_local(async move {
-            let r = api("POST", &format!("{}/{path}", base()), Some(body)).await;
+            let r = api("POST", &url, Some(body)).await;
             if busy.try_set(false).is_some() {
                 return;
             }
@@ -126,9 +143,23 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             load();
         })
     };
-    let open_form = move |v: Value| {
+    let act = move |path: String, body: Value, done: &'static str| {
+        send(format!("{}/{path}", base()), body, done)
+    };
+    // A saved template or plan with no claim time follows the server's default.
+    let claim_default = move || {
+        data.with_untracked(|v| v.as_ref().map(|v| v["limits"]["claim_default"].clone()))
+            .unwrap_or_else(|| json!(48))
+    };
+    let open_form = move |mut v: Value| {
+        if v["claim_hours"].is_null() {
+            v["claim_hours"] = claim_default();
+        }
         host.set(s(&v["host"]));
         sponsor.set(s(&v["sponsor"]));
+        if let Some(secs) = v["duration_secs"].as_i64() {
+            length.set(fmt_duration(secs));
+        }
         d.set(v.clone());
         draft.set(Some(v));
     };
@@ -145,12 +176,82 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             .unwrap_or_else(|| json!({}));
         open_form(json!({"id": null, "channel": "", "prize": "", "winners": 1, "req": defaults, "claim_hours": claim, "extras": extras, "code": ""}));
     };
+    let new_plan = move || {
+        start_new();
+        d.update(|v| *v = plans::as_plan(v.take()));
+        draft.set(Some(d.get_untracked()));
+    };
+    // A saved template or plan, or a giveaway, as a new Start form: same settings, no entry code.
+    let copy_into_form = move |mut v: Value| {
+        v["id"] = Value::Null;
+        v["code"] = json!("");
+        v["kind"] = Value::Null;
+        if v["channel"].is_null() {
+            v["channel"] = json!("");
+        }
+        open_form(v);
+    };
+    let duplicate = move |x: Value| {
+        let mut v = x.clone();
+        let secs = x["ends_at"].as_i64().unwrap_or(0) - x["created"].as_i64().unwrap_or(0);
+        v["duration_secs"] = json!((secs / 60 * 60).max(60));
+        copy_into_form(v);
+    };
+    let edit_saved = move |mut v: Value| {
+        v["kind"] = json!(if v["spec"].is_null() {
+            "template"
+        } else {
+            "plan"
+        });
+        if v["channel"].is_null() {
+            v["channel"] = json!("");
+        }
+        open_form(v);
+    };
+    // The settings of a template go into the open form; the name, channel and schedule stay.
+    let apply_template = move |t: Value| {
+        host.set(s(&t["host"]));
+        sponsor.set(s(&t["sponsor"]));
+        length.set(fmt_duration(t["duration_secs"].as_i64().unwrap_or(86_400)));
+        d.update(|v| {
+            for k in ["prize", "winners", "claim_hours", "req", "extras"] {
+                v[k] = t[k].clone();
+            }
+            if v["claim_hours"].is_null() {
+                v["claim_hours"] = claim_default();
+            }
+        });
+    };
+    let delete_saved = move |v: Value| {
+        let (id, name) = (v["id"].as_i64().unwrap_or(0), s(&v["name"]));
+        ask(
+            Ask::new(format!("Delete “{name}”?"))
+                .text("Giveaways it already started keep running.")
+                .yes("Delete")
+                .danger(),
+            move |_| {
+                send(
+                    format!("{}/{id}/delete", plans_url()),
+                    json!({}),
+                    "Deleted.",
+                )
+            },
+        )
+    };
     let save_form = move || {
         let mut v = d.get_untracked();
         let new = v["id"].is_null();
         v["host"] = json!(host.get_untracked());
         v["sponsor"] = json!(sponsor.get_untracked());
-        if new {
+        let saved = matches!(v["kind"].as_str(), Some("plan" | "template"));
+        if saved {
+            v["duration_secs"] = json!(parse_duration(&length.get_untracked()).unwrap_or(0));
+            if v["kind"] == "template" {
+                v["channel"] = Value::Null;
+                v["spec"] = Value::Null;
+            }
+            send(plans_url(), v, "Saved.");
+        } else if new {
             v["duration_secs"] = json!(parse_duration(&length.get_untracked()).unwrap_or(0));
             act(
                 String::new(),
@@ -165,25 +266,66 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             );
         }
     };
+    // The open Start form as a template (a name is asked first).
+    let save_template = move || {
+        let mut v = d.get_untracked();
+        v["host"] = json!(host.get_untracked());
+        v["sponsor"] = json!(sponsor.get_untracked());
+        let Some(secs) = parse_duration(&length.get_untracked()) else {
+            return msg.err("Type how long it runs first, for example 2d or 1h 30m.");
+        };
+        v["duration_secs"] = json!(secs);
+        v["id"] = Value::Null;
+        v["channel"] = Value::Null;
+        v["spec"] = Value::Null;
+        ask(
+            Ask::new("Save as a template")
+                .text("Name of the template:")
+                .input("")
+                .yes("Save"),
+            move |name| {
+                v["name"] = json!(name.trim());
+                send(plans_url(), v, "Template saved.");
+            },
+        )
+    };
     let chan = move |id: &str| crate::form::name_of(&dc.get(), "channels", id);
     let form_view = move || {
         draft.get().map(|start| {
+            let kind = s(&start["kind"]);
+            let saved = kind == "plan" || kind == "template";
             let new = start["id"].is_null();
+            // The fields of a whole giveaway: a new one, or a template or plan.
+            let full = new || saved;
+            let template = kind == "template";
+            let title = match (kind.as_str(), new) {
+                ("plan", true) => "New plan",
+                ("plan", false) => "Change plan",
+                ("template", _) => "Change template",
+                (_, true) => "Start a giveaway",
+                _ => "Change giveaway",
+            };
+            let templates = data
+                .with_untracked(|v| v.as_ref().map(|v| v["plans"]["templates"].as_array().cloned().unwrap_or_default()))
+                .unwrap_or_default();
             let close = move || draft.set(None);
             let limits = data.with_untracked(|v| v.as_ref().map(|v| v["limits"].clone())).unwrap_or_default();
             let max_w = limits["winners"].as_i64().unwrap_or(100);
             let why = move || -> Option<&'static str> {
                 let v = d.get();
-                if new && s(&v["channel"]).is_empty() {
+                if saved && s(&v["name"]).trim().is_empty() {
+                    return Some("Type a name.");
+                }
+                if full && !template && s(&v["channel"]).is_empty() {
                     return Some("Pick a channel.");
                 }
                 if s(&v["prize"]).trim().is_empty() {
                     return Some("Type the prize.");
                 }
-                if new && parse_duration(&length.get()).is_none() {
+                if full && parse_duration(&length.get()).is_none() {
                     return Some("Type how long it runs, for example 2d or 1h 30m.");
                 }
-                if new && v["extras"]["reaction"] == true && !s(&v["code"]).trim().is_empty() {
+                if !saved && v["extras"]["reaction"] == true && !s(&v["code"]).trim().is_empty() {
                     return Some("An entry code needs the Enter button: turn reaction entry off.");
                 }
                 None
@@ -201,9 +343,18 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             let r = NodeRef::<leptos::html::Div>::new();
             focus_on_open(r);
             view! {
-                <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label=if new { "Start a giveaway" } else { "Change giveaway" } on:keydown=move |e| dialog_keys(&e, close)><div class="card">
-                    <h2>{if new { "Start a giveaway" } else { "Change giveaway" }}</h2>
-                    {new.then(|| view! {
+                <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label=title on:keydown=move |e| dialog_keys(&e, close)><div class="card">
+                    <h2>{title}</h2>
+                    {(new && !templates.is_empty()).then(|| view! {
+                        <div class="row"><label>"Template"</label><div class="chipset" role="group" aria-label="templates">
+                            {templates.iter().cloned().map(|t| view! { <button class="chip" on:click=move |_| apply_template(t.clone())>{s(&t["name"])}</button> }).collect_view()}
+                        </div></div>
+                    })}
+                    {saved.then(|| view! {
+                        <div class="row"><label for="gw-name">"Name"</label>
+                            <input id="gw-name" maxlength=limits["name"].as_i64().unwrap_or(60).to_string() prop:value=move || d.with(|v| s(&v["name"])) on:input=move |e| { let t = event_target_value(&e); d.update(|v| v["name"] = json!(t)) } /></div>
+                    })}
+                    {(full && !template).then(|| view! {
                         <div class="row"><label>"Channel"</label>
                             <ListPick items=Signal::derive(move || items(&dc.get(), "channels")) get=Signal::derive(move || d.with(|v| s(&v["channel"]))) set=Callback::new(move |x: String| d.update(|v| v["channel"] = json!(x))) none="choose a channel" label="channel" /></div>
                     })}
@@ -211,7 +362,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                         <input id="gw-prize" maxlength=limits["prize"].as_i64().unwrap_or(200).to_string() prop:value=move || d.with(|v| s(&v["prize"])) on:input=move |e| { let t = event_target_value(&e); d.update(|v| v["prize"] = json!(t)) } placeholder="Nitro for a month" /></div>
                     <div class="row"><label for="gw-winners">"Winners"</label>
                         <input id="gw-winners" type="number" min="1" max=max_w.to_string() prop:value=move || d.with(|v| v["winners"].to_string()) on:change=num("winners") /></div>
-                    {new.then(|| view! {
+                    {full.then(|| view! {
                         <div class="row"><label for="gw-length">"Runs for"</label>
                             <input id="gw-length" prop:value=move || length.get() on:input=move |e| length.set(event_target_value(&e)) placeholder="2d, 12h or 1h 30m" /></div>
                         <div class="row"><label for="gw-claim">"Claim time (hours)"</label>
@@ -244,17 +395,21 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                         <div class="row"><label for="gw-threadhours">"Close the thread after (hours)"</label>
                             <input id="gw-threadhours" type="number" min="1" max="720" prop:value=move || d.with(|v| v["extras"]["thread_hours"].as_i64().unwrap_or(72).to_string()) on:change=num("thread_hours") /></div>
                         <p class="muted small hint">"Winners get the role at the draw and lose it after this time. The winner thread is private: the winners, the host and the sponsor. Brim closes it after this time."</p>
-                        {new.then(|| view! {
+                        {full.then(|| view! {
                             <div class="row"><label for="gw-react">"Enter by reaction"</label>
                                 <input id="gw-react" type="checkbox" class="sw" role="switch" prop:checked=move || d.with(|v| v["extras"]["reaction"] == true) on:change=move |e| { let c = event_target_checked(&e); d.update(|v| v["extras"]["reaction"] = json!(c)) } /></div>
+                        })}
+                        {(!saved && new).then(|| view! {
                             <div class="row"><label for="gw-code">"Entry code"</label>
                                 <input id="gw-code" maxlength="50" prop:value=move || d.with(|v| s(&v["code"])) on:input=move |e| { let t = event_target_value(&e); d.update(|v| v["code"] = json!(t)) } placeholder="optional" /></div>
-                            <p class="muted small hint">"Reaction: members react with the button emoji instead of the button, and get no private answer. Entry code: members press Enter and type it; 3 wrong codes give a 10 minute wait. Brim keeps only a hash, so you cannot see the code again. Both stay as set once the giveaway starts."</p>
                         })}
+                        <p class="muted small hint">"Reaction: members react with the button emoji instead of the button, and get no private answer. Entry code: members press Enter and type it; 3 wrong codes give a 10 minute wait. Brim keeps only a hash, so you cannot see the code again; a template, plan or duplicate never keeps it. Both stay as set once the giveaway starts."</p>
                     </details>
+                    {(kind == "plan").then(|| view! { <plans::When d url=plans_url() /> })}
                     <div class="acts">
                         <button class="ghost" on:click=move |_| close()>"Cancel"</button>
-                        <button disabled=move || why().is_some() || busy.get() title=move || why().unwrap_or("") on:click=move |_| save_form()>{busy_label(move || busy.get(), if new { "Start" } else { "Save" })}</button>
+                        {(new && !saved).then(|| view! { <button class="ghost" disabled=move || busy.get() on:click=move |_| save_template()>"Save as template"</button> })}
+                        <button disabled=move || why().is_some() || busy.get() title=move || why().unwrap_or("") on:click=move |_| save_form()>{busy_label(move || busy.get(), if new && !saved { "Start" } else { "Save" })}</button>
                     </div>
                 </div></div>
             }
@@ -353,6 +508,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
         };
         let (p1, p2, p3) = (prize.clone(), prize.clone(), prize.clone());
         let x2 = x.clone();
+        let x3 = x.clone();
         view! {
             <li class="card">
                 <div class="row"><b>{format!("#{id} {prize}")}</b><span class="sp"></span>
@@ -377,6 +533,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                 })}
                 <div class="row">
                     <span class="sp"></span>
+                    <button class="ghost" disabled=move || busy.get() on:click=move |_| duplicate(x3.clone())>"Duplicate"</button>
                     <button class="ghost" on:click=move |_| open_people(id, 0)>"Entrants"</button>
                     {running.then(|| view! {
                         <button class="ghost" disabled=move || busy.get() on:click=move |_| { let mut v = x2.clone(); v["req"] = x2["req"].clone(); open_form(v) }>"Edit"</button>
@@ -422,6 +579,8 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             {if run.is_empty() { view! { <p class="muted">"No giveaway is running."</p> }.into_any() } else { view! { <ul class="stack">{run.into_iter().map(row_view).collect_view()}</ul> }.into_any() }}
             <h2>"Ended"</h2>
             {if done.is_empty() { view! { <p class="muted">"No ended giveaways yet."</p> }.into_any() } else { view! { <ul class="stack">{done.into_iter().map(row_view).collect_view()}</ul> }.into_any() }}
+            <plans::Lists data chan busy on_new=Callback::new(move |_| new_plan()) on_use=Callback::new(copy_into_form)
+                on_edit=Callback::new(edit_saved) on_delete=Callback::new(delete_saved) />
         }.into_any()
     };
     let gl = guild.clone();
@@ -475,7 +634,15 @@ fn Extra(dc: RwSignal<Value>, d: RwSignal<Value>, max: i64) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_duration;
+    use super::{fmt_duration, parse_duration};
+
+    #[test]
+    fn a_length_written_back_reads_the_same() {
+        for secs in [60, 3600, 5400, 86_400, 183_900, 7_776_000] {
+            assert_eq!(parse_duration(&fmt_duration(secs)), Some(secs));
+        }
+        assert_eq!(fmt_duration(0), "1m");
+    }
 
     #[test]
     fn durations_read_like_the_command() {

@@ -43,7 +43,7 @@ pub fn first_weekday(y: i32, m: u32) -> u32 {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn browser_zone() -> String {
+pub(crate) fn browser_zone() -> String {
     let f = js_sys::Intl::DateTimeFormat::new(&js_sys::Array::new(), &js_sys::Object::new());
     js_sys::Reflect::get(&f.resolved_options(), &"timeZone".into())
         .ok()
@@ -51,13 +51,13 @@ fn browser_zone() -> String {
         .unwrap_or_else(|| "UTC".into())
 }
 #[cfg(not(target_arch = "wasm32"))]
-fn browser_zone() -> String {
+pub(crate) fn browser_zone() -> String {
     "UTC".into()
 }
 
 /// The browser's list of time zone names (IANA).
 #[cfg(target_arch = "wasm32")]
-fn zones() -> Vec<String> {
+pub(crate) fn zones() -> Vec<String> {
     let intl = js_sys::Reflect::get(&js_sys::global(), &"Intl".into()).ok();
     let f = intl
         .as_ref()
@@ -73,7 +73,7 @@ fn zones() -> Vec<String> {
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
-fn zones() -> Vec<String> {
+pub(crate) fn zones() -> Vec<String> {
     vec![]
 }
 #[cfg(target_arch = "wasm32")]
@@ -114,7 +114,7 @@ fn this_month() -> (i32, u32) {
     (2026, 11)
 }
 
-fn new_line(kind: &str) -> Value {
+pub(crate) fn new_line(kind: &str) -> Value {
     match kind {
         "once" => json!({"kind": "once", "date": "", "time": "09:00"}),
         "every" => json!({"kind": "every", "minutes": 60}),
@@ -187,7 +187,8 @@ fn month_calendar(rule: RwSignal<Value>, i: usize, locked: Signal<bool>) -> impl
 }
 
 /// One "when" line of the rule being edited.
-fn line_view(rule: RwSignal<Value>, i: usize, next: RwSignal<Value>, locked: Signal<bool>) -> impl IntoView {
+/// `messages`: offers "Every N messages" (a message rule counts them; a giveaway plan cannot).
+pub(crate) fn line_view(rule: RwSignal<Value>, i: usize, next: RwSignal<Value>, locked: Signal<bool>, messages: bool) -> impl IntoView {
     let get = move |k: &'static str| rule.with(|r| r["spec"]["lines"][i][k].clone());
     let set = move |k: &'static str, v: Value| rule.update(|r| r["spec"]["lines"][i][k] = v);
     let kind = move || get("kind").as_str().unwrap_or("daily").to_string();
@@ -200,7 +201,7 @@ fn line_view(rule: RwSignal<Value>, i: usize, next: RwSignal<Value>, locked: Sig
         <div class="rline">
             <div class="row">
                 <select aria-label="kind of time" disabled=locked on:change=move |e| { let k = event_target_value(&e); rule.update(|r| r["spec"]["lines"][i] = new_line(&k)) }>
-                    {KINDS.map(|(k, t)| view! { <option value=k selected=move || kind() == k>{t}</option> }).collect_view()}
+                    {KINDS.into_iter().filter(|(k, _)| messages || *k != "messages").map(|(k, t)| view! { <option value=k selected=move || kind() == k>{t}</option> }).collect_view()}
                 </select>
                 {move || match kind().as_str() {
                     "once" => view! {
@@ -365,7 +366,7 @@ pub fn automate_tab(
                     <Tip text="Times are in this zone, so 09:00 stays 09:00 when summer time starts or ends. It starts as your browser's zone." icon="info" />
                 </div>
                 <div class="rlines">
-                    {move || (0..r.with(|v| v["spec"]["lines"].as_array().map_or(0, Vec::len))).map(|i| line_view(r, i, next, locked)).collect_view()}
+                    {move || (0..r.with(|v| v["spec"]["lines"].as_array().map_or(0, Vec::len))).map(|i| line_view(r, i, next, locked, true)).collect_view()}
                 </div>
                 <div class="row">
                     <AddButton label="Add time" attr:disabled=move || r.with(|v| v["spec"]["lines"].as_array().map_or(0, Vec::len) >= 10)

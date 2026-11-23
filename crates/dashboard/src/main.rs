@@ -12,6 +12,7 @@ mod embeds;
 mod feedfollow;
 mod feedhooks;
 mod feeds;
+mod giveaway_plans;
 mod giveaways;
 mod layout;
 mod lockdown;
@@ -289,6 +290,7 @@ pub fn router(st: AppState, dist: &str) -> Router {
         .merge(msgsticky::routes())
         .merge(feeds::routes())
         .merge(giveaways::routes())
+        .merge(giveaway_plans::routes())
         .merge(feedhooks::routes())
         .merge(msgtags::routes())
         .merge(botmsgs::routes())

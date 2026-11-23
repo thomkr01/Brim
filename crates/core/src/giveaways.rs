@@ -410,10 +410,25 @@ const COLS: &str =
 /// Saves `n` as a running giveaway and queues its end, or says which limit it breaks. The count of
 /// running giveaways and the insert are one transaction under a per-server lock.
 pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<Giveaway, String>> {
+    let mut tx = pool.begin().await?;
+    let r = create_in(&mut tx, n, max_running, None).await?;
+    if r.is_ok() {
+        tx.commit().await?;
+    }
+    Ok(r)
+}
+
+/// [`create`] inside the caller's transaction (a plan claims its run in the same one). `plan`: the
+/// plan that starts it. The caller commits only when the result is `Ok`.
+pub async fn create_in(
+    tx: &mut sqlx::PgConnection,
+    n: &New,
+    max_running: i64,
+    plan: Option<i64>,
+) -> Result<Result<Giveaway, String>> {
     if let Some(p) = new_problem(n) {
         return Ok(Err(p));
     }
-    let mut tx = pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('giveaways:' || $1::text, 0))")
         .bind(n.guild_id)
         .execute(&mut *tx)
@@ -432,8 +447,8 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     }
     let g: Giveaway = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO giveaways (guild_id, channel_id, prize, host_id, sponsor_id, created_by,
-           winners, ends_at, req, button_label, button_emoji, claim_hours, needs_repost, extras)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12, $13, $14)
+           winners, ends_at, req, button_label, button_emoji, claim_hours, needs_repost, extras, plan_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + make_interval(secs => $8), $9, $10, $11, $12, $13, $14, $15)
          RETURNING {COLS}"
     )))
     .bind(n.guild_id)
@@ -450,6 +465,7 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
     .bind(n.claim_hours as i32)
     .bind(n.post_job)
     .bind(sqlx::types::Json(&n.extras))
+    .bind(plan)
     .fetch_one(&mut *tx)
     .await?;
     let mut g = g;
@@ -480,7 +496,6 @@ pub async fn create(pool: &PgPool, n: &New, max_running: i64) -> Result<Result<G
         g.ends_at.timestamp(),
     )
     .await?;
-    tx.commit().await?;
     Ok(Ok(g))
 }
 
@@ -1071,6 +1086,34 @@ pub async fn cancel(pool: &PgPool, guild: i64, id: i64) -> Result<bool> {
     Ok(n == 1)
 }
 
+/// True when a winner role removal of ANOTHER giveaway waits for this member and role.
+/// `future_only`: only one that is not due yet. A member keeps a winner role until the latest of
+/// their role end times, so a removal that is due skips while a later one waits, and a new win
+/// while one waits adds its own. A removal of the same giveaway never counts (a replaced winner
+/// loses the role at once).
+pub async fn role_off_waits(
+    pool: &PgPool,
+    guild: i64,
+    giveaway: i64,
+    user: i64,
+    role: i64,
+    future_only: bool,
+) -> Result<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2
+           AND payload->>'user' = $3::text AND payload->>'role' = $4::text
+           AND payload->>'id' <> $5::text AND (NOT $6 OR run_at > now()))",
+    )
+    .bind(guild)
+    .bind(ROLE_OFF_JOB)
+    .bind(user)
+    .bind(role)
+    .bind(giveaway)
+    .bind(future_only)
+    .fetch_one(pool)
+    .await?)
+}
+
 async fn drop_jobs(tx: &mut sqlx::PgConnection, guild: i64, id: i64) -> Result<()> {
     sqlx::query(
         "DELETE FROM scheduled_jobs WHERE guild_id = $1 AND kind = $2 AND payload->>'id' = $3",
@@ -1359,37 +1402,44 @@ pub async fn queue_post(
     Ok(n == 1)
 }
 
-/// A role that a restore made again: the rules and the winner role of the running giveaways name
-/// the new id.
+/// A role that a restore made again: the rules and the winner role of the running giveaways and
+/// of the templates and plans name the new id.
 pub async fn relink_roles(pool: &PgPool, guild: i64, old: i64, new: i64) -> Result<u64> {
-    sqlx::query(
-        "UPDATE giveaways SET extras = jsonb_set(extras, '{winner_role}', to_jsonb($3::text))
-         WHERE guild_id = $1 AND status = 'running' AND extras->>'winner_role' = $2::text",
-    )
-    .bind(guild)
-    .bind(old.to_string())
-    .bind(new.to_string())
-    .execute(pool)
-    .await?;
-    Ok(sqlx::query(
-        "UPDATE giveaways SET req = req
-           || jsonb_build_object('required', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
-                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'required') x), '[]'))
-           || jsonb_build_object('blocked', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
-                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'blocked') x), '[]'))
-           || jsonb_build_object('bypass', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
-                THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'bypass') x), '[]'))
-           || jsonb_build_object('extra', COALESCE((SELECT jsonb_agg(CASE WHEN x->>'role' = $2::text
-                THEN jsonb_set(x, '{role}', to_jsonb($3::text)) ELSE x END)
-                FROM jsonb_array_elements(req->'extra') x), '[]'))
-         WHERE guild_id = $1 AND status = 'running' AND strpos(req::text, '\"' || $2::text || '\"') > 0",
-    )
-    .bind(guild)
-    .bind(old.to_string())
-    .bind(new.to_string())
-    .execute(pool)
-    .await?
-    .rows_affected())
+    let mut n = 0;
+    for (table, only) in [
+        ("giveaways", "AND status = 'running'"),
+        ("giveaway_plans", ""),
+    ] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET extras = jsonb_set(extras, '{{winner_role}}', to_jsonb($3::text))
+             WHERE guild_id = $1 {only} AND extras->>'winner_role' = $2::text"
+        )))
+        .bind(guild)
+        .bind(old.to_string())
+        .bind(new.to_string())
+        .execute(pool)
+        .await?;
+        n += sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET req = req
+               || jsonb_build_object('required', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                    THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'required') x), '[]'))
+               || jsonb_build_object('blocked', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                    THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'blocked') x), '[]'))
+               || jsonb_build_object('bypass', COALESCE((SELECT jsonb_agg(CASE WHEN x = to_jsonb($2::text)
+                    THEN to_jsonb($3::text) ELSE x END) FROM jsonb_array_elements(req->'bypass') x), '[]'))
+               || jsonb_build_object('extra', COALESCE((SELECT jsonb_agg(CASE WHEN x->>'role' = $2::text
+                    THEN jsonb_set(x, '{{role}}', to_jsonb($3::text)) ELSE x END)
+                    FROM jsonb_array_elements(req->'extra') x), '[]'))
+             WHERE guild_id = $1 {only} AND strpos(req::text, '\"' || $2::text || '\"') > 0"
+        )))
+        .bind(guild)
+        .bind(old.to_string())
+        .bind(new.to_string())
+        .execute(pool)
+        .await?
+        .rows_affected();
+    }
+    Ok(n)
 }
 
 /// The entry count of each of `ids` (only those with entries).

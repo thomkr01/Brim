@@ -160,6 +160,9 @@ pub const ANONYMIZE: &[&str] = &[
     "UPDATE tickets SET user_id = 0 WHERE user_id = $1 AND closed_at IS NOT NULL",
     // A "Not NSFW" row stays as the server's allow for that image.
     "UPDATE nsfw_scans SET user_id = NULL WHERE user_id = $1",
+    // A repeating plan would copy the person into every new giveaway.
+    "UPDATE giveaway_plans SET host_id = NULL WHERE host_id = $1",
+    "UPDATE giveaway_plans SET sponsor_id = NULL WHERE sponsor_id = $1",
 ];
 
 /// Older config versions name the person (a removed staff member, a blocked ticket user): their id

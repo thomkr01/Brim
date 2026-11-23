@@ -14,6 +14,7 @@ use axum::{
     Json, Router,
 };
 use brim_core::{
+    giveaway_plans as plans,
     giveaways::{self as store, EndNow, Extras, Giveaway, Req},
     jobs,
     sections::GiveawaysCfg,
@@ -35,22 +36,22 @@ pub fn routes() -> Router<AppState> {
         .route(&format!("{g}/{{id}}/entries"), get(entries))
 }
 
-fn bad(s: impl Into<String>) -> ApiError {
+pub(crate) fn bad(s: impl Into<String>) -> ApiError {
     ApiError::BadRequest(s.into())
 }
 
-async fn staff(st: &AppState, s: &Sess, guild: i64) -> Result<(), ApiError> {
+pub(crate) async fn staff(st: &AppState, s: &Sess, guild: i64) -> Result<(), ApiError> {
     api::staff(st, s, guild, &["giveaways"]).await.map(drop)
 }
 
 /// A change: [`staff`], and not while panic mode locks mod commands (as the `giveaway` command).
-async fn writer(st: &AppState, s: &Sess, guild: i64) -> Result<(), ApiError> {
+pub(crate) async fn writer(st: &AppState, s: &Sess, guild: i64) -> Result<(), ApiError> {
     staff(st, s, guild).await?;
     crate::appeals::mod_lock_guard(st, s, guild, &mut *st.db.acquire().await?).await
 }
 
 /// A host or sponsor: a member of this server.
-async fn member(
+pub(crate) async fn member(
     st: &AppState,
     guild: i64,
     id: Option<i64>,
@@ -96,6 +97,7 @@ fn row_with(g: &Giveaway, entries: i64, claims: &[store::Claim]) -> Value {
         "needs_repost": g.needs_repost, "issue": g.issue, "entries": entries,
         "claim_hours": g.claim_hours, "claims": claims,
         "extras": g.extras.0, "has_code": g.has_code, "thread": id(g.thread_id),
+        "created": g.created_at.timestamp(),
     })
 }
 
@@ -118,6 +120,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     };
     Ok(Json(json!({
         "giveaways": all.iter().map(|g| row_with(g, n(g.id), &claims)).collect::<Vec<_>>(),
+        "plans": crate::giveaway_plans::view(&st, guild).await?,
         "defaults": defaults,
         "extras": Extras::default(),
         "on": settings(&st, guild).await?.is_some(),
@@ -125,12 +128,13 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
             "winners": store::WINNERS.1, "max_secs": store::DURATION.1, "min_secs": store::DURATION.0,
             "prize": store::MAX_PRIZE, "roles": store::MAX_ROLES, "extra": store::EXTRA.1,
             "claim_hours": store::CLAIM_HOURS.1, "claim_default": d.claim_hours,
+            "templates": plans::MAX_TEMPLATES, "plans": plans::MAX_PLANS, "name": plans::MAX_NAME,
         },
     })))
 }
 
 /// The server's giveaway settings; `None` while the part or the Messages module is off.
-async fn settings(st: &AppState, guild: i64) -> Result<Option<GiveawaysCfg>, ApiError> {
+pub(crate) async fn settings(st: &AppState, guild: i64) -> Result<Option<GiveawaysCfg>, ApiError> {
     let (_, c) = crate::store::current(&st.db, guild).await?;
     if c["modules"]["messages"] == false {
         return Ok(None);
@@ -139,7 +143,7 @@ async fn settings(st: &AppState, guild: i64) -> Result<Option<GiveawaysCfg>, Api
     Ok(cfg.enabled.then_some(cfg))
 }
 
-fn id_of(s: &Option<String>) -> Result<Option<i64>, ApiError> {
+pub(crate) fn id_of(s: &Option<String>) -> Result<Option<i64>, ApiError> {
     s.as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -173,7 +177,7 @@ struct Start {
 
 /// The winner role must be one Brim can give to anyone: below Brim, not managed, not @everyone,
 /// with no dangerous Discord permissions. The bot checks again when it gives it.
-async fn check_role(st: &AppState, guild: i64, x: &Extras) -> Result<(), ApiError> {
+pub(crate) async fn check_role(st: &AppState, guild: i64, x: &Extras) -> Result<(), ApiError> {
     let Some(role) = x.winner_role else {
         return Ok(());
     };

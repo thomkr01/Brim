@@ -32,6 +32,7 @@ pub fn steps(page: &str) -> Option<&'static [&'static str]> {
             "Turn giveaways on, set what a new giveaway starts with, then click Start a giveaway. Brim posts it with an Enter button.",
             "Members press Enter and get a private answer. Brim checks the entry rules at the press and again for each winner at the draw. Quarantined members, Raider List entries and members the Join Gate caught never enter or win.",
             "At the end time Brim draws the winners, posts them and sends each one a DM. Reroll draws all winners again, Redraw replaces one; a past winner never wins the same giveaway again.",
+            "Duplicate copies a giveaway into the Start form, and Save as template keeps its settings under a name. A plan starts a giveaway for you on a date or on repeat, and can wait until the last one has ended. Neither keeps an entry code.",
             "Change the look of each message in the Message Builder with the buttons under Messages. Members whose permit has the Manage Giveaways permit perm, and Trusted Admins and up, run giveaways here and with the giveaway command.",
         ],
         "feeds" => &[

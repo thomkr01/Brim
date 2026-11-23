@@ -36,7 +36,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// Each line with its next three runs (unix seconds), for the list under it.
-fn lines_view(s: &Spec, now: DateTime<Utc>) -> Vec<Value> {
+pub(crate) fn lines_view(s: &Spec, now: DateTime<Utc>) -> Vec<Value> {
     s.lines
         .iter()
         .map(|l| {
@@ -440,6 +440,7 @@ pub(crate) async fn runner(st: AppState) {
             crate::msgtrig::delete_due(&st).await,
             crate::msgsticky::repost_one(&st).await,
             crate::msgtags::run_one(&st).await,
+            crate::giveaway_plans::run_one(&st).await,
         ] {
             match r {
                 // More may be due: go on at once.
