@@ -1522,6 +1522,10 @@ pub fn schema() -> Vec<Value> {
                     "How long a winner has to claim the prize.",
                 ),
                 hp(
+                    ti(fg("New giveaways", "sponsor_picture", "bool"), "Show the sponsor's picture"),
+                    "Puts the sponsor's profile picture in the top right of the giveaway message. It shows only when the giveaway has a sponsor.",
+                ),
+                hp(
                     ti(dv(banner("New giveaways", "banner"), "a"), "Banner"),
                     "The picture at the bottom of the giveaway message. To use your own picture, change the image in the Message Builder.",
                 ),

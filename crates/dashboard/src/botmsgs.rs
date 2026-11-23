@@ -115,6 +115,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                     let example = if d.key == "ticket.panel" && *v == "text" && !panel_text.is_empty() { panel_text.as_str() } else { example };
                     let banner = banner_example(&cfg, &site, &d.key);
                     let example = if *v == "banner" { banner.as_str() } else { example };
+                    let example = if *v == "sponsor_picture" && cfg["giveaways"]["sponsor_picture"] != true { "" } else { example };
                     json!({"name": v, "label": label, "example": example})
                 })
                 .collect();
@@ -224,6 +225,12 @@ async fn shown(
             &std::env::var("DASHBOARD_URL").unwrap_or_default(),
             &key,
         );
+    }
+    // The sponsor's picture is off until the server turns it on.
+    if let Some(b) = ex.iter_mut().find(|(k, _)| *k == "sponsor_picture") {
+        if cfg["giveaways"]["sponsor_picture"] != true {
+            b.1.clear();
+        }
     }
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = botmsg::render(&key, stored.as_ref(), &vars);

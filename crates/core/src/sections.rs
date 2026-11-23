@@ -1446,6 +1446,9 @@ pub struct GiveawaysCfg {
     pub block_raid_joiners: bool,
     /// Hours a winner has to claim the prize.
     pub claim_hours: u32,
+    /// The sponsor's profile picture in the top right of the default giveaway message. Off until
+    /// the server turns it on (owner decision 2026-11-23).
+    pub sponsor_picture: bool,
     /// The picture at the bottom of the default giveaway message: `a`, `b`, `c` or `none`.
     pub banner: String,
     /// Running giveaways at once, up to `giveaways::MAX_RUNNING`.
@@ -1464,6 +1467,7 @@ impl Default for GiveawaysCfg {
             min_member_hours: 0,
             block_raid_joiners: false,
             claim_hours: 48,
+            sponsor_picture: false,
             banner: "a".into(),
             max_running: crate::giveaways::MAX_RUNNING as u32,
         }

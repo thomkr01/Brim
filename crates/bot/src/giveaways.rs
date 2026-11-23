@@ -349,13 +349,15 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
     let host = g.host_id.map(|h| format!("<@{h}>")).unwrap_or_default();
     let sponsor = g.sponsor_id.map(|s| format!("<@{s}>")).unwrap_or_default();
     let entries = entries.to_string();
-    let picture = sponsor_picture(app, g.sponsor_id).await;
+    let cfg = app.cfg(g.guild_id as u64).await.ok();
+    // The sponsor's picture only when the server turned it on (off by default).
+    let picture = match cfg.as_ref().is_some_and(|c| c.giveaways.sponsor_picture) {
+        true => sponsor_picture(app, g.sponsor_id).await,
+        false => String::new(),
+    };
     let choice = match g.status.as_str() {
-        "running" | "ended" => app
-            .cfg(g.guild_id as u64)
-            .await
-            .map(|c| c.giveaways.banner.clone()),
-        _ => Ok(String::new()),
+        "running" | "ended" => cfg.map(|c| c.giveaways.banner.clone()),
+        _ => None,
     }
     .unwrap_or_default();
     match g.status.as_str() {
