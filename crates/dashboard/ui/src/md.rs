@@ -47,9 +47,27 @@ pub fn inline(s: &str) -> String {
     let s = s.replace('\u{1}', "");
     // code spans and links are stashed first so the emphasis passes leave their insides (and URLs) alone
     let (mut out, mut kept, mut rest) = (String::new(), Vec::new(), s.as_str());
-    while let Some(i) = rest.find(['`', '[', '&']) {
+    while let Some(i) = rest.find(['`', '[', '&', '@']) {
         let t = &rest[i..];
-        let hit = if t.starts_with('&') {
+        let hit = if let Some(typed) = t.strip_prefix('@') {
+            // A typed @name (an example such as @alex) draws as the mention it stands for; an email's @ does not.
+            let word = |c: char| c.is_alphanumeric() || c == '_';
+            let before = rest[..i]
+                .chars()
+                .next_back()
+                .or_else(|| out.chars().next_back());
+            let name = typed
+                .split(|c: char| !(word(c) || c == '.' || c == '-'))
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(['.', '-']);
+            (!name.is_empty() && !before.is_some_and(word)).then(|| {
+                (
+                    name.len() + 1,
+                    format!("<span class=\"mention\">@{name}</span>"),
+                )
+            })
+        } else if t.starts_with('&') {
             t.strip_prefix("&lt;").and_then(|r| {
                 r.find("&gt;")
                     .filter(|&e| e < 80)
@@ -174,7 +192,7 @@ fn token(t: &str) -> Option<String> {
         return pill(format!(
             "@{}",
             crate::discord::name("roles", &r)
-                .unwrap_or("unknown-role".into())
+                .unwrap_or(r.clone())
                 .trim_start_matches('@')
         ));
     }
@@ -182,14 +200,14 @@ fn token(t: &str) -> Option<String> {
         let r = id(r.trim_start_matches('!'))?;
         return pill(format!(
             "@{}",
-            crate::discord::name("users", &r).unwrap_or("unknown-user".into())
+            crate::discord::name("users", &r).unwrap_or(r.clone())
         ));
     }
     if let Some(r) = t.strip_prefix('#') {
         let r = id(r)?;
         return pill(format!(
             "#{}",
-            crate::discord::name("channels", &r).unwrap_or("unknown".into())
+            crate::discord::name("channels", &r).unwrap_or(r.clone())
         ));
     }
     if let Some(r) = t.strip_prefix("t:") {
@@ -225,7 +243,11 @@ mod tests {
         assert!(!h.contains('\u{1}'));
         assert!(!h.contains("alt=\":<a"), "{h}");
         // The emoji's alt attribute holds no quote, so nothing after it becomes an attribute.
-        let alt = h.split("alt=\"").nth(1).and_then(|r| r.split('"').next()).unwrap_or("");
+        let alt = h
+            .split("alt=\"")
+            .nth(1)
+            .and_then(|r| r.split('"').next())
+            .unwrap_or("");
         assert!(!alt.contains('<'), "{h}");
     }
 
@@ -250,6 +272,21 @@ mod tests {
         assert_eq!(md("## H"), "<div class=\"h2\">H</div>");
         // mentions and emojis keep their underscores away from the italic pass
         assert_eq!(inline(&esc("<@1001> <#2001> <@&9> <:right_sort:42> _a_ <x> a & b")),
-            "<span class=\"mention\">@unknown-user</span> <span class=\"mention\">#unknown</span> <span class=\"mention\">@unknown-role</span> <img class=\"emo\" alt=\":right_sort:\" src=\"https://cdn.discordapp.com/emojis/42.webp\"> <i>a</i> &lt;x&gt; a &amp; b");
+            "<span class=\"mention\">@1001</span> <span class=\"mention\">#2001</span> <span class=\"mention\">@9</span> <img class=\"emo\" alt=\":right_sort:\" src=\"https://cdn.discordapp.com/emojis/42.webp\"> <i>a</i> &lt;x&gt; a &amp; b");
+    }
+
+    #[test]
+    fn a_typed_at_name_is_a_mention_but_an_email_is_not() {
+        let m = |n: &str| format!("<span class=\"mention\">@{n}</span>");
+        assert_eq!(
+            inline("Needs @Members."),
+            format!("Needs {}.", m("Members"))
+        );
+        assert_eq!(
+            inline("@alex, @sam"),
+            format!("{}, {}", m("alex"), m("sam"))
+        );
+        assert_eq!(inline("a@b.com"), "a@b.com");
+        assert_eq!(inline("@"), "@");
     }
 }
