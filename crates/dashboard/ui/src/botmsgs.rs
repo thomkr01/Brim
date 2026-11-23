@@ -181,7 +181,7 @@ pub fn BotMessages(
     #[prop(optional)]
     from_tickets: bool,
     /// On another page: only the message `open_key` names, editable in place, with a link to the
-    /// Messages page for more tools.
+    /// full editor on the Messages page for more tools.
     #[prop(optional)]
     embedded: bool,
 ) -> impl IntoView {
@@ -665,7 +665,7 @@ pub fn BotMessages(
         view! {
             <div class="mbhead">
                 {(!embedded).then(|| view! { <button class="ghost back" on:click=move |_| back(None)>"← Default messages"</button> })}
-                {embedded.then(|| view! { <a class="btn ghost" href=format!("#/{}/bot_messages/{}", g.get_value(), rkey_link)>{crate::icons::icon("edit")}"More tools"</a> })}
+                {embedded.then(|| view! { <button on:click=move |_| { let to = format!("/{}/bot_messages/{}", g.get_value(), rkey_link); crate::guard::leave(move || { let _ = web_sys::window().unwrap().location().set_hash(&to); }) }>"Edit with more tools"</button> })}
                 {from_tickets.then(|| view! { <button class="ghost back" on:click=move |_| back(Some(format!("/{}/tickets", g.get_value())))>"← Back to Tickets"</button> })}
                 <b class="name">{r["name"].as_str().unwrap_or("").to_string()}</b>
                 <span class="states">{badge(&r)}</span>

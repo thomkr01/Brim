@@ -680,11 +680,11 @@ fs.mkdirSync(out, { recursive: true });
   // to start a giveaway, and the giveaway is duplicated; a plan with a schedule is saved.
   psql(`update guild_config set config = config || jsonb_build_object('giveaways', jsonb_build_object('enabled', true)) where guild_id = ${gid} and version = (select max(version) from guild_config where guild_id = ${gid})`);
   await page.goto(`${base}/#/${gid}/giveaways`);
-  // The Giveaways page shows the message as members see it, with the Enter button Brim adds, and an editor beside it (More tools links to the Messages page).
+  // The Giveaways page shows the message as members see it, with the Enter button Brim adds, and an editor beside it (a button goes to the full editor).
   await page.locator('.msgswitch .dmsg .dbtn.added', { hasText: 'Enter' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: no live preview with the Enter button'));
   await page.click('.seg button:text-is("Winners post")', { timeout: 3000 }).catch(() => failed.push('giveaways: no Winners post switch'));
   await page.locator('.msgswitch .dbtn.added', { hasText: 'Claim' }).waitFor({ timeout: 8000 }).catch(() => failed.push('giveaways: the Winners post preview has no Claim button'));
-  if (!(await page.locator('.msgswitch .live .ed').count()) || !(await page.locator('.msgswitch a', { hasText: 'More tools' }).count())) failed.push('giveaways: no editor or More tools link beside the preview');
+  if (!(await page.locator('.msgswitch .live .ed').count()) || !(await page.locator('.msgswitch button', { hasText: 'Edit with more tools' }).count())) failed.push('giveaways: no editor or more-tools button beside the preview');
   await page.reload();
   const pickGeneral = async () => { await page.getByPlaceholder('choose a channel').first().click(); await page.locator('[role=option]', { hasText: '#general' }).first().dispatchEvent('mousedown'); };
   await page.locator('button.add:has-text("Start a giveaway"):not([disabled])').first().click({ timeout: 10000 }).catch(async () => { failed.push('giveaways: Start a giveaway is off'); await page.screenshot({ path: `${out}/giveaway_off.png` }); });
