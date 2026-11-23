@@ -463,7 +463,7 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .mbhead input.name { font-size:var(--fs-section-title); font-weight:700; min-width:0; flex:1 1 200px; }
 .tabs button .i { width:16px; height:16px; margin-right:8px; vertical-align:-3px; }
 .mcard { margin:0 0 var(--space-24); }
-.small { font-size:var(--fs-caption); } .pvtop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; } .pvtop h2 { margin:0; }
+.small { font-size:var(--fs-caption); } .pvtop { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px; } .pvtop h2 { margin:0; } .pvnote { margin:0 0 var(--space-8); }
 /* Base two-choice selector: the open choice is the orange one. Pages may add to it (the scoped rules below). */
 .seg { display:inline-flex; border:1px solid var(--line); border-radius:var(--radius-row); overflow:hidden; flex:none; max-width:100%; }
 .seg button { background:none; border:0; border-radius:0; color:var(--muted); text-transform:none; font-weight:600; padding:var(--space-8) var(--space-16); }
@@ -904,7 +904,7 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .pane .tog > label { flex:none; }
 /* Message page: the preview on the right, the editor on the left behind "Edit message". */
 .msplit { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-16); align-items:start; } .msplit.two { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .mside { min-width:0; } .vchip { max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
-.msplit.two { align-items:stretch; } .msplit.two .mview { display:flex; } .msplit.two .mview > .pvcard { flex:1; min-width:0; }
+.msplit { background:var(--b2); border-radius:var(--radius-card); padding:var(--space-20); margin-bottom:var(--space-24); } .msplit .mcard { background:var(--b3); margin:0; } .msplit.two { align-items:stretch; } .msplit.two .mview { display:flex; } .msplit.two .mview > .pvcard { flex:1; min-width:0; }
 .added-note { display:flex; gap:var(--space-8); align-items:flex-start; margin:0 0 var(--space-12); padding:var(--space-8) var(--space-12); border:1px solid var(--accent); border-radius:var(--radius-row); background:var(--b2); font-size:var(--fs-ui); }
 @media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { display:block; } }
 .msgswitch .mbhead { margin-top:var(--space-12); }

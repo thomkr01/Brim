@@ -592,11 +592,7 @@ pub fn Giveaways(guild: String) -> impl IntoView {
             active=Signal::derive(move || tab.get().to_string()) on_pick=Callback::new(move |k| tab.set(k)) />
         {move || match tab.get() {
             "settings" => view! { <Section guild=g1.clone() name="giveaways".to_string() on_save=Callback::new(move |_| load()) /> }.into_any(),
-            "messages" => view! {
-                <div class="card">
-                    <crate::botmsgs::MessageSwitch guild=g2.clone() keys=vec![("giveaway.running", "Running"), ("giveaway.ended", "Ended"), ("giveaway.winners", "Winners post"), ("giveaway.winner_dm", "Winner DM")] />
-                </div>
-            }.into_any(),
+            "messages" => view! { <crate::botmsgs::MessageSwitch guild=g2.clone() keys=vec![("giveaway.running", "Running"), ("giveaway.ended", "Ended"), ("giveaway.winners", "Winners post"), ("giveaway.winner_dm", "Winner DM")] /> }.into_any(),
             _ => view! { {list}{form_view}{people_view} }.into_any(),
         }}
         <Toast msg />
