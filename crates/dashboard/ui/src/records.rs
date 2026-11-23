@@ -166,6 +166,14 @@ pub(crate) fn who(names: RwSignal<std::collections::HashMap<String, String>>, id
     view! { <b title=tip>{move || names.with(|n| n.get(&id).cloned()).unwrap_or_else(|| id.clone())}</b> }
 }
 
+/// A case's member, or `None` for a case without one (a purge of a channel, a slowmode).
+fn target(names: RwSignal<std::collections::HashMap<String, String>>, id: &Value) -> AnyView {
+    match id.as_str() {
+        Some(id) => who(names, id.to_string()).into_any(),
+        None => view! { <code>"None"</code> }.into_any(),
+    }
+}
+
 /// The case list: one clean row per case; a click opens the case page.
 #[component]
 pub fn CaseList(guild: String) -> impl IntoView {
@@ -236,7 +244,7 @@ pub fn CaseList(guild: String) -> impl IntoView {
                 view! { <a class="card link" href=format!("#/{}/cases/{no}", g.get_value())>
                     <b class="no">{format!("#{no}")}</b>
                     <span class="what"><span><b>{s(&r["kind"])}</b>" "<span class="chip" class:ok=active>{if active { "open" } else { "closed" }}</span></span>
-                        <span class="muted">{who(names, s(&r["user_id"]))}" by "{who(names, s(&r["mod_id"]))}" · "{crate::datareq::when(&r["at"])}</span></span>
+                        <span class="muted">{target(names, &r["user_id"])}" by "{who(names, s(&r["mod_id"]))}" · "{crate::datareq::when(&r["at"])}</span></span>
                     <span class="sp"></span>{crate::icons::icon("chevron_right")}
                 </a> }
             }
@@ -360,7 +368,7 @@ pub fn CasePage(guild: String, no: String) -> impl IntoView {
                         {(rank >= 3).then(|| view! { <button class="ghost" disabled=move || busy.get() on:click=move |_| { ask(Ask::new("Delete this case for good?").text("Its proofs and its history go with it.").yes("Delete").danger(), move |_| { let (url, to) = (format!("{}/delete", base.get_value()), back.get_value()); run_act(guard(busy, async move { api("POST", &url, Some(json!({}))).await }), msg, need, move |_| { let _ = window().location().set_hash(&to); }) }) }>"Delete"</button> })}
                     </div>
                     <dl class="facts">
-                        <dt>"Member"</dt><dd>{who(names, s(&c["user_id"]))}</dd>
+                        <dt>"Member"</dt><dd>{target(names, &c["user_id"])}</dd>
                         <dt>"Moderator"</dt><dd>{who(names, s(&c["mod_id"]))}</dd>
                         <dt>"Date"</dt><dd>{crate::datareq::when(&c["at"])}</dd>
                         {c["expires_at"].as_str().map(|_| view! { <dt>"Ends"</dt><dd>{crate::datareq::when(&c["expires_at"])}</dd> })}

@@ -139,15 +139,20 @@ pub(crate) async fn send_case_log(app: &App, gid: u64, c: &CaseLog) -> Result<()
 /// The mod log entry of a case a staff member deleted in the dashboard. The case's own reason is
 /// shown; proofs and message copies are not.
 pub(crate) fn case_delete_log(c: &CaseDelete) -> Log {
+    // A case without a member (member 0: a purge of a channel, a slowmode) shows `None`.
+    let member = match c.user {
+        0 => "`None`".to_string(),
+        u => embed::user(u),
+    };
     let mut log = Log::new("Case Deleted", RED)
         .line("Case", &format!("`{}`", c.case_no))
         .line("Kind", &c.kind)
-        .user("Member", c.user)
+        .line("Member", &member)
         .user("Moderator", c.moderator)
         .user("Deleted By", c.by)
         .var("case", &c.case_no.to_string())
         .var("kind", &c.kind)
-        .var("member", &embed::user(c.user))
+        .var("member", &member)
         .var("moderator", &embed::user(c.moderator))
         .var("deleted_by", &embed::user(c.by));
     let mut reason = String::new();

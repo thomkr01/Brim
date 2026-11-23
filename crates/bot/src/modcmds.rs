@@ -899,11 +899,15 @@ pub async fn run(
         | ModCmd::CasesEdit { case, .. }
         | ModCmd::CaseSet { case, .. }
         | ModCmd::ProofAdd { case, .. } => (
-            sqlx::query_scalar("SELECT user_id FROM cases WHERE guild_id=$1 AND case_no=$2")
-                .bind(gid.get() as i64)
-                .bind(case)
-                .fetch_optional(&app.pool)
-                .await?,
+            // A case without a member is about nobody, so its moderator may change it.
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COALESCE({}, 0) FROM cases WHERE guild_id=$1 AND case_no=$2",
+                cases::TARGET
+            )))
+            .bind(gid.get() as i64)
+            .bind(case)
+            .fetch_optional(&app.pool)
+            .await?,
             format!("change case #{case}"),
         ),
         ModCmd::NoteRemove { id, .. } | ModCmd::NoteModify { id, .. } => (
@@ -1333,7 +1337,8 @@ pub async fn run(
                         ..text.into()
                     });
                 }
-                let who = user.unwrap_or(actor_id.get());
+                // No member: the case has no target (0), not the moderator.
+                let who = user.unwrap_or(0);
                 let n = done.deleted;
                 let note = format!("{n} messages in <#{channel}>");
                 let mut text = format!("Deleted {n} messages in <#{channel}>. Filter: {what}");
@@ -1372,7 +1377,7 @@ pub async fn run(
                 let note = format!("{secs}s in {}", list.join(" "));
                 (
                     "slowmode",
-                    actor_id.get(),
+                    0,
                     None,
                     Some(note),
                     format!("Slowmode set to {secs}s"),

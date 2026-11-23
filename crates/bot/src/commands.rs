@@ -875,7 +875,12 @@ pub(crate) fn mod_log_embed(
     duration_s: Option<i64>,
     reason: Option<&str>,
 ) -> Log {
-    let (moderator, member) = (embed::user(actor), embed::user(target));
+    let moderator = embed::user(actor);
+    // A case without a member (target 0: a purge of a channel, a slowmode) shows `None`.
+    let member = match target {
+        0 => "`None`".to_string(),
+        t => embed::user(t),
+    };
     let mut log = Log::new("", case_color(name))
         .inline("Case:", &format!("`{case_no}`"))
         .inline("Type:", &format!("`{}`", case_title(name)))

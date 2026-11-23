@@ -274,16 +274,18 @@ async fn cases(
     Query(f): Query<CaseFilter>,
 ) -> Res {
     api::staff(&st, &s, guild, &["cases"]).await?;
-    let rows: Vec<CaseRow> = sqlx::query_as(
-            "select case_no, kind, user_id::text, mod_id::text, reason,
+    let rows: Vec<CaseRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "select case_no, kind, ({target})::text, mod_id::text, reason,
                     (select count(*) from case_proofs p where p.guild_id = cases.guild_id and p.case_no = cases.case_no),
                     points, active, created_at
              from cases where guild_id = $1
-               and ($2 = '' or user_id::text = $2 or mod_id::text = $2)
+               and ($2 = '' or (user_id::text = $2 and {has}) or mod_id::text = $2)
                and ($3 = '' or kind = $3)
                and ($4 = '' or active = ($4 = 'open'))
              order by case_no desc limit 50 offset $5",
-        )
+            target = cases::TARGET,
+            has = cases::HAS_TARGET,
+        )))
         .bind(guild)
         .bind(f.q.unwrap_or_default().trim())
         .bind(f.kind.unwrap_or_default())
@@ -309,8 +311,9 @@ async fn case_page(
     Path((guild, no)): Path<(i64, i32)>,
 ) -> Res {
     api::staff(&st, &s, guild, &["cases"]).await?;
-    let case: Option<Value> = sqlx::query_scalar(
-        "select json_build_object('case_no', c.case_no, 'kind', c.kind, 'user_id', c.user_id::text,
+    // `cases::TARGET` names plain columns; the subqueries below use their own aliases.
+    let case: Option<Value> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select json_build_object('case_no', c.case_no, 'kind', c.kind, 'user_id', ({})::text,
                     'mod_id', c.mod_id::text, 'reason', c.reason, 'points', c.points, 'active', c.active,
                     'duration_s', c.duration_s, 'expires_at', c.expires_at, 'at', c.created_at,
                     'proofs_max', $3::bigint,
@@ -325,7 +328,8 @@ async fn case_page(
                             'at', e.edited_at) order by e.id desc), '[]'::json)
                         from case_edits e where e.guild_id = c.guild_id and e.case_no = c.case_no))
          from cases c where c.guild_id = $1 and c.case_no = $2",
-    )
+        cases::TARGET
+    )))
     .bind(guild)
     .bind(no)
     .bind(cases::PROOFS_MAX)
@@ -349,12 +353,15 @@ async fn case_guard(
     no: i32,
 ) -> Result<crate::access::Level, ApiError> {
     let level = api::staff(st, s, guild, &["cases"]).await?;
-    let member: Option<i64> =
-        sqlx::query_scalar("select user_id from cases where guild_id = $1 and case_no = $2")
-            .bind(guild)
-            .bind(no)
-            .fetch_optional(&st.db)
-            .await?;
+    // A case without a member is about nobody (0), so its moderator may change it.
+    let member: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select coalesce({}, 0) from cases where guild_id = $1 and case_no = $2",
+        cases::TARGET
+    )))
+    .bind(guild)
+    .bind(no)
+    .fetch_optional(&st.db)
+    .await?;
     subject_guard(st, s, level, guild, member).await?;
     unlocked(st, s, guild).await?;
     Ok(level)
@@ -502,12 +509,14 @@ async fn proof_remove(
     let (kind, verified) = cases::remove_proof(&mut tx, guild, no, id, (s.user_id, None))
         .await?
         .ok_or(ApiError::NotFound)?;
-    let member: i64 =
-        sqlx::query_scalar("select user_id from cases where guild_id = $1 and case_no = $2")
-            .bind(guild)
-            .bind(no)
-            .fetch_one(&mut *tx)
-            .await?;
+    let member: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "select coalesce({}, 0) from cases where guild_id = $1 and case_no = $2",
+        cases::TARGET
+    )))
+    .bind(guild)
+    .bind(no)
+    .fetch_one(&mut *tx)
+    .await?;
     staff_action(&mut tx, guild, &s, "case_edit", member, no, None).await?;
     tx.commit().await?;
     let log = CaseLog {
@@ -576,7 +585,8 @@ async fn staff_action(
             mod_id: s.user_id,
             kind,
             source: "dashboard",
-            target_id: Some(user),
+            // 0: the case has no member (`cases::TARGET`).
+            target_id: (user != 0).then_some(user),
             case_no: Some(no),
             audit_id: None,
             ai_client,
@@ -602,6 +612,7 @@ async fn case_delete(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(ApiError::NotFound)?;
+    let user = cases::target(&kind, user, moderator).unwrap_or(0);
     staff_action(&mut tx, guild, &s, "case_delete", user, no, None).await?;
     tx.commit().await?;
     // The bot posts the mod log entry. The case is gone already, so a failed enqueue is only logged.

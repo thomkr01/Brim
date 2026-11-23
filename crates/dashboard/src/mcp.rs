@@ -356,8 +356,11 @@ async fn preview(
         }
         "case_edit" => {
             let no: i32 = target.and_then(|t| t.parse().ok()).unwrap_or(-1);
-            let (member, kind, reason, active): (String, String, Option<String>, bool) =
-                sqlx::query_as("select user_id::text, kind, reason, active from cases where guild_id = $1 and case_no = $2")
+            let (member, kind, reason, active): (Option<String>, String, Option<String>, bool) =
+                sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                    "select ({})::text, kind, reason, active from cases where guild_id = $1 and case_no = $2",
+                    brim_core::cases::TARGET
+                )))
                     .bind(guild)
                     .bind(no)
                     .fetch_optional(&st.db)

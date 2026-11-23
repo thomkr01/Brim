@@ -65,6 +65,11 @@ fn every_moderation_log_default_reads_as_the_code_builds_it() {
         "from <@6>",
     );
     same(case, purge, false);
+    // A purge of a channel has no member: Target shows `None`, not the moderator.
+    let channel = mod_log_embed((15, "purge"), (5, 0), None, None);
+    same(case, channel.clone(), false);
+    let target = channel.build().fields[3].value.clone();
+    assert_eq!(target, format!("{} `None`", brim_logging::embed::ARROW));
 
     let cases = [
         CaseLog {

@@ -5,9 +5,28 @@ use sqlx::PgPool;
 
 use crate::models::{GuildId, UserId};
 
+/// Kinds that act on a channel, not a member: a purge without a member, a slowmode.
+pub const CHANNEL_KINDS: [&str; 2] = ["purge", "slowmode"];
+
+/// SQL condition (columns of `cases`, unqualified): the case has a member as its target. New
+/// cases without one store `user_id = 0`; older purge and slowmode cases stored the moderator
+/// (self-targets are refused, so that pair always means no target). Keeps `user_id = $n` indexed.
+pub const HAS_TARGET: &str =
+    "(user_id <> 0 AND NOT (kind IN ('purge', 'slowmode') AND user_id = mod_id))";
+
+/// SQL expression for the target to show: NULL when the case has none ([`HAS_TARGET`]).
+pub const TARGET: &str = "CASE WHEN user_id <> 0 AND NOT (kind IN ('purge', 'slowmode') AND user_id = mod_id) THEN user_id END";
+
+/// The member a case targets, None for a case without one. The same rule as [`HAS_TARGET`].
+pub fn target(kind: &str, user_id: i64, mod_id: i64) -> Option<i64> {
+    let none = user_id == 0 || (CHANNEL_KINDS.contains(&kind) && user_id == mod_id);
+    (!none).then_some(user_id)
+}
+
 pub struct NewCase<'a> {
     pub guild_id: GuildId,
     pub kind: &'a str,
+    /// 0 when the case has no member (a purge without one, a slowmode).
     pub user_id: UserId,
     pub mod_id: UserId,
     pub reason: Option<&'a str>,
@@ -21,6 +40,7 @@ pub struct NewCase<'a> {
 
 /// Inserts the case and its action_log row atomically; returns the per-guild case number.
 pub async fn create(pool: &PgPool, c: NewCase<'_>) -> Result<i32> {
+    let target = (c.user_id != 0).then_some(c.user_id);
     let mut tx = pool.begin().await?;
     // Serialize case numbering per guild. Its own key: the bare guild id is the config lock.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('cases:' || $1, 0))")
@@ -62,7 +82,7 @@ pub async fn create(pool: &PgPool, c: NewCase<'_>) -> Result<i32> {
     .bind(c.guild_id)
     .bind(c.mod_id)
     .bind(c.kind)
-    .bind(c.user_id)
+    .bind(target)
     .bind(c.inverse)
     .bind(case_no)
     .execute(&mut *tx)
@@ -74,7 +94,7 @@ pub async fn create(pool: &PgPool, c: NewCase<'_>) -> Result<i32> {
             mod_id: c.mod_id,
             kind: c.kind,
             source: "bot",
-            target_id: Some(c.user_id),
+            target_id: target,
             case_no: Some(case_no),
             audit_id: None,
             ai_client: None,
@@ -465,6 +485,80 @@ mod tests {
         let again = Some("the member was quarantined again after it");
         assert_eq!(why(held).await.unwrap().as_deref(), again);
         assert_eq!(why(9999).await.unwrap(), None, "no such case");
+        crate::db::purge_guild(&pool, g).await.unwrap();
+    }
+
+    #[test]
+    fn a_channel_case_has_no_target() {
+        assert_eq!(target("purge", 0, 9), None, "new purge of a channel");
+        assert_eq!(
+            target("purge", 9, 9),
+            None,
+            "older purge: the moderator was stored"
+        );
+        assert_eq!(target("slowmode", 9, 9), None);
+        assert_eq!(target("purge", 7, 9), Some(7), "purge of one member");
+        assert_eq!(
+            target("ban", 9, 9),
+            Some(9),
+            "only channel kinds use the old rule"
+        );
+        for k in CHANNEL_KINDS {
+            assert!(HAS_TARGET.contains(&format!("'{k}'")) && TARGET.contains(&format!("'{k}'")));
+        }
+    }
+
+    /// The SQL rule agrees with `target`, and a case without a member logs no target.
+    #[tokio::test]
+    async fn the_sql_target_rule_matches_the_code() {
+        let Ok(url) = crate::db::test_url() else {
+            return;
+        };
+        let pool = crate::db::connect(&url).await.unwrap();
+        let g = 5_378_000_000 + std::process::id() as i64;
+        crate::db::purge_guild(&pool, g).await.unwrap();
+        let rows = [
+            ("purge", 0),
+            ("purge", 9),
+            ("slowmode", 9),
+            ("purge", 771_101),
+            ("ban", 9),
+        ];
+        for (kind, user_id) in rows {
+            let c = NewCase {
+                guild_id: g,
+                kind,
+                user_id,
+                mod_id: 9,
+                reason: None,
+                points: 0,
+                duration_s: None,
+                proof: None,
+                inverse: None,
+            };
+            create(&pool, c).await.unwrap();
+        }
+        let sql = format!(
+            "SELECT kind, user_id, mod_id, {TARGET}, {HAS_TARGET} FROM cases WHERE guild_id = $1 ORDER BY case_no"
+        );
+        let got: Vec<(String, i64, i64, Option<i64>, bool)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(sql))
+                .bind(g)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for (kind, user, by, shown, has) in got {
+            assert_eq!(shown, target(&kind, user, by), "{kind} {user}");
+            assert_eq!(has, shown.is_some(), "{kind} {user}");
+        }
+        let logged: Option<i64> = sqlx::query_scalar(
+            "SELECT target_id FROM action_log WHERE guild_id = $1 AND case_no = 1",
+        )
+        .bind(g)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(logged, None);
         crate::db::purge_guild(&pool, g).await.unwrap();
     }
 }

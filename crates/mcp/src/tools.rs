@@ -118,7 +118,7 @@ fn limit(a: &Value, default: i64, max: i64) -> i64 {
     a["limit"].as_i64().unwrap_or(default).clamp(1, max)
 }
 
-async fn one(st: &State, sql: &'static str, g: i64, n: i64) -> Result<Value> {
+async fn one(st: &State, sql: impl sqlx::SqlSafeStr, g: i64, n: i64) -> Result<Value> {
     Ok(sqlx::query_scalar::<_, Option<Value>>(sql)
         .bind(g)
         .bind(n)
@@ -199,12 +199,14 @@ pub async fn call(st: &State, name: &str, a: &Value) -> Result<Value> {
             "SELECT jsonb_agg(jsonb_build_object('version', version, 'changed_by', changed_by::text, 'created_at', created_at) ORDER BY version DESC)
              FROM (SELECT * FROM mcp_guild_config WHERE guild_id = $1 ORDER BY version DESC LIMIT $2) h",
             need(a, "guild_id")?, limit(a, 20, 50)).await?,
-        "cases" => sqlx::query_scalar::<_, Option<Value>>(
+        "cases" => sqlx::query_scalar::<_, Option<Value>>(sqlx::AssertSqlSafe(format!(
             "SELECT jsonb_agg(c ORDER BY case_no DESC) FROM (
-                SELECT case_no, kind, user_id::text, mod_id::text, reason, proof, points, duration_s, expires_at, active, created_at
-                FROM mcp_cases WHERE guild_id = $1 AND ($2::bigint IS NULL OR user_id = $2) AND ($3::text IS NULL OR kind = $3)
+                SELECT case_no, kind, ({target})::text AS user_id, mod_id::text, reason, proof, points, duration_s, expires_at, active, created_at
+                FROM mcp_cases WHERE guild_id = $1 AND ($2::bigint IS NULL OR (user_id = $2 AND {has})) AND ($3::text IS NULL OR kind = $3)
                 ORDER BY case_no DESC LIMIT $4) c",
-        )
+            target = brim_core::cases::TARGET,
+            has = brim_core::cases::HAS_TARGET,
+        )))
         .bind(need(a, "guild_id")?)
         .bind(id(a, "user_id")?)
         .bind(a["kind"].as_str())
@@ -213,9 +215,9 @@ pub async fn call(st: &State, name: &str, a: &Value) -> Result<Value> {
         .await?
         .unwrap_or(json!([])),
         "case" => one(st,
-            "SELECT jsonb_build_object('case_no', case_no, 'kind', kind, 'user_id', user_id::text, 'mod_id', mod_id::text, 'reason', reason,
+            sqlx::AssertSqlSafe(format!("SELECT jsonb_build_object('case_no', case_no, 'kind', kind, 'user_id', ({})::text, 'mod_id', mod_id::text, 'reason', reason,
                 'proof', proof, 'points', points, 'duration_s', duration_s, 'expires_at', expires_at, 'active', active, 'created_at', created_at)
-             FROM mcp_cases WHERE guild_id = $1 AND case_no = $2",
+             FROM mcp_cases WHERE guild_id = $1 AND case_no = $2", brim_core::cases::TARGET)),
             need(a, "guild_id")?, a["case_no"].as_i64().context("case_no is required")?).await?,
         "raid_log" => one(st,
             "SELECT jsonb_agg(r ORDER BY created_at DESC) FROM (

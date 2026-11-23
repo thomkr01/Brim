@@ -663,17 +663,20 @@ async fn user_info(
             .fetch_one(&app.pool)
             .await?;
     let user = app.http.user(Id::new(target as u64)).await?.model().await?;
-    let total: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM cases WHERE guild_id=$1 AND user_id=$2")
-            .bind(gid.get() as i64)
-            .bind(target)
-            .fetch_one(&app.pool)
-            .await?;
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) FROM cases WHERE guild_id=$1 AND user_id=$2 AND {}",
+        brim_core::cases::HAS_TARGET
+    )))
+    .bind(gid.get() as i64)
+    .bind(target)
+    .fetch_one(&app.pool)
+    .await?;
     let (page, pages) = paging(page, total);
-    let rows: Vec<(i32, String, bool, i64)> = sqlx::query_as(
+    let rows: Vec<(i32, String, bool, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT case_no, kind, active, extract(epoch from created_at)::bigint FROM cases
-         WHERE guild_id=$1 AND user_id=$2 ORDER BY case_no DESC LIMIT $3 OFFSET $4",
-    )
+         WHERE guild_id=$1 AND user_id=$2 AND {} ORDER BY case_no DESC LIMIT $3 OFFSET $4",
+        brim_core::cases::HAS_TARGET
+    )))
     .bind(gid.get() as i64)
     .bind(target)
     .bind(PER_PAGE)

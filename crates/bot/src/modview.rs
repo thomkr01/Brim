@@ -154,8 +154,12 @@ pub(crate) fn dehoisted(name: &str) -> Option<String> {
 type CaseRow = (i32, String, i64, i64, Option<String>, bool, i64);
 
 fn fmt_case((no, kind, user, moderator, reason, active, at): &CaseRow) -> String {
+    let user = match brim_core::cases::target(kind, *user, *moderator) {
+        Some(u) => format!("<@{u}>"),
+        None => "`None`".into(),
+    };
     format!(
-        "`#{no}` {kind}{} <@{user}> by <@{moderator}> <t:{at}:R>: {}",
+        "`#{no}` {kind}{} {user} by <@{moderator}> <t:{at}:R>: {}",
         if *active { "" } else { " (inactive)" },
         reason.as_deref().unwrap_or("no reason")
     )
@@ -172,12 +176,13 @@ pub(crate) async fn view_cases(
     kind: Option<String>,
     page: usize,
 ) -> Result<String> {
-    let rows: Vec<CaseRow> = sqlx::query_as(
+    let rows: Vec<CaseRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT case_no, kind, user_id, mod_id, reason, active, EXTRACT(EPOCH FROM created_at)::bigint
-         FROM cases WHERE guild_id=$1 AND ($2::int IS NULL OR case_no=$2) AND ($3::bigint IS NULL OR user_id=$3)
+         FROM cases WHERE guild_id=$1 AND ($2::int IS NULL OR case_no=$2) AND ($3::bigint IS NULL OR (user_id=$3 AND {}))
          AND ($4::bigint IS NULL OR mod_id=$4) AND ($5::text IS NULL OR kind=$5)
          ORDER BY case_no DESC LIMIT 10 OFFSET $6",
-    )
+        brim_core::cases::HAS_TARGET
+    )))
     .bind(g)
     .bind(case)
     .bind(user.map(|u| u as i64))
@@ -201,12 +206,14 @@ pub(crate) async fn cases_page(
     user: u64,
     page: usize,
 ) -> Result<(Embed, usize)> {
-    let (n,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM cases WHERE guild_id=$1 AND user_id=$2")
-            .bind(g)
-            .bind(user as i64)
-            .fetch_one(&app.pool)
-            .await?;
+    let (n,): (i64,) = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT count(*) FROM cases WHERE guild_id=$1 AND user_id=$2 AND {}",
+        brim_core::cases::HAS_TARGET
+    )))
+    .bind(g)
+    .bind(user as i64)
+    .fetch_one(&app.pool)
+    .await?;
     let pages = (n as usize).div_ceil(PER_PAGE).max(1);
     let page = page.min(pages - 1);
     let text = view_cases(app, g, None, Some(user), None, None, page).await?;
