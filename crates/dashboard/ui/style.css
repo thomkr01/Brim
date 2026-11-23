@@ -690,6 +690,12 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
   .land .scene:has(> .win:not(.pane):not(.lcard):not(.tbl)) > :is(.pane, .lcard, .tbl):nth-of-type(3) { width:max-content; max-width:calc(var(--space-56) * 5.5); padding-right:calc(var(--space-56) + var(--space-24)); }
   .land .scene > .win.xs { width:calc(var(--space-56) * 6.4); }
 }
+.land .win.dash { text-align:left; } @media (min-width:761px) { .land .scene > .win.dash:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 13.5); } } .land .scene > .win.dash { padding:0; background:none; box-shadow:none; overflow:visible; }
+.land .scene > .win.builder { padding:0; background:none; box-shadow:none; overflow:visible; }
+@media (min-width:761px) { .land .scene > .win.builder:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 15); } }
+.land .win.dash .head { margin:0 0 var(--space-16); } .land .win.dash .chip { white-space:nowrap; } .land .scene.l-dash > .co { position:absolute; left:62%; top:90%; z-index:7; } .land .win.dash .cards { align-items:flex-start; gap:var(--space-16); } .land .win.dash .card { padding:var(--space-16); }
+.land .win.dash .row label { flex:1 1 auto; min-width:0; } .land .win.dash .row.tog { flex-wrap:nowrap; } .land .win.dash .row:not(.tog) label { flex:0 0 100%; }
+.land .win.dash .col { min-width:0; width:100%; } .land .win.dash .lp, .land .win.dash input { min-width:0; max-width:100%; } .land .win.dash .pick { flex:1; } .land .win.dash input[readonly], .land .win.dash select { pointer-events:none; }
 .land .embed .fields > .blk[style*="span 4"] { grid-column:span 6 !important; }
 .land .embed .fields .blk > b { font-size:.88em; }
 .land .dmsg, .land .dmsg * { word-break:normal; overflow-wrap:normal; }
@@ -715,7 +721,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .fx { position:absolute; inset:0 auto 0 var(--fxl, 0px); width:var(--fxw, 100%); z-index:3; pointer-events:none; }
-.land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
+.land .scene > i, .land .fx > i { position:absolute; transition:left .3s linear, top .3s linear; z-index:0; pointer-events:none; }
 /* The star shape is on ::before: a clip-path on the same element would cut off its own glow (filter runs before clip-path). */
 .land .spark { width:var(--space-32); height:var(--space-32); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark::before { content:""; position:absolute; inset:0; background:var(--orange-grad); clip-path:var(--star); }
@@ -940,3 +946,5 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 
 /* The front page main box starts exactly at the left edge of the buttons, and the page-wide `main { overflow-x:clip }` cut their focus ring there. The hero clips the page edge itself. */
 .land .hero-body { overflow:visible; }
+/* A field value in a scene is shown as it is typed, as in the editor. */
+.land .pane .tog .chip { text-transform:none; white-space:normal; }
