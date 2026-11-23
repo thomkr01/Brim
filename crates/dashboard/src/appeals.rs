@@ -288,13 +288,7 @@ async fn submit(
             log = log.field(&format!("{}:", f.label), &brim_core::msgvars::escape(a));
         }
         let log = crate::discord::framed(&st.db, guild, "log.appeal", log).await;
-        let button = |label: &str, act: &str, style: u8| json!({"type": 2, "style": style, "label": label, "custom_id": format!("appeal:{id}:{act}")});
-        let row = json!([{"type": 1, "components": [
-            button("Approve", "accept", 3),
-            button("Deny", "deny", 4),
-            button("Deny + Blacklist", "blacklist", 4),
-            button("Dismiss", "dismiss", 2),
-        ]}]);
+        let row = decision_row(id);
         // The appeal is saved: a failed notice is only logged.
         let posted = match crate::discord::Readers::load(&st.db, guild, &config).await {
             Ok(who) => {
@@ -880,6 +874,17 @@ pub(crate) fn sent_log(kind: &str, username: &str, user_id: i64, id: i64) -> bri
     .var("member.username", username)
     .var("member.id", &user_id.to_string())
     .var("appeal", &id.to_string())
+}
+
+/// Approve, Deny, Deny + Blacklist and Dismiss under the log of appeal `id`.
+pub(crate) fn decision_row(id: i64) -> Value {
+    let button = |label: &str, act: &str, style: u8| json!({"type": 2, "style": style, "label": label, "custom_id": format!("appeal:{id}:{act}")});
+    json!([{"type": 1, "components": [
+        button("Approve", "accept", 3),
+        button("Deny", "deny", 4),
+        button("Deny + Blacklist", "blacklist", 4),
+        button("Dismiss", "dismiss", 2),
+    ]}])
 }
 
 #[cfg(test)]

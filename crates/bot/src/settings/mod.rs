@@ -682,6 +682,15 @@ fn button(icon: Emoji, id: String, style: ButtonStyle, disabled: bool) -> Compon
     }))
 }
 
+/// The page row under each command answer that has pages, by its Bot messages entry.
+pub(crate) fn pagers(invoker: u64) -> Vec<(String, Component)> {
+    ["cmds", "ginfo", "tkblock", "tksnip", "cases.1", "about"]
+        .into_iter()
+        .chain(maps::MODULES.iter().map(|m| m.names[0]))
+        .filter_map(|k| Some((page_command(k)?, page_row(invoker, k, 0, 3))))
+        .collect()
+}
+
 /// The Bot messages entry (`cmd.<command>`) of the command whose pages `kind` turns.
 fn page_command(kind: &str) -> Option<String> {
     let (word, mod_first) = match kind {
