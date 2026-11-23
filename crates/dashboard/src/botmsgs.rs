@@ -160,11 +160,23 @@ async fn added_buttons(
         brim_core::sections::panel_message(&on, false, None, &t.types, t.button_per_type)
             ["components"]
             .clone();
-    // Panels that Brim builds from the live settings are not drawn: the notice says so.
+    // The appeal log is posted by the dashboard, with its decision buttons.
+    all["log.appeal.appeal_sent"] = crate::appeals::decision_row(0);
+    // Panels and menus that Brim builds from the live settings are not drawn: the notice says so.
     for d in botmsg::defs() {
         let k = d.key.as_str();
         if k.split('.').take(2).eq(["reply", "panel"])
-            || matches!(k, "reply.help.panel" | "reply.whitelist.prompt")
+            || matches!(
+                k,
+                "reply.help.panel"
+                    | "reply.whitelist.prompt"
+                    // The ticket type menus: one option per type of this server.
+                    | "reply.dm.menu"
+                    | "reply.ticket.ask_type"
+                    | "reply.ticket.claimed_self"
+                    | "reply.ticket.claimed_other"
+                    | "reply.ticket.claim_failed"
+            )
         {
             all[k] = json!("panel");
         }

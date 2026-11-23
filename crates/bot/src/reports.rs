@@ -755,7 +755,7 @@ async fn user_overview(
     crate::reply::answer(app, gid, "reply.report.user_overview", &vars).await
 }
 
-fn pager(id: i64, page: i64, pages: i64) -> Component {
+pub(crate) fn pager(id: i64, page: i64, pages: i64) -> Component {
     let last = pages - 1;
     let b = |icon: Emoji, to: i64, slot: &str, style, off| match button(
         icon.fallback,

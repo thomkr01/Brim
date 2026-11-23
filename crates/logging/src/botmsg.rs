@@ -7422,6 +7422,51 @@ pub fn in_text(d: &Def) -> bool {
     d.template["embeds"].as_array().is_none_or(Vec::is_empty) && !d.required.is_empty()
 }
 
+/// Why the saved message `msg` (a Message Builder message) cannot be used for the place `key`, in
+/// plain words; empty when it fits. `brim_rows`: the rows of buttons Brim adds there. The picker,
+/// the save and the send all use this one check, so they never disagree.
+pub fn fits(key: &str, msg: &Value, brim_rows: usize) -> Vec<String> {
+    let Some(d) = find(key) else {
+        return vec!["Brim has no such message".into()];
+    };
+    if d.locked || HIDDEN.contains(&key) {
+        return vec![format!("“{}” cannot be changed", d.name)];
+    }
+    let mut why = Vec::new();
+    let unknown = unknown_vars(key, msg);
+    if !unknown.is_empty() {
+        let list: Vec<String> = unknown.iter().map(|v| format!("{{{v}}}")).collect();
+        why.push(format!("“{}” has no {}", d.name, list.join(", ")));
+    }
+    if let Some(m) = missing_text(key, msg) {
+        why.push(m);
+    }
+    let rows = msg["components"].as_array().map_or(&[][..], Vec::as_slice);
+    if rows.len() + brim_rows > 5 {
+        let s = if brim_rows == 1 { "" } else { "s" };
+        why.push(format!(
+            "Brim adds {brim_rows} row{s} of buttons here, so this message can have at most {} of its own",
+            5usize.saturating_sub(brim_rows)
+        ));
+    }
+    // Ready-made buttons and menus answer only on a Message Builder post (their handler checks it).
+    let link = |c: &Value| c["type"] == 2 && c["url"].is_string() && c.get("action").is_none();
+    if rows
+        .iter()
+        .flat_map(|r| r["components"].as_array().into_iter().flatten())
+        .any(|c| !link(c))
+    {
+        why.push("here your own buttons must be link buttons: menus and ready-made buttons work only on a message the Message Builder posts".into());
+    }
+    let text = msg["content"]
+        .as_str()
+        .is_some_and(|c| !c.trim().is_empty());
+    if !text && msg["embeds"].as_array().is_none_or(Vec::is_empty) {
+        why.push("this message has no text and no embed".into());
+    }
+    why
+}
+
 /// Important variables an edited copy dropped (red warning, not a block).
 pub fn dropped(key: &str, msg: &Value) -> Vec<String> {
     let Some(d) = find(key) else { return vec![] };
@@ -7460,6 +7505,29 @@ fn collect(v: &Value, out: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fits_gives_each_reason() {
+        let ok = json!({"embeds": [{"title": "Hi", "description": "Welcome to {guild.name}"}]});
+        assert!(fits("verify.panel", &ok, 1).is_empty());
+        let mut m = ok.clone();
+        m["embeds"][0]["description"] = json!("Welcome {ga_prize}");
+        let why = fits("verify.panel", &m, 1);
+        assert_eq!(why.len(), 2, "{why:?}");
+        assert!(why[0].contains("{ga_prize}") && why[1].contains("{guild.name}"));
+        let link = json!({"type": 2, "style": 5, "label": "Site", "url": "https://example.com"});
+        m = ok.clone();
+        m["components"] = json!(vec![json!({"type": 1, "components": [link]}); 4]);
+        assert!(fits("verify.panel", &m, 1).is_empty());
+        assert!(fits("verify.panel", &m, 2)[0].contains("at most 3"));
+        m["components"] = json!([{"type": 1, "components": [{"type": 2, "style": 1, "label": "x", "action": "rules"}]}]);
+        assert!(fits("verify.panel", &m, 1)[0].contains("link buttons"));
+        assert!(fits("verify.panel", &json!({"content": ""}), 1)
+            .iter()
+            .any(|w| w.contains("no text")));
+        assert!(fits(HIDDEN[0], &ok, 0)[0].contains("cannot be changed"));
+        assert!(!fits("no.such", &ok, 0).is_empty());
+    }
+
     use super::*;
 
     /// Each entry's names are one to one, and no name members type is the code name of another
