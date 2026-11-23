@@ -18,8 +18,15 @@ enum Item {
     C(&'static str),
     /// The Cases page: rows of (number, kind, open or closed, grey text).
     K(&'static [(&'static str, &'static str, &'static str, &'static str)]),
+    /// A dashboard settings page, built from the page's own parts: module, page, big title and cards of (card title, field JSON).
+    /// Kinds: s switch (on), c choice, p channel picker, r role picker with chips, n text field.
+    D(&'static str, &'static str, &'static str, &'static [Card]),
+    /// The Message Builder itself (editor and live preview) on the verification panel, from the dashboard's own editor.
+    B,
 }
-use Item::{C, E, K, L, M, P, T};
+/// A card of a dashboard page: its title and its fields, each the JSON of a schema field that the page's own `Field` draws.
+type Card = (&'static str, &'static [&'static str]);
+use Item::{B, C, D, E, K, L, M, P, T};
 
 /// Line text, layout class (see .l-* in style.css) and the pieces of its scene.
 type Scene = (&'static str, &'static str, &'static [Item]);
@@ -30,9 +37,21 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Switch on the protection you want", "stk", &[P("Automod status", &["?Do you want Brim to monitor messages?", "Enable Automod", "Moderate invite links posted", "Filter out NSFW links", ">Next step"]), P("Antinuke status", &["?Do you want Brim to monitor moderation actions made by your staff members?", "Enable Antinuke"]), P("Quarantine", &["?Do you want the quarantine system that keeps your server safe from being destroyed?", "Use the auto quarantine module", "Guard the server's vanity url", "Quarantine role|@Quarantine"])]),
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
-        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_simple"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
-        ("A panel they press to start", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_panel"), M("Mika", "I just joined, what now?"), C("Verify")]),
-        ("Set up in the dashboard", "base", &[T("Verification log", &[("Mika pressed Verify", "verified"), ("Lee pressed Verify", "verified"), ("bot-9 never answered", "kicked")]), E("verify_help"), M("Mika", "How do I verify?"), C("Help")])]),
+        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
+        ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
+        ("Make the panel your own, in the builder", "builder", &[B]),
+        ("Set up in the dashboard", "dash", &[D("Server Joins", "Verification", "General Settings", &[
+            ("General", &[
+                r#"{"path":"verification.enabled","kind":"bool","title":"Use the verification module","tip":"Off: new members get full access without a check."}"#,
+                r#"{"path":"verification.target","kind":"choice","title":"Verification targets","options":["Everyone","SuspiciousOnly"],"default":"Everyone"}"#,
+                r#"{"path":"verification.on_fail","kind":"choice","title":"Fail action","options":["Nothing","Kick","Ban","Quarantine"],"default":"Kick","tip":"Kick, Ban and Quarantine run when the verification duration ends after the join."}"#,
+                r#"{"path":"verification.mode","kind":"choice","title":"Verification mode","options":["Captcha","Web","Dm","SimpleCaptcha","Button"],"default":"Captcha"}"#,
+            ]),
+            ("Captcha", &[
+                r#"{"path":"verification.captcha.length","kind":"int","title":"Captcha answer length","default":6,"min":1,"max":10}"#,
+                r#"{"path":"verification.captcha.trace","kind":"bool","title":"Show a colored trace that follows the captcha characters","default":true}"#,
+                r#"{"path":"verification.captcha.spread","kind":"bool","title":"Show small spread-around characters to trick scripts","default":true}"#,
+            ])]), C("Settings")])]),
     ("Anti-raid.", &[
         ("Joins pause when a wave of accounts arrives", "base", &[T("Raider List", &[("raid-acct-1", "listed"), ("raid-acct-2", "listed"), ("raid-acct-3", "listed")]), E("raid"), M("New accounts", "8 joined in 10 seconds"), C("Raid")]),
         ("Every raid gets a report", "base", &[T("Raid report", &[("8 joins in 10 s", "paused"), ("6 accounts without avatar", "flagged"), ("Joins resumed", "ok")]), E("raid_report"), M("Mika", "Joined 3 minutes ago, no avatar"), C("Report")]),
@@ -125,11 +144,13 @@ fn fit() {
             all.push((s.clone(), group(&s)));
         }
         let max = |f: fn(&(f64, f64, f64, f64)) -> f64| all.iter().map(|(_, g)| f(g)).fold(0.0, f64::max);
-        let (mgw, mgh, mw1, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.2), max(|g| g.3));
+        let (mgw, mgh, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.3));
         let mnw1 = all.iter().map(|(_, g)| g.2).fold(f64::MAX, f64::min);
-        let bh = mgh + 96.0;
+        // The bottom stars sit 72 px under the first piece, so a first piece that is the tallest gets more room below.
+        let pad = (mh1 + 72.0 - mgh).max(48.0);
+        let bh = mgh + 2.0 * pad;
         let k = (w / bw).min(0.85);
-        let (l, t) = ((bw - mgw) / 2.0, (bh - mgh) / 2.0);
+        let (l, t) = ((bw - mgw) / 2.0, pad);
         // Every scene starts at the same corner (the union of all groups is centred), so the stars stay clear of each one.
         for (s, _) in &all {
             let _ = s.style().set_property("--k", &k.to_string());
@@ -144,15 +165,17 @@ fn fit() {
         let slots = if phone {
             [(l + 22.0, t - 22.0), (l + 52.0, t - 30.0), (l + mgw - 24.0, t - 20.0), (l + mgw - 52.0, t - 28.0), (l + 24.0, t + mgh + 22.0), (l + 54.0, t + mgh + 30.0)]
         } else {
-            let bx = l + 0.115 * mnw1; // left of the third piece, which starts 23% into the first
-            [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + mw1 + 14.0, t + 10.0), (l + mw1 + 40.0, t + 30.0), (bx, t + mh1 + 22.0), (bx - 6.0, t + mh1 + 56.0)]
+            // The stars follow the open scene's first piece (a dashboard page or the builder is wider and taller than a sample message).
+            let (w1, h1) = all.iter().find(|(s, _)| s.class_list().contains("on")).map_or((mnw1, mh1), |(_, g)| (g.2, g.3));
+            let bx = l + 0.115 * w1; // left of the third piece, which starts 23% into the first
+            [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + w1 + 14.0, t + 10.0), (l + w1 + 40.0, t + 30.0), (bx, t + h1 + 22.0), (bx - 6.0, t + h1 + 56.0)]
         };
         let Ok(stars) = b.query_selector_all(".fx > i") else { continue };
         for n in 0..stars.length().min(6) {
             let Some(st) = html(stars.item(n)) else { continue };
             let (x, y) = slots[n as usize];
             let half = f64::from(st.offset_width()) / 2.0;
-            let _ = st.style().set_property("left", &format!("{}px", (x * k - half).max(0.0).min(if phone { w - half * 2.0 } else { 1e9 })));
+            let _ = st.style().set_property("left", &format!("{}px", { let l = x * k - half; if phone { l.max(0.0).min(w - half * 2.0) } else { l } }));
             let _ = st.style().set_property("top", &format!("{}px", y * k - half));
         }
     }
@@ -201,6 +224,8 @@ pub fn Landing(
     #[prop(optional)]
     signed_in: bool,
 ) -> impl IntoView {
+    // Head (the page header a scene shows) reads the server list from the context; the front page has none.
+    provide_context(signal(Vec::<serde_json::Value>::new()).0);
     // A ban DM links to #/appeal/<id>, and the login comes back to the page that was open.
     let hash = web_sys::window().unwrap().location().hash().unwrap_or_default();
     let login = if signed_in {
@@ -305,6 +330,23 @@ pub fn Landing(
                                     C(text) => view! { <div class="co">{text}</div> }.into_any(),
                                     M(name, text) => view! { <div class="win mm"><i class="mmav" aria-hidden="true"></i><div><b>{name}</b><p>{text}</p></div></div> }.into_any(),
                                     K(rows) => view! { <div class="win tbl caselist stack">{rows.iter().map(|(no, kind, state, meta)| view! { <div class="card link"><b class="no">{*no}</b><span class="what"><span><b>{*kind}</b>" "<span class="chip" class:ok=(*state == "open")>{*state}</span></span><span class="muted">{*meta}</span></span></div> }).collect_view()}</div> }.into_any(),
+                                    B => {
+                                        // The panel's own default text with its variable, as the editor shows it.
+                                        let mut body = sample("verify_panel");
+                                        // The samples load after the first draw; until then the editor shows an empty message.
+                                        if let Some(e) = body["embeds"].get_mut(0) { e["description"] = "To access `{guild.name}`, you need to pass the verification first.".into(); } else { body = serde_json::json!({}); }
+                                        let cur = RwSignal::new(serde_json::json!({"body": body}));
+                                        let ed = crate::embeds::Editor::new(cur, StoredValue::new(String::new()), true);
+                                        let (message_tab, preview_tab, pop_view) = ed.views();
+                                        ed.edit.set(Some(true));
+                                        view! { <div class="win builder" inert=true>{crate::embeds::split(ed.edit, message_tab, preview_tab)}{pop_view}</div> }.into_any()
+                                    }
+                                    D(module, page, big, cards) => {
+                                        // The page's own `Field` on a local copy of its settings; nothing is saved.
+                                        let val = RwSignal::new(serde_json::json!({"verification": {"enabled": true}}));
+                                        let dc = RwSignal::new(serde_json::json!({"channels": [], "roles": []}));
+                                        view! { <div class="win dash" inert=true><crate::common::Head guild=String::new() page=page.to_string() big=big.to_string() module=Some((module.to_string(), "#".to_string())) /><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|f| view! { <crate::form::Field f=serde_json::from_str(f).unwrap_or_default() val dc /> }).collect_view()}</div></div> }).collect_view()}</div></div> }.into_any()
+                                    }
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
                                 }).collect_view()}</div> }).collect_view()}
                             </div>
@@ -370,10 +412,23 @@ mod tests {
         assert!(appeal_login("").is_none());
     }
 
+    /// The editor text of the verification panel scene is the bot's own default (botmsg.rs) in its public form, so a change there fails this test until the scene follows.
+    #[test]
+    fn verification_scene_text_is_the_bot_default() {
+        let bot = include_str!("../../../logging/src/botmsg.rs");
+        let rows: Vec<&str> = SECTIONS.iter().flat_map(|(_, t)| t.iter()).flat_map(|(_, _, items)| items.iter()).filter_map(|it| match it { Item::P(_, rows) => Some(rows.iter().copied()), _ => None }).flatten().collect();
+        let desc = rows.iter().find_map(|r| r.strip_prefix("Description|To access")).expect("the verification scene has the panel description");
+        // The editor shows the public name (`{guild.name}`). The code holds either that or the old code name `{server}`, which a mapping turns into it.
+        let esc = |t: String| t.replace('{', "{{").replace('}', "}}");
+        let public = esc(format!("To access{desc}"));
+        let old = esc(format!("To access{desc}").replace("{guild.name}", "{server}"));
+        assert!(bot.contains(&public) || bot.contains(&old), "default verify.panel text changed: {public}");
+    }
+
     /// Every setting, card title and button a scene names exists in the dashboard's own source (schema, wizard cards, pages).
     #[test]
     fn scenes_name_real_settings() {
-        let src: String = [include_str!("../../src/schema.rs"), include_str!("wizard.rs"), include_str!("main.rs"), include_str!("layout.rs"), include_str!("recovery.rs"), include_str!("feeds.rs"), include_str!("channels.rs"), include_str!("embeds.rs"), include_str!("raiders.rs"), include_str!("tickets.rs"), include_str!("pages.rs")].concat();
+        let src: String = [include_str!("../../src/schema.rs"), include_str!("wizard.rs"), include_str!("main.rs"), include_str!("layout.rs"), include_str!("recovery.rs"), include_str!("feeds.rs"), include_str!("channels.rs"), include_str!("embeds.rs"), include_str!("raiders.rs"), include_str!("tickets.rs"), include_str!("pages.rs"), include_str!("discord.rs"), include_str!("form.rs")].concat();
         // Sample data a scene shows (names, ids, times) is not a setting.
         let mut bad = vec![];
         // A field without a title shows its path as words ("ignored_channels" is "Ignored channels"); a backup title carries its id.
@@ -394,6 +449,7 @@ mod tests {
                             }
                         }
                         Item::L(title, btn, _) => { check(title); check(btn) }
+                        Item::D(module, page, big, cards) => { check(module); check(page); check(big); for (name, fields) in cards.iter() { check(name); for f in fields.iter() { check(serde_json::from_str::<serde_json::Value>(f).unwrap()["title"].as_str().unwrap()) } } }
                         _ => {}
                     }
                 }
