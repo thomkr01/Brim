@@ -654,7 +654,7 @@ pub fn BotMessages(
                     // What it is and an example, on hover.
                     let tip = info.iter().find(|(n, ..)| format!("{{{n}}}") == v).map_or("Click to copy.".to_string(), |(_, l, ex)| match ex.is_empty() {
                         true => format!("{l}. Click to copy."),
-                        false => format!("{l}, for example “{ex}”. Click to copy."),
+                        false => format!("{l}, for example “{}”. Click to copy.", ex.replace(['*', '`'], "")),
                     });
                     let t = v.clone();
                     view! { <button class="chip copyvar" class:need=miss title=tip on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}</button> }
