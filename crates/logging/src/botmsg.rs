@@ -7282,6 +7282,51 @@ mod tests {
         assert!(m["embeds"][0]["image"].is_null());
     }
 
+    /// With no sponsor the giveaway messages show nothing of one: no picture, no "Sponsored by"
+    /// line, no stray label.
+    #[test]
+    fn giveaway_messages_show_no_sponsor_without_one() {
+        let vars = [
+            ("prize", "P"),
+            ("ends", "soon"),
+            ("ended", "now"),
+            ("winners", "W"),
+            ("host", "H"),
+            ("sponsor", ""),
+            ("sponsor_picture", ""),
+            ("link", "https://discord.com/x"),
+            ("claim", "2d"),
+            ("closes", "soon"),
+            ("server", "S"),
+            ("deadline", "soon"),
+        ];
+        for k in [
+            "giveaway.running",
+            "giveaway.ended",
+            "giveaway.cancelled",
+            "giveaway.winners",
+            "giveaway.no_winners",
+            "giveaway.reroll",
+            "giveaway.winner_dm",
+            "giveaway.thread",
+        ] {
+            let Some(_) = find(k) else { continue };
+            let m = render(k, None, &vars);
+            assert!(
+                !m.to_string().to_lowercase().contains("sponsor"),
+                "{k}: {m}"
+            );
+            assert!(
+                m["embeds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .all(|e| e["thumbnail"].is_null()),
+                "{k}"
+            );
+        }
+    }
+
     /// The default giveaway cards show the facts as fields; the sponsor line and an empty field
     /// are left out, never shown empty.
     #[test]
