@@ -303,6 +303,26 @@ pub fn bot(m: &Value) -> AnyView {
 #[component]
 pub fn VerifyPreview(#[prop(into)] mode: Signal<String>, #[prop(into, optional)] captcha: Signal<Option<String>>) -> impl IntoView {
     let pressed = RwSignal::new(None::<&'static str>);
+    // On a server's page: the server's copy of the panel, and the link to its editor.
+    let guild = crate::hash().into_iter().next().filter(|g| g.parse::<u64>().is_ok());
+    let copy = RwSignal::new(Value::Null);
+    if let Some(g) = guild.clone() {
+        leptos::task::spawn_local(async move {
+            if let Ok(v) = crate::common::api("GET", &format!("/api/guilds/{g}/bot-messages/verify.panel/shown"), None).await {
+                if !copy.is_disposed() {
+                    copy.set(v["message"].clone());
+                }
+            }
+        });
+    }
+    // As the bot posts it (`overlay::bot_embed`): the first embed only, no content.
+    let panel = move || {
+        let mut m = sample("verify_panel");
+        if let Some(e) = copy.with(|c| c["embeds"].get(0).cloned()) {
+            m["embeds"] = Value::Array(vec![e]);
+        }
+        m
+    };
     let click = move |e: leptos::ev::MouseEvent| {
         use wasm_bindgen::JsCast;
         let id = e.target().and_then(|t| t.dyn_into::<web_sys::Element>().ok()).and_then(|t| t.closest("[data-id]").ok().flatten()).and_then(|b| b.get_attribute("data-id"));
@@ -346,7 +366,8 @@ pub fn VerifyPreview(#[prop(into)] mode: Signal<String>, #[prop(into, optional)]
         }
         view! {
             <div class="vprev" on:click=click>
-                {show("verify_panel")}
+                {move || show_msg(panel())}
+                {guild.clone().map(|g| view! { <a class="btn ghost" href=format!("#/{g}/bot_messages/verify.panel")>"Edit message"</a> })}
                 {crate::embeds::added_notice(&serde_json::json!({"added": sample("verify_panel")["components"]}))}
                 <p class="muted">{move || if pressed.get().is_some() { "Press Verify or Help again to see the other answer." } else { "Press Verify or Help, as in Discord." }}</p>
                 {reply}

@@ -219,7 +219,7 @@ fn messages() -> Value {
         is_bot: true,
         adder: Some(YOU),
     };
-    let (panel, buttons) = verify_panel(SERVER);
+    let (panel, buttons) = verify_panel(SERVER, None);
     let answer = verify::row(verify::button("Answer", &format!("{}1", verify::ENTER)));
     let captcha = format!(
         "data:image/png;base64,{}",
@@ -325,6 +325,7 @@ fn added_buttons() -> Value {
         "reply.confirm.question": [crate::confirm::sample_question(MEMBER).1],
         "log.mod_command.raider_list_match": crate::raiders::alert_rows(MEMBER),
         "log.mod_command.case": crate::undo::rows(4151, "ban"),
+        "verify.panel": [verify_panel(SERVER, None).1],
         "verify.kicked": [verify::row(crate::welcome::link("Join again", jump()))],
         "verify.ban_ended": [verify::row(crate::welcome::link("Join again", jump()))],
         "log.report.message_reported": crate::reports::rows(1, jump(), true),

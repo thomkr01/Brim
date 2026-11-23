@@ -195,7 +195,8 @@ pub async fn setup(app: &App, gid: Id<GuildMarker>) -> Result<crate::reply::Said
     if app.http.channel(ch).await?.model().await?.guild_id != Some(gid) {
         return Ok(say("reply.verify.wrong_channel").await);
     }
-    let (embed, buttons) = verify_panel(&guild_name(app, gid).await);
+    let stored = crate::reply::stored_msg(app, gid, "verify.panel").await;
+    let (embed, buttons) = verify_panel(&guild_name(app, gid).await, stored.as_ref());
     app.http
         .create_message(ch)
         .embeds(&[embed])

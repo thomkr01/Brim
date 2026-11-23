@@ -290,7 +290,7 @@ fn is_security(key: &str) -> bool {
     botmsg::find(key).is_some_and(|d| d.security)
 }
 
-async fn stored(
+pub(crate) async fn stored(
     db: impl sqlx::PgExecutor<'_>,
     guild: i64,
     key: &str,

@@ -352,15 +352,10 @@ pub fn button(label: &str, id: &str, style: ButtonStyle) -> Component {
     })
 }
 
-/// The verify panel, posted by the `verifysetup` command and by the dashboard wizard.
-pub fn verify_panel(server: &str) -> (Embed, Component) {
-    let embed = EmbedBuilder::new()
-        .color(GREEN)
-        .title(format!("{} Verification Required!", crate::emoji::CAPTCHA))
-        .description(format!(
-            "To access `{server}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."
-        ))
-        .build();
+/// The verify panel, posted by the `verifysetup` command and by the dashboard wizard: the entry
+/// `verify.panel` (the server's copy `stored`, else the default) and the buttons Brim adds.
+pub fn verify_panel(server: &str, stored: Option<&serde_json::Value>) -> (Embed, Component) {
+    let embed = crate::overlay::bot_embed("verify.panel", stored, &[("server", server)]);
     let row = Component::ActionRow(ActionRow {
         id: None,
         components: vec![
@@ -374,6 +369,19 @@ pub fn verify_panel(server: &str) -> (Embed, Component) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verify_panel_takes_the_servers_copy() {
+        let copy =
+            serde_json::json!({"embeds": [{"title": "Hi", "description": "Welcome to {server}"}]});
+        let (e, row) = verify_panel("Mine", Some(&copy));
+        assert_eq!(e.description.as_deref(), Some("Welcome to Mine"));
+        assert!(matches!(row, Component::ActionRow(r) if r.components.len() == 2));
+        // A copy without the required server name sends the default.
+        let lost = serde_json::json!({"embeds": [{"description": "Welcome"}]});
+        let d = verify_panel("Mine", Some(&lost)).0.description.unwrap();
+        assert!(d.contains("`Mine`"), "{d}");
+    }
 
     #[test]
     fn clip_marks_cut_text() {

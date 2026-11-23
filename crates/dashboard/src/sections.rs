@@ -1134,8 +1134,11 @@ async fn verify_channel(
         .discord
         .call(Method::GET, &format!("/guilds/{guild}"), None)
         .await?;
-    let (embed, buttons) =
-        brim_logging::embed::verify_panel(server["name"].as_str().unwrap_or("the server"));
+    let stored = crate::botmsgs::stored(&st.db, guild, "verify.panel").await?;
+    let (embed, buttons) = brim_logging::embed::verify_panel(
+        server["name"].as_str().unwrap_or("the server"),
+        stored.as_ref(),
+    );
     let mut tx = st.db.begin().await?;
     let version = store::commit(&mut tx, guild, b.expected_version, &config, s.user_id).await?;
     tx.commit().await?;

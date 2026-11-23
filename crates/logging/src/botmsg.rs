@@ -5633,6 +5633,18 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         GREEN,
         &format!("{YES} You passed the verification. You can now access `{{server}}`!"),
     ));
+    // The panel the `verifysetup` command and the dashboard post; Brim adds Verify and Help.
+    let mut d = plain(
+        "verify.panel",
+        "Verification panel",
+        g,
+        &["server"],
+        &format!("{CAPTCHA} Verification Required!"),
+        GREEN,
+        &format!("To access `{{server}}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."),
+    );
+    d.required = vec!["server"];
+    out.push(d);
     out.push(plain(
         "verify.wrong",
         "Wrong captcha answer",
