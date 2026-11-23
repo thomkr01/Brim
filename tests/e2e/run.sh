@@ -51,7 +51,7 @@ up $DASHBOARD_URL
 
 # dashboard.js counts rows of these tables, so a second run on the same database starts clean.
 # The bot saves the buttons it adds under its messages at start; the mock has no bot, so seed the Enter button.
-psql "$DATABASE_URL" -q -c "insert into bot_previews (id, messages) values (true, '{\"buttons\": {\"giveaway.running\": [{\"type\": 1, \"components\": [{\"type\": 2, \"style\": 1, \"label\": \"Enter\", \"custom_id\": \"gw:e:1\", \"emoji\": {\"name\": \"🎉\"}}]}]}}') on conflict (id) do update set messages = excluded.messages"
+psql "$DATABASE_URL" -q -c "insert into bot_previews (id, messages) values (true, '{\"buttons\": {\"giveaway.running\": [{\"type\": 1, \"components\": [{\"type\": 2, \"style\": 1, \"label\": \"Enter\", \"custom_id\": \"gw:e:1\", \"emoji\": {\"name\": \"🎉\"}}]}], \"giveaway.winners\": [{\"type\": 1, \"components\": [{\"type\": 2, \"style\": 3, \"label\": \"Claim\", \"custom_id\": \"gw:c:1\", \"emoji\": {\"name\": \"🏆\"}}]}]}}') on conflict (id) do update set messages = excluded.messages"
 psql "$DATABASE_URL" -q -c "delete from message_sends; delete from message_rules; delete from sticky_msgs; delete from scheduled_jobs where kind = 'case_log'"
 if [ -n "${DEEP:-}" ]; then
   # The mock's owner is the guild owner, so the dashboard grants owner level without any seed data.

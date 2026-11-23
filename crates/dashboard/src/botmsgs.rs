@@ -63,6 +63,7 @@ pub fn routes() -> Router<AppState> {
         .route(&format!("{g}/{{key}}/revert"), post(revert))
         .route(&format!("{g}/{{key}}/undo"), post(undo))
         .route(&format!("{g}/{{key}}/test"), post(test))
+        .route(&format!("{g}/{{key}}/shown"), get(shown))
 }
 
 /// Every built-in message with its default, the server's copy and a pending undo.
@@ -180,6 +181,57 @@ async fn added_buttons(
         }
     }
     Ok(all)
+}
+
+/// One message as members see it, with example values: the server's copy (else the default),
+/// filled in, and the buttons Brim adds. A page draws it beside an Edit message link.
+async fn shown(
+    State(st): State<AppState>,
+    s: Sess,
+    Path((guild, key)): Path<(i64, String)>,
+) -> Res {
+    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    let d = botmsg::find(&key).ok_or(ApiError::NotFound)?;
+    if botmsg::HIDDEN.contains(&key.as_str()) {
+        return Err(ApiError::NotFound);
+    }
+    let stored: Option<Value> = match d.locked {
+        true => None,
+        false => {
+            sqlx::query_scalar("select message from bot_messages where guild_id = $1 and key = $2")
+                .bind(botmsg::copy_guild(&key, guild))
+                .bind(&key)
+                .fetch_optional(&st.db)
+                .await?
+        }
+    };
+    let server = st
+        .discord
+        .guild_name(guild)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let ex = examples(d, &server);
+    let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let mut m = botmsg::render(&key, stored.as_ref(), &vars);
+    // Brim emoji tags (`{e:name}`) in the texts, as `panel_message` fills them.
+    for e in m["embeds"].as_array_mut().into_iter().flatten() {
+        for p in ["/title", "/description", "/footer/text"] {
+            if let Some(v) = e.pointer_mut(p) {
+                if let Some(t) = v.as_str() {
+                    *v = json!(brim_logging::emoji::fill(t).trim());
+                }
+            }
+        }
+    }
+    let (_, cfg) = crate::store::current(&st.db, guild).await?;
+    let tickets: brim_core::sections::TicketsCfg =
+        serde_json::from_value(cfg["tickets"].clone()).unwrap_or_default();
+    let added = added_buttons(&st, guild, &tickets).await?;
+    Ok(Json(
+        json!({"message": m, "added": added.get(key.as_str())}),
+    ))
 }
 
 /// The outside-server keys, for SQL.

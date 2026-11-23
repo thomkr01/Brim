@@ -8,6 +8,41 @@ use crate::embeds::Editor;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
+/// A few messages of one place in one preview box: a switch between them, the message as
+/// members see it with the buttons Brim adds, and the Edit message link of the one shown.
+#[component]
+pub fn MessageSwitch(guild: String, keys: Vec<(&'static str, &'static str)>) -> impl IntoView {
+    let pick = RwSignal::new(keys[0].0);
+    let shown = RwSignal::new(Value::Null);
+    let g = StoredValue::new(guild);
+    Effect::new(move |_| {
+        let k = pick.get();
+        shown.set(Value::Null);
+        spawn_local(async move {
+            let r = api("GET", &format!("/api/guilds/{}/bot-messages/{k}/shown", g.get_value()), None).await;
+            if !shown.is_disposed() && pick.get_untracked() == k {
+                shown.set(r.unwrap_or_else(|e| json!({"error": e})));
+            }
+        });
+    });
+    let tabs = keys.into_iter().map(|(k, l)| view! { <button class:on=move || pick.get() == k on:click=move |_| pick.set(k)>{l}</button> }).collect_view();
+    view! {
+        <div class="seg" role="group" aria-label="message">{tabs}</div>
+        <div class="msgswitch">{move || {
+            let v = shown.get();
+            if v.is_null() {
+                return view! { <p class="loading"><Working /></p> }.into_any();
+            }
+            if let Some(e) = v["error"].as_str() {
+                return view! { <p class="err">{e.to_string()}</p> }.into_any();
+            }
+            let c = json!({"added": v["added"]});
+            let m = crate::embeds::with_added(&c, v["message"].clone());
+            view! { {crate::discord::bot(&m)}{crate::embeds::added_notice(&c)}<a class="btn ghost" href=format!("#/{}/bot_messages/{}", g.get_value(), pick.get())>"Edit message"</a> }.into_any()
+        }}</div>
+    }
+}
+
 /// Variables of a template, as the editor's list wants them.
 fn vars_of(m: &Value) -> Vec<(String, String, String)> {
     m["vars"]

@@ -584,18 +584,11 @@ pub fn Giveaways(guild: String) -> impl IntoView {
                 on_edit=Callback::new(edit_saved) on_delete=Callback::new(delete_saved) />
         }.into_any()
     };
-    let gl = guild.clone();
     view! {
         <Section guild=guild.clone() name="giveaways".to_string() on_save=Callback::new(move |_| load()) />
         <div class="card">
             <h3>"Messages"</h3>
-            <p class="muted small">"Each message opens with its preview and an Edit message button."</p>
-            <div class="row">
-                <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.running")>"Giveaway message"</a>
-                <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.ended")>"Ended message"</a>
-                <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.winners")>"Winners post"</a>
-                <a class="btn ghost" href=format!("#/{gl}/bot_messages/giveaway.winner_dm")>"Winner DM"</a>
-            </div>
+            <crate::botmsgs::MessageSwitch guild=guild.clone() keys=vec![("giveaway.running", "Running"), ("giveaway.ended", "Ended"), ("giveaway.winners", "Winners post"), ("giveaway.winner_dm", "Winner DM")] />
         </div>
         {list}
         {form_view}

@@ -81,7 +81,7 @@ fn body_to_save(c: &Value) -> Value {
 
 /// `msg` with the buttons Brim adds itself (`c["added"]`, rows as Discord takes them), marked so
 /// the preview draws them as not editable.
-fn with_added(c: &Value, mut msg: Value) -> Value {
+pub(crate) fn with_added(c: &Value, mut msg: Value) -> Value {
     let mut rows = msg["components"].as_array().cloned().unwrap_or_default();
     for mut r in c["added"].as_array().cloned().unwrap_or_default() {
         for b in r["components"].as_array_mut().into_iter().flatten() {
