@@ -387,7 +387,7 @@ pub fn Feeds(guild: String) -> impl IntoView {
             orig.set(body.clone());
             cur.set(json!({"body": body}));
             ed.reset();
-            ed.edit.set(admin().then_some(false));
+            ed.edit.set(admin().then_some(true));
             open.set(Some((f, row)));
         })
     };

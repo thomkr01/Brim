@@ -8,38 +8,17 @@ use crate::embeds::Editor;
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
-/// A few messages of one place in one preview box: a switch between them, the message as
-/// members see it with the buttons Brim adds, and the Edit message link of the one shown.
+/// A few messages of one place, a switch between them, and the one shown editable in place (the
+/// same editor and save as the Messages page, with a link there for more tools). Only the shown
+/// one is open, so the variable list is its own; a switch asks first when there are unsaved edits.
 #[component]
 pub fn MessageSwitch(guild: String, keys: Vec<(&'static str, &'static str)>) -> impl IntoView {
     let pick = RwSignal::new(keys[0].0);
-    let shown = RwSignal::new(Value::Null);
     let g = StoredValue::new(guild);
-    Effect::new(move |_| {
-        let k = pick.get();
-        shown.set(Value::Null);
-        spawn_local(async move {
-            let r = api("GET", &format!("/api/guilds/{}/bot-messages/{k}/shown", g.get_value()), None).await;
-            if !shown.is_disposed() && pick.get_untracked() == k {
-                shown.set(r.unwrap_or_else(|e| json!({"error": e})));
-            }
-        });
-    });
-    let tabs = keys.into_iter().map(|(k, l)| view! { <button class:on=move || pick.get() == k on:click=move |_| pick.set(k)>{l}</button> }).collect_view();
+    let tabs = keys.into_iter().map(|(k, l)| view! { <button class:on=move || pick.get() == k on:click=move |_| crate::guard::leave(move || pick.set(k))>{l}</button> }).collect_view();
     view! {
         <div class="seg" role="group" aria-label="message">{tabs}</div>
-        <div class="msgswitch">{move || {
-            let v = shown.get();
-            if v.is_null() {
-                return view! { <p class="loading"><Working /></p> }.into_any();
-            }
-            if let Some(e) = v["error"].as_str() {
-                return view! { <p class="err">{e.to_string()}</p> }.into_any();
-            }
-            let c = json!({"added": v["added"]});
-            let m = crate::embeds::with_added(&c, v["message"].clone());
-            view! { {crate::discord::bot(&m)}{crate::embeds::added_notice(&c)}<a class="btn ghost" href=format!("#/{}/bot_messages/{}", g.get_value(), pick.get())>"Edit message"</a> }.into_any()
-        }}</div>
+        <div class="msgswitch">{move || view! { <BotMessages guild=g.get_value() open_key=pick.get().to_string() embedded=true /> }}</div>
     }
 }
 
@@ -201,6 +180,10 @@ pub fn BotMessages(
     /// Opened from the Tickets tab (`.../from-tickets` in the link): a Back button returns there.
     #[prop(optional)]
     from_tickets: bool,
+    /// On another page: only the message `open_key` names, editable in place, with a link to the
+    /// Messages page for more tools.
+    #[prop(optional)]
+    embedded: bool,
 ) -> impl IntoView {
     let g = StoredValue::new(guild);
     let pending = StoredValue::new(open_key);
@@ -272,7 +255,7 @@ pub fn BotMessages(
         orig.set(body.clone());
         cur.set(json!({"body": body, "added": r["buttons"]}));
         ed.reset();
-        ed.edit.set((!(r["locked"] == true || !may(&r))).then_some(false));
+        ed.edit.set((!(r["locked"] == true || !may(&r))).then_some(true));
         open.set(Some(r));
     };
     Effect::new(move |_| {
@@ -642,6 +625,7 @@ pub fn BotMessages(
         let can_edit = !locked && may(&r);
         let (r1, r2) = (r.clone(), r.clone());
         let rkey = format!("{}/revert", r["key"].as_str().unwrap_or(""));
+        let rkey_link = r["key"].as_str().unwrap_or("").to_string();
         let warn = move || {
             let gone = cur.with(|c| dropped(&r1, &c["body"]));
             (can_edit && !gone.is_empty()).then(|| {
@@ -680,7 +664,8 @@ pub fn BotMessages(
         let edited = r["message"].is_object() && !locked;
         view! {
             <div class="mbhead">
-                <button class="ghost back" on:click=move |_| back(None)>"← Default messages"</button>
+                {(!embedded).then(|| view! { <button class="ghost back" on:click=move |_| back(None)>"← Default messages"</button> })}
+                {embedded.then(|| view! { <a class="btn ghost" href=format!("#/{}/bot_messages/{}", g.get_value(), rkey_link)>{crate::icons::icon("edit")}"More tools"</a> })}
                 {from_tickets.then(|| view! { <button class="ghost back" on:click=move |_| back(Some(format!("/{}/tickets", g.get_value())))>"← Back to Tickets"</button> })}
                 <b class="name">{r["name"].as_str().unwrap_or("").to_string()}</b>
                 <span class="states">{badge(&r)}</span>
@@ -703,7 +688,7 @@ pub fn BotMessages(
         }.into_any()
     };
     view! {
-        {move || if open.with(Option::is_some) { editor() } else { list() }}
+        {move || if open.with(Option::is_some) { editor() } else if embedded { view! { <p class="loading"><Working /></p> }.into_any() } else { list() }}
         <Toast msg />
     }
 }

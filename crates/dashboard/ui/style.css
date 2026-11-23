@@ -904,9 +904,9 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .pane .tog > label { flex:none; }
 /* Message page: the preview on the right, the editor on the left behind "Edit message". */
 .msplit { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-16); align-items:start; } .msplit.two { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .mside { min-width:0; } .vchip { max-width:100%; overflow:hidden; text-overflow:ellipsis; vertical-align:bottom; }
-.msplit.two .mview { position:sticky; top:var(--space-16); } .mtop { display:flex; align-items:center; gap:var(--space-8); margin-bottom:var(--space-8); } .editbtn { display:inline-flex; align-items:center; gap:var(--space-8); }
+.msplit.two .mview { position:sticky; top:var(--space-16); }
 .added-note { display:flex; gap:var(--space-8); align-items:flex-start; margin:0 0 var(--space-12); padding:var(--space-8) var(--space-12); border:1px solid var(--accent); border-radius:var(--radius-row); background:var(--b2); font-size:var(--fs-ui); }
-@media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { position:static; order:-1; } }
+@media (max-width:900px) { .msplit.two { grid-template-columns:minmax(0,1fr); } .msplit.two .mview { position:static; } }
 /* Preview: a click on a part edits it (the outline is on the part itself); wide enough, the phone preview sits beside the desktop one. */
 .pvwrap.can [data-p], .pvwrap.can [data-b] { cursor:pointer; outline:2px solid transparent; transition:outline-color var(--dur) var(--ease); } .pvwrap.can [data-p] { border-radius:var(--radius-row); padding:2px 6px; margin:-2px -6px; } .pvwrap.can [data-p]:hover, .pvwrap.can [data-b]:hover { outline-color:var(--accent); }
 .pvboth { display:flex; gap:var(--space-16); align-items:flex-start; } .pvboth > .pvwrap { flex:1 1 0; min-width:0; } .pvboth > .pvside { flex:none; width:380px; }
