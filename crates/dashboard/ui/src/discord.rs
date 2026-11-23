@@ -367,8 +367,8 @@ pub fn VerifyPreview(#[prop(into)] mode: Signal<String>, #[prop(into, optional)]
         view! {
             <div class="vprev" on:click=click>
                 {move || show_msg(panel())}
-                {guild.clone().map(|g| view! { <a class="btn ghost" href=format!("#/{g}/bot_messages/verify.panel")>"Edit message"</a> })}
                 {crate::embeds::added_notice(&serde_json::json!({"added": sample("verify_panel")["components"]}))}
+                {guild.clone().map(|g| view! { <a class="btn ghost" href=format!("#/{g}/bot_messages/verify.panel")>"Edit message"</a> })}
                 <p class="muted">{move || if pressed.get().is_some() { "Press Verify or Help again to see the other answer." } else { "Press Verify or Help, as in Discord." }}</p>
                 {reply}
             </div>
