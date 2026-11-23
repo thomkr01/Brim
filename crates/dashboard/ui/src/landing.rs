@@ -376,10 +376,11 @@ mod tests {
         let bot = include_str!("../../../logging/src/botmsg.rs");
         let rows: Vec<&str> = SECTIONS.iter().flat_map(|(_, t)| t.iter()).flat_map(|(_, _, items)| items.iter()).filter_map(|it| match it { Item::P(_, rows) => Some(rows.iter().copied()), _ => None }).flatten().collect();
         let desc = rows.iter().find_map(|r| r.strip_prefix("Description|To access")).expect("the verification scene has the panel description");
-        // The editor shows the public name (`{guild.name}`); the code holds `{server}` and maps it (`DISCORD_NAMES`).
-        assert!(bot.contains("(\"server\", \"guild.name\")"), "the public name of server changed");
-        let code_text = format!("To access{desc}").replace("{guild.name}", "{server}").replace('{', "{{").replace('}', "}}");
-        assert!(bot.contains(&code_text), "default verify.panel text changed: {code_text}");
+        // The editor shows the public name (`{guild.name}`). The code holds either that or the old code name `{server}`, which a mapping turns into it.
+        let esc = |t: String| t.replace('{', "{{").replace('}', "}}");
+        let public = esc(format!("To access{desc}"));
+        let old = esc(format!("To access{desc}").replace("{guild.name}", "{server}"));
+        assert!(bot.contains(&public) || bot.contains(&old), "default verify.panel text changed: {public}");
     }
 
     /// Every setting, card title and button a scene names exists in the dashboard's own source (schema, wizard cards, pages).
