@@ -244,9 +244,9 @@ table.data td { padding:var(--space-12); border-top:1px solid var(--line); } tab
 /* Only the icon grows: scaling the whole .tip would scale the card too and push it past the edge. */
 .tip .i { transition:transform var(--dur-fast) var(--ease); }
 .tip:hover .i, .tip:focus-visible .i { transform:scale(1.12); } .tip:focus-visible { outline:2px solid var(--focus); }
-.tip .bubble { position:absolute; z-index:20; bottom:calc(100% + 12px); left:50%; transform:translate(calc(-50% + var(--dx, 0px)), 4px); width:max-content; max-width:min(280px, calc(80 * var(--vw))); background:rgba(12,12,12,.95); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); border:1px solid var(--line); border-radius:var(--radius-row); padding:var(--space-12) var(--space-16); color:#f5f5f5; font:400 var(--fs-caption)/1.5 Poppins, sans-serif; text-align:left; text-transform:none; box-shadow:0 10px 30px #0007; opacity:0; pointer-events:none; transition:opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
-.tip:hover .bubble, .tip:focus .bubble { opacity:1; transform:translate(calc(-50% + var(--dx, 0px)), 0); }
-.tip.below .bubble { bottom:auto; top:calc(100% + 12px); }
+.tip .bubble, .copyvar .bubble { position:absolute; z-index:20; bottom:calc(100% + 12px); left:50%; transform:translate(calc(-50% + var(--dx, 0px)), 4px); width:max-content; max-width:min(280px, calc(80 * var(--vw))); background:rgba(12,12,12,.95); -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px); border:1px solid var(--line); border-radius:var(--radius-row); padding:var(--space-12) var(--space-16); color:#f5f5f5; font:400 var(--fs-caption)/1.5 Poppins, sans-serif; text-align:left; text-transform:none; box-shadow:0 10px 30px #0007; opacity:0; pointer-events:none; transition:opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.tip:hover .bubble, .tip:focus .bubble, .copyvar:hover .bubble, .copyvar:focus-visible .bubble { opacity:1; transform:translate(calc(-50% + var(--dx, 0px)), 0); }
+.tip.below .bubble, .copyvar.below .bubble { bottom:auto; top:calc(100% + 12px); }
 /* A hidden card still takes layout room: near the right edge on a phone it made the page scroll sideways. clip (not hidden) keeps vertical overflow and sticky parts working; place() keeps a shown card inside main anyway. */
 main { overflow-x:clip; }
 .offnote { display:flex; align-items:center; margin:12px 0 0; color:var(--muted); font-size:var(--fs-caption); }
@@ -429,7 +429,7 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .note.setup-first > b, .note.req-text > b { flex:0 0 100%; }
 .note.setup-first > .muted, .note.req-text > .muted { flex:1; min-width:200px; }
 .note.req-text.bad { border-color:color-mix(in srgb, var(--bad) 60%, var(--line)); background:color-mix(in srgb, var(--bad) 10%, var(--b3)); }
-.note.req-text .chipset { flex:0 0 100%; } .note.req-text button.chip.copyvar { margin:0; cursor:pointer; } .note.req-text button.chip.copyvar.need { border-color:var(--bad); color:var(--bad); }
+.note.req-text .chipset { flex:0 0 100%; } .note.req-text button.chip.copyvar { position:relative; margin:0; cursor:pointer; } .note.req-text button.chip.copyvar.need { border-color:var(--bad); color:var(--bad); }
 @media (max-width:600px) { .note.chk:has(> .acts) { flex-wrap:wrap; } .note.chk:has(> .acts) > div { flex-basis:100%; } .note.chk > .acts { margin-left:0; justify-content:flex-start; } }
 /* Bot Profile: one panel, images left, fields middle, live previews right (two columns below 1200 px wide, one on a phone). */
 .bp { display:grid; grid-template-columns:200px minmax(0,1fr) 300px; gap:var(--space-24); align-items:start; } .bp-fields > .row:first-child { margin-top:0; }

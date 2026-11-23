@@ -657,7 +657,7 @@ pub fn BotMessages(
                         false => format!("{l}, for example “{}”. Click to copy.", ex.replace(['*', '`'], "")),
                     });
                     let t = v.clone();
-                    view! { <button class="chip copyvar" class:need=miss title=tip on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}</button> }
+                    view! { <button class="chip copyvar" class:need=miss on:mouseenter=move |e| place_bubble(&e) on:focus=move |e| place_bubble(&e) on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}<span class="bubble">{tip}</span></button> }
                 }).collect_view();
                 view! {
                     <div class="note req-text" class:bad=gone>
