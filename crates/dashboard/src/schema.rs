@@ -1489,7 +1489,7 @@ pub fn schema() -> Vec<Value> {
             "Giveaways",
             vec![
                 hp(
-                    dv(ti(fg("General", "enabled", "bool"), "Use giveaways"), true),
+                    dv(ti(fg("General", "enabled", "bool"), "Use giveaways"), false),
                     "Off: nobody can start or enter a giveaway. Running giveaways still end and draw their winners.",
                 ),
                 ti(dv(fg("New giveaways", "button_label", "text"), "Enter"), "Button label"),
@@ -1799,6 +1799,26 @@ mod tests {
             (&json!(5_000), &json!(8_640_000_000_i64))
         );
         assert!(field("antinuke", "enabled")["min"].is_null());
+    }
+
+    /// The switch of Giveaways shows what the server runs: a server with no saved giveaways
+    /// settings has them off (`GiveawaysCfg::default`), so the page must not show the switch on.
+    #[test]
+    fn the_giveaways_switch_shows_the_real_default() {
+        let g = schema()
+            .into_iter()
+            .find(|s| s["name"] == "giveaways")
+            .unwrap();
+        let f = g["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["path"] == "enabled")
+            .unwrap();
+        assert_eq!(
+            f["default"],
+            brim_core::sections::GiveawaysCfg::default().enabled
+        );
     }
 
     #[test]
