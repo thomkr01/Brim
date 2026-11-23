@@ -7444,12 +7444,16 @@ pub fn fits(key: &str, msg: &Value, brim_rows: usize) -> Vec<String> {
         ));
     }
     // Ready-made buttons and menus answer only on a Message Builder post (their handler checks it).
-    let link = |c: &Value| c["type"] == 2 && c["url"].is_string() && c.get("action").is_none();
-    if rows
-        .iter()
-        .flat_map(|r| r["components"].as_array().into_iter().flatten())
-        .any(|c| !link(c))
-    {
+    let link = |c: &Value| {
+        c["type"] == 2 && c["style"] == 5 && c["url"].is_string() && c.get("action").is_none()
+    };
+    let only_links = |r: &Value| {
+        r["type"] == 1
+            && r["components"]
+                .as_array()
+                .is_some_and(|b| b.iter().all(link))
+    };
+    if !rows.iter().all(only_links) {
         why.push("here your own buttons must be link buttons: menus and ready-made buttons work only on a message the Message Builder posts".into());
     }
     let text = msg["content"]
@@ -7514,6 +7518,8 @@ mod tests {
         assert!(fits("verify.panel", &m, 1).is_empty());
         assert!(fits("verify.panel", &m, 2)[0].contains("at most 3"));
         m["components"] = json!([{"type": 1, "components": [{"type": 2, "style": 1, "label": "x", "action": "rules"}]}]);
+        assert!(fits("verify.panel", &m, 1)[0].contains("link buttons"));
+        m["components"] = json!([{"type": 3, "options": []}]);
         assert!(fits("verify.panel", &m, 1)[0].contains("link buttons"));
         assert!(fits("verify.panel", &json!({"content": ""}), 1)
             .iter()
