@@ -20,8 +20,12 @@ pub async fn copy(app: &App, gid: Id<GuildMarker>) -> Result<Value> {
         "select jsonb_build_object(
            'embeds', (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'message', message,
                 'channel_id', channel_id, 'webhook', webhook, 'pings', pings, 'saved_level', saved_level,
-                'saved_at', saved_at, 'tag', tag, 'updated_by', updated_by, 'updated_at', updated_at)), '[]')
+                'saved_at', saved_at, 'tag', tag, 'updated_by', updated_by, 'updated_at', updated_at,
+                'category_id', category_id, 'position', position)), '[]')
               from embeds where guild_id = $1),
+           'categories', (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name,
+                'position', position, 'updated_by', updated_by, 'updated_at', updated_at)), '[]')
+              from message_categories where guild_id = $1),
            'rules', (select coalesce(jsonb_agg(jsonb_build_object('id', id, 'embed_id', embed_id, 'kind', kind,
                 'enabled', enabled, 'channel_id', channel_id, 'spec', spec, 'issue', issue,
                 'created_by', created_by, 'updated_by', updated_by, 'updated_at', updated_at)), '[]')
@@ -87,6 +91,37 @@ pub async fn load(app: &App, gid: Id<GuildMarker>, copy: &Value, by: u64) -> Res
         .bind(g)
         .execute(&mut *tx)
         .await?;
+    // Categories first, so the messages below can point to them. A backup from before categories
+    // has none: the server keeps its own, and its messages keep theirs.
+    let cats = copy["categories"].is_array();
+    if cats {
+        sqlx::query(
+            "delete from message_categories where guild_id = $1
+               and id not in (select (e->>'id')::bigint from jsonb_array_elements($2) e)",
+        )
+        .bind(g)
+        .bind(part("categories"))
+        .execute(&mut *tx)
+        .await?;
+        // Every name is freed first, so swapped names cannot clash (names are unique per server).
+        // A leading space is a name the dashboard cannot make; the upsert below sets each name back.
+        sqlx::query("update message_categories set name = ' ' || id where guild_id = $1")
+            .bind(g)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "insert into message_categories (id, guild_id, name, position, updated_by, updated_at)
+             select id, $1, name, coalesce(position, 0), updated_by, coalesce(updated_at, now())
+             from jsonb_populate_recordset(null::message_categories, $2)
+             on conflict (id) do update set name = excluded.name, position = excluded.position,
+                 updated_by = excluded.updated_by, updated_at = excluded.updated_at
+             where message_categories.guild_id = excluded.guild_id",
+        )
+        .bind(g)
+        .bind(part("categories"))
+        .execute(&mut *tx)
+        .await?;
+    }
     // A deleted message takes its rules, stickies and Sent log with it (foreign keys).
     sqlx::query(
         "delete from embeds where guild_id = $1
@@ -99,18 +134,24 @@ pub async fn load(app: &App, gid: Id<GuildMarker>, copy: &Value, by: u64) -> Res
     // `where embeds.guild_id = excluded.guild_id`: an id another server holds is never touched.
     sqlx::query(
         "insert into embeds (id, guild_id, name, message, channel_id, webhook, pings, saved_level, saved_at,
-                             tag, updated_by, updated_at)
-         select id, $1, name, message, channel_id, webhook, coalesce(pings, 'none'), coalesce(saved_level, 0),
-                saved_at, tag, updated_by, coalesce(updated_at, now())
-         from jsonb_populate_recordset(null::embeds, $2)
+                             tag, updated_by, updated_at, category_id, position)
+         select b.id, $1, b.name, b.message, b.channel_id, b.webhook, coalesce(b.pings, 'none'),
+                coalesce(b.saved_level, 0), b.saved_at, b.tag, b.updated_by, coalesce(b.updated_at, now()),
+                case when $3 then c.id else (select category_id from embeds k where k.id = b.id and k.guild_id = $1) end,
+                case when $3 then coalesce(b.position, 0)
+                     else coalesce((select position from embeds k where k.id = b.id and k.guild_id = $1), 0) end
+         from jsonb_populate_recordset(null::embeds, $2) b
+         left join message_categories c on c.id = b.category_id and c.guild_id = $1
          on conflict (id) do update set name = excluded.name, message = excluded.message,
              channel_id = excluded.channel_id, webhook = excluded.webhook, pings = excluded.pings,
              saved_level = excluded.saved_level, saved_at = excluded.saved_at, tag = excluded.tag,
-             updated_by = excluded.updated_by, updated_at = excluded.updated_at
+             updated_by = excluded.updated_by, updated_at = excluded.updated_at,
+             category_id = excluded.category_id, position = excluded.position
          where embeds.guild_id = excluded.guild_id",
     )
     .bind(g)
     .bind(part("embeds"))
+    .bind(cats)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -287,6 +328,9 @@ mod tests {
         .fetch_one(p)
         .await
         .unwrap();
+        sqlx::query("with c as (insert into message_categories (guild_id, name, position, updated_by) values ($1, 'Info', 2, 1) returning id)
+                     update embeds set category_id = (select id from c), position = 3 where id = $2")
+            .bind(g).bind(embed).execute(p).await.unwrap();
         sqlx::query("insert into message_rules (embed_id, guild_id, kind, channel_id, spec, created_by, updated_by) values ($1, $2, 'trigger', null, '{\"channels\": [\"5\"]}', 1, 1)")
             .bind(embed).bind(g).execute(p).await.unwrap();
         sqlx::query("insert into sticky_msgs (embed_id, guild_id, channel_id, created_by, updated_by, posted_id) values ($1, $2, 5, 1, 1, 77)")
@@ -296,6 +340,20 @@ mod tests {
         let saved = copy(&t.app, gid).await.unwrap();
         assert_eq!(count(&saved), 1);
 
+        // After the backup: the category is deleted (its message goes to Uncategorized) and another
+        // takes its name.
+        sqlx::query("delete from message_categories where guild_id = $1")
+            .bind(g)
+            .execute(p)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into message_categories (guild_id, name, updated_by) values ($1, 'Info', 1)",
+        )
+        .bind(g)
+        .execute(p)
+        .await
+        .unwrap();
         sqlx::query("update embeds set name = 'Changed', tag = null where id = $1")
             .bind(embed)
             .execute(p)
@@ -346,6 +404,26 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(names, [("Rules".into(), Some("rules".into()))]);
+        let home: (String, i32, i32) = sqlx::query_as(
+            "select c.name, c.position, e.position from embeds e join message_categories c on c.id = e.category_id
+             where e.guild_id = $1",
+        )
+        .bind(g)
+        .fetch_one(p)
+        .await
+        .unwrap();
+        assert_eq!(
+            home,
+            ("Info".into(), 2, 3),
+            "the category and the order come back"
+        );
+        let cats: i64 =
+            sqlx::query_scalar("select count(*) from message_categories where guild_id = $1")
+                .bind(g)
+                .fetch_one(p)
+                .await
+                .unwrap();
+        assert_eq!(cats, 1, "the newer category is not in the backup");
         let sticky: (Option<i64>, bool) =
             sqlx::query_as("select posted_id, enabled from sticky_msgs where guild_id = $1")
                 .bind(g)
@@ -378,7 +456,50 @@ mod tests {
 
         for q in [
             "delete from embeds where guild_id = $1",
+            "delete from message_categories where guild_id = $1",
             "delete from bot_messages where guild_id = $1",
+            "delete from dashboard_audit where guild_id = $1",
+        ] {
+            sqlx::query(q).bind(g).execute(p).await.unwrap();
+        }
+        t.cleanup().await;
+    }
+
+    /// Runs only with a scratch Postgres: names swapped after the backup (even to "B (5)" style
+    /// names) do not stop the load.
+    #[tokio::test]
+    async fn swapped_category_names_still_load() {
+        let Some(t) = crate::test_support::T::new(996).await else {
+            return;
+        };
+        let (gid, g, p) = (t.g(0), t.g(0).get() as i64, &t.app.pool);
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "insert into message_categories (guild_id, name, updated_by) values ($1, 'A', 1), ($1, 'B', 1) returning id",
+        )
+        .bind(g)
+        .fetch_all(p)
+        .await
+        .unwrap();
+        let saved = copy(&t.app, gid).await.unwrap();
+        let rename = |id: i64, name: String| {
+            sqlx::query("update message_categories set name = $2 where id = $1")
+                .bind(id)
+                .bind(name)
+                .execute(p)
+        };
+        rename(ids[1], format!("B ({})", ids[0])).await.unwrap();
+        rename(ids[0], "B".into()).await.unwrap();
+        load(&t.app, gid, &saved, 42).await.unwrap();
+        let names: Vec<String> = sqlx::query_scalar(
+            "select name from message_categories where guild_id = $1 order by id",
+        )
+        .bind(g)
+        .fetch_all(p)
+        .await
+        .unwrap();
+        assert_eq!(names, ["A", "B"]);
+        for q in [
+            "delete from message_categories where guild_id = $1",
             "delete from dashboard_audit where guild_id = $1",
         ] {
             sqlx::query(q).bind(g).execute(p).await.unwrap();

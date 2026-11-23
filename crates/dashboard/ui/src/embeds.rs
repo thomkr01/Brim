@@ -1526,6 +1526,7 @@ pub fn Embeds(
     let g = StoredValue::new(guild);
     let pending = StoredValue::new(open_id);
     let rows = RwSignal::new(Vec::<Value>::new());
+    let cats = RwSignal::new(Vec::<Value>::new());
     // The channel picker's list ({channels, can_create}) and this message's Sent log.
     let chans = RwSignal::new(json!({"channels": []}));
     let sends = RwSignal::new(Vec::<Value>::new());
@@ -1561,6 +1562,14 @@ pub fn Embeds(
         spawn_local(async move {
             match api("GET", &base(), None).await {
                 Ok(v) => rows.set(v.as_array().cloned().unwrap_or_default()),
+                Err(e) => msg.err(e),
+            }
+        });
+        // The server's own categories (`msgcats.rs`).
+        spawn_local(async move {
+            let url = format!("/api/guilds/{}/message-categories", g.get_value());
+            match api("GET", &url, None).await {
+                Ok(v) => cats.set(v.as_array().cloned().unwrap_or_default()),
                 Err(e) => msg.err(e),
             }
         })
@@ -1844,35 +1853,39 @@ pub fn Embeds(
             </span>
         }
     };
-    let list = move || {
-        let needle = q.get().to_lowercase();
-        let all = rows.get();
-        let n = all.len();
+    // One message row; `msgcats::Grouped` puts it in its category and makes it sortable.
+    let row = Callback::new(move |m: Value| {
+        let n = rows.with_untracked(Vec::len);
+        let color = format!("#{:06x}", m["body"]["embeds"][0]["color"].as_u64().unwrap_or(0x4e5058));
+        let (id, name) = (m["id"].as_i64().unwrap_or(0), m["name"].as_str().unwrap_or("").to_string());
+        let (m1, m2, n2) = (m.clone(), m.clone(), name.clone());
         view! {
-            <div class="intro"><p>"Build a message once, then let Brim post it. Edit it later and the posted copy changes too."</p><Count n=Signal::stored(n) key="messages" /></div>
-            {(n > 0).then(|| view! { <div class="listtop">
-                <input type="search" placeholder="Search messages" aria-label="search messages" prop:value=move || q.get() on:input=move |e| q.set(event_target_value(&e)) />
-                <AddButton label="Add new message" attr:disabled=move || !room(n, "messages") on:click=move |_| show(blank()) />
-            </div> })}
-            {(n == 0).then(|| view! { <Empty title="No messages yet" hint="Build your first message: a welcome, the rules or an announcement." label="Add new message" add=move || show(blank()) /> })}
-            <div class="mlist">
-                {all.into_iter().filter(|m| m["name"].as_str().unwrap_or("").to_lowercase().contains(&needle)).map(|m| {
-                    let color = format!("#{:06x}", m["body"]["embeds"][0]["color"].as_u64().unwrap_or(0x4e5058));
-                    let (id, name) = (m["id"].as_i64().unwrap_or(0), m["name"].as_str().unwrap_or("").to_string());
-                    let (m1, m2, n2) = (m.clone(), m.clone(), name.clone());
-                    view! {
-                        <div class="card mrow">
-                            <span class="sw8" style=format!("background:{color}")></span>
-                            <button class="nm" on:click=move |_| show(m1.clone())><b>{name}</b></button>
-                            {states(&m)}
-                            <span class="acts">
-                                <button class="ghost" title="Duplicate" aria-label="Duplicate" disabled={n >= 100} on:click=move |_| duplicate(m2.clone())>{crate::icons::icon("copy")}</button>
-                                <button class="ghost" title="Delete" aria-label="Delete" on:click=move |_| remove(id, n2.clone())>{crate::icons::icon("trash")}</button>
-                            </span>
-                        </div>
-                    }
-                }).collect_view()}
+            <div class="card mrow">
+                <span class="sw8" style=format!("background:{color}")></span>
+                <button class="nm" on:click=move |_| show(m1.clone())><b>{name}</b></button>
+                {states(&m)}
+                <span class="acts">
+                    <button class="ghost" title="Duplicate" aria-label="Duplicate" disabled={n >= 100} on:click=move |_| duplicate(m2.clone())>{crate::icons::icon("copy")}</button>
+                    <button class="ghost" title="Delete" aria-label="Delete" on:click=move |_| remove(id, n2.clone())>{crate::icons::icon("trash")}</button>
+                </span>
             </div>
+        }.into_any()
+    });
+    let changed = Callback::new(move |_| load());
+    // Only an empty list or not redraws the list, so a move keeps the open categories and focus.
+    let any = Memo::new(move |_| rows.with(|r| !r.is_empty()));
+    let list = move || {
+        let n = move || rows.with(Vec::len);
+        let any = any.get();
+        view! {
+            <div class="intro"><p>"Build a message once, then let Brim post it. Edit it later and the posted copy changes too."</p><Count n=Signal::derive(n) key="messages" /></div>
+            {any.then(|| view! { <div class="listtop">
+                <input type="search" placeholder="Search messages" aria-label="search messages" prop:value=move || q.get() on:input=move |e| q.set(event_target_value(&e)) />
+                {crate::msgcats::tools(g, rows, cats, changed, msg)}
+                <AddButton label="Add new message" attr:disabled=move || !room(n(), "messages") on:click=move |_| show(blank()) />
+            </div> })}
+            {(!any).then(|| view! { <Empty title="No messages yet" hint="Build your first message: a welcome, the rules or an announcement." label="Add new message" add=move || show(blank()) /> })}
+            <crate::msgcats::Grouped guild=g rows cats q row changed msg />
         }
     };
     let access = expect_context::<Access>();

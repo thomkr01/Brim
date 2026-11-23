@@ -830,3 +830,6 @@ The owner saw the new scene sit a little to the right while it moved, with no re
 The white layer of a pressed front page button (`::before`, `z-index:-1`) lay over the button's own fill, because the press transform makes the button a stacking context. Light labels became white on white. Fixed by removing the layer.
 
 **Rule:** a state that changes a button's fill sets the label colour with it. Look at the pressed, hover and focus still of every button style in both browsers before reporting.
+## A list that redraws on every change (2026-11-23)
+
+**After a keyboard move the open categories closed and the focus was lost.** The page's `list` closure read the row count, so each change of the rows built the list component again, with new state. Read only what decides the layout (a `Memo` of "any rows"), keep the screen reader's live region outside the redrawn part, and after a move put the focus back on the moved row. Fixed in `ui/src/embeds.rs` and `ui/src/msgcats.rs`.

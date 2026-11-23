@@ -27,6 +27,8 @@ type Row = (
     String,
     Option<Value>,
     String,
+    Option<String>,
+    i32,
     Value,
 );
 
@@ -895,6 +897,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     api::require(&st, &s, guild, Level::Viewer, false).await?;
     let rows: Vec<Row> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "select id, name, {MSG}, channel_id::text, message_channel::text, message_id::text, pings, webhook, {VERSION},
+             category_id::text, position,
              jsonb_build_object(
                  'scheduled', exists(select 1 from message_rules r where r.embed_id = embeds.id and r.enabled and r.kind = 'schedule'),
                  'answers', exists(select 1 from message_rules r where r.embed_id = embeds.id and r.enabled and r.kind = 'trigger'),
@@ -902,7 +905,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                  'sticky', exists(select 1 from sticky_msgs k where k.embed_id = embeds.id and k.enabled),
                  'issue', exists(select 1 from message_rules r where r.embed_id = embeds.id and r.issue is not null)
                        or exists(select 1 from sticky_msgs k where k.embed_id = embeds.id and k.issue is not null))
-         from embeds where guild_id = $1 order by name, id"
+         from embeds where guild_id = $1 order by position, lower(name), id"
     )))
     .bind(guild)
     .fetch_all(&st.db)
@@ -910,10 +913,10 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
     Ok(Json(json!(rows
         .into_iter()
         .map(
-            |(id, name, body, channel, message_channel, message, pings, webhook, version, uses)| json!({
+            |(id, name, body, channel, message_channel, message, pings, webhook, version, category, position, uses)| json!({
                 "id": id, "name": name, "missing": missing(&body), "missing_answer": missing_in(&body, true), "body": body, "channel": channel,
                 "message_channel": message_channel, "message": message, "pings": pings, "webhook": webhook,
-                "version": version, "uses": uses,
+                "version": version, "uses": uses, "category": category, "position": position,
             })
         )
         .collect::<Vec<_>>())))
@@ -1242,9 +1245,12 @@ async fn save(
         )))
         .bind(id),
         None => sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "insert into embeds (guild_id, name, message, channel_id, updated_by, pings, saved_level, saved_at, webhook)
+            "insert into embeds (guild_id, name, message, channel_id, updated_by, pings, saved_level, saved_at, webhook, position)
              -- shortcut: two saves at the same moment can pass 100 by one; lock per server if that matters.
-             select $2, $3, $4, $5, $6, $8, $9, now(), $10 where (select count(*) from embeds where guild_id = $2) < $7
+             -- After a manual order a new message goes last; in A to Z order (all 0) it stays 0.
+             select $2, $3, $4, $5, $6, $8, $9, now(), $10,
+                    (select case when max(position) > 0 then max(position) + 1 else 0 end from embeds where guild_id = $2)
+             where (select count(*) from embeds where guild_id = $2) < $7
              returning id, {VERSION}"
         )))
         .bind(None::<i64>),

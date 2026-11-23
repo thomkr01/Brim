@@ -1723,3 +1723,7 @@ The Update page showed "Newest: Could not reach GitHub right now." and an empty 
 ## An identity value from a failed lookup went into a commit (2026-11-23)
 
 **A commit author email held an error text.** The email was read from a lookup that failed, and the failure text was stored as the value. It showed in the author and committer of a pushed commit, and it pointed to a tool. *Avoid:* set the author name and email as fixed literal values in the repo config, never from a command or an API call. Before every push, print `git log --format='%an <%ae> | %cn <%ce>'` for each commit to be pushed and read it. A wrong value in a pushed commit is not fixed by a new push: the commit stays public on its branch until the branch is deleted.
+
+## Restoring names that must be unique (2026-11-23)
+
+**A backup load could fail on category names that were swapped after the backup.** The load freed a clashing name by renaming it to "name (id)". That new name could already exist (a staff member can type "B (5)"), and the unique check runs row by row, so the whole load stopped. Free every name first with a value the dashboard can never make (a leading space: names are trimmed), then set the names from the backup. Fixed in `crates/bot/src/msgbackup.rs`; test `swapped_category_names_still_load`.

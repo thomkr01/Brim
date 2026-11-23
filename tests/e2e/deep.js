@@ -137,6 +137,11 @@ async function matrix(browser) {
     ['POST', `${g}/embeds/999999/post`, () => ({}), 'editor', false],
     ['POST', `${g}/embeds/999999/delete`, () => ({}), 'editor', false],
     ['GET', `${g}/embeds/channels`, () => undefined, 'viewer', false],
+    ['GET', `${g}/message-categories`, () => undefined, 'viewer', false],
+    ['POST', `${g}/message-categories`, () => ({ name: `e2e matrix ${Date.now()}` }), 'editor', false],
+    ['POST', `${g}/message-categories/order`, () => ({ reset: true }), 'editor', false],
+    ['POST', `${g}/message-categories/999999/rename`, () => ({ name: 'e2e' }), 'editor', false],
+    ['POST', `${g}/message-categories/999999/delete`, () => ({}), 'editor', false],
     // bot messages: anyone may look; Owner, Extra Owners and Trusted Admins change them
     ['GET', `${g}/bot-messages`, () => undefined, 'viewer', false],
     ['POST', `${g}/bot-messages/dm.punish.ban`, () => ({ message: { content: 'e2e {mod_reason}', embeds: [] } }), 'admin', false],

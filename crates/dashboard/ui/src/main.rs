@@ -28,6 +28,7 @@ mod msgtrig;
 mod msgsticky;
 mod msgtags;
 mod md;
+mod msgcats;
 mod msgparts;
 mod pages;
 mod permits;

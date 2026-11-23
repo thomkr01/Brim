@@ -17,6 +17,7 @@ mod giveaways;
 mod layout;
 mod lockdown;
 mod mcp;
+mod msgcats;
 mod msghooks;
 mod msgrules;
 mod msgsticky;
@@ -293,6 +294,7 @@ pub fn router(st: AppState, dist: &str) -> Router {
         .merge(giveaway_plans::routes())
         .merge(feedhooks::routes())
         .merge(msgtags::routes())
+        .merge(msgcats::routes())
         .merge(botmsgs::routes())
         .merge(update::routes())
         .merge(mcp::routes())

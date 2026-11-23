@@ -458,6 +458,13 @@ button:has(> .working) { background:none; border-color:transparent; color:var(--
 .mlist .mrow .nm { grid-column:2; background:none; border:0; padding:0; color:var(--fg); text-align:left; text-transform:none; font-weight:400; cursor:pointer; overflow-wrap:anywhere; }
 .mlist .mrow .states { grid-column:2; grid-row:2; } .mlist .mrow .states:empty { display:none; }
 .mlist .mrow .acts { grid-column:3; grid-row:1 / 3; display:flex; gap:4px; } .mlist .mrow .acts button { padding:var(--space-4) var(--space-8); }
+/* Saved messages in categories, sortable (msgcats.rs): the grip left of each row, the category title row. */
+.msort { display:flex; align-items:center; gap:var(--space-8); } .msort > .mrow { flex:1; min-width:0; } .msort:focus-visible { outline:none; } .msort:focus-visible > .mrow { box-shadow:var(--ol-pick); }
+.msort.moving > .mrow, .mcathead.moving > .hub { box-shadow:var(--ol-pick), var(--lift); transform:translateY(-2px); }
+.msort.above > .mrow, .mcathead.above > .hub { box-shadow:inset 0 2px 0 var(--primary); } .msort.below > .mrow, .mcathead.below > .hub { box-shadow:inset 0 -2px 0 var(--primary); }
+.mcathead { display:flex; align-items:center; gap:var(--space-8); } .mcathead > .hub { flex:1; min-width:0; } .mcathead.target > .hub { box-shadow:var(--ol-pick); }
+.mcattools { display:flex; flex-wrap:wrap; gap:var(--space-8); margin:0 0 var(--space-8) var(--space-32); } .mcattools button { display:inline-flex; align-items:center; gap:var(--space-8); }
+.mcat .mlist { margin-left:var(--space-32); } .mcat > .muted { margin:0 0 var(--space-12) var(--space-32); }
 .states { display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap; } .states .tip { margin:0; width:18px; height:18px; } .states .tip .i { width:18px; height:18px; }
 .mbhead { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:0 0 8px; }
 .mbhead input.name { font-size:var(--fs-section-title); font-weight:700; min-width:0; flex:1 1 200px; }
