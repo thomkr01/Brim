@@ -1727,3 +1727,7 @@ The Update page showed "Newest: Could not reach GitHub right now." and an empty 
 ## Restoring names that must be unique (2026-11-23)
 
 **A backup load could fail on category names that were swapped after the backup.** The load freed a clashing name by renaming it to "name (id)". That new name could already exist (a staff member can type "B (5)"), and the unique check runs row by row, so the whole load stopped. Free every name first with a value the dashboard can never make (a leading space: names are trimmed), then set the names from the backup. Fixed in `crates/bot/src/msgbackup.rs`; test `swapped_category_names_still_load`.
+
+## A load test that queued more tasks than the pool can serve in 30 s (2026-11-24)
+
+**`forms::tests::ten_thousand_members_send_one_form` failed on a slow runner with "pool timed out while waiting for an open connection".** The engine is not at fault: every send locks the form row (`FOR UPDATE`) so numbers have no gaps, which is by design, and one send takes about 3 ms. The test starts all 10,000 sends at once on a pool of 10, so the last task waits about 30 s for a connection, which is exactly the default `acquire_timeout`. A real member never waits that long (a Discord interaction ends after 3 s). *Avoid:* a test that queues many tasks on a small pool sets its own long `acquire_timeout`, so the speed of the runner cannot decide the result. Fixed in `crates/core/src/forms/tests.rs`.

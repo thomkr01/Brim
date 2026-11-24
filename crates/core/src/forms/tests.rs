@@ -605,6 +605,14 @@ async fn ten_thousand_members_send_one_form() {
     let Some((pool, gid)) = db(5).await else {
         return;
     };
+    // Same size as the real pool, but 10,000 tasks queue for 10 connections at once, so the
+    // default 30 s wait for a connection is a limit of the runner's speed, not of the engine.
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(10)
+        .acquire_timeout(std::time::Duration::from_secs(600))
+        .connect(&crate::db::test_url().unwrap())
+        .await
+        .unwrap();
     let s = staff();
     let id = create(&pool, gid, 9, &s).await.unwrap().unwrap();
     let old = s.body.hash();
