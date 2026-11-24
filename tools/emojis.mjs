@@ -20,6 +20,8 @@ const names = readdirSync(DIR).filter(f => f.endsWith('.svg')).map(f => f.slice(
   .filter(n => !only.length || only.includes(n)).sort();
 const src = n => readFileSync(new URL(`${n}.svg`, DIR), 'utf8');
 
+// Banner words are one row of emojis cut between letters: their gradient runs over the whole row, and the letters may touch the edges.
+const BANNER = /^(congrats|congratulations)_\d+$/;
 function lint(n, s) {
   const bad = [];
   if (!/^[a-z0-9_]{2,32}$/.test(n)) bad.push('bad name');
@@ -28,7 +30,7 @@ function lint(n, s) {
   if (n === 'spacer') return /^<svg[^>]*(\/>|>\s*<\/svg>)$/.test(s.trim()) ? bad : [...bad, 'spacer must be empty'];
   const grads = [...s.matchAll(/<linearGradient\b[^>]*>/g)];
   if (grads.length !== 1) bad.push(`${grads.length} gradients`);
-  else if (!grads[0][0].includes(`id="${n}-grad"`) || !/gradientUnits="userSpaceOnUse" x1="16" y1="64" x2="112" y2="64"/.test(grads[0][0])) bad.push('gradient attrs');
+  else if (!grads[0][0].includes(`id="${n}-grad"`) || !(BANNER.test(n) ? /gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="\d+" y2="0"/ : /gradientUnits="userSpaceOnUse" x1="16" y1="64" x2="112" y2="64"/).test(grads[0][0])) bad.push('gradient attrs');
   const stops = [...s.matchAll(/<stop offset="([\d.]+)" stop-color="(#[0-9A-Fa-f]{6})"\/>/g)].map(m => [m[1], m[2].toUpperCase()]);
   const ok = JSON.stringify(stops) === JSON.stringify(STOPS) ||
     (stops.length === 3 && JSON.stringify(stops.slice(0, 2)) === JSON.stringify(MEANING) && stops[2][0] === '1' && ENDS.includes(stops[2][1]));
@@ -70,7 +72,7 @@ async function check() {
     for (const n of names) {
       const s = src(n), bad = lint(n, s);
       const { box, ink } = await raster(page, s);
-      if (n !== 'spacer' && !/^(bar_|branch_|line_vertical)/.test(n) && box && (box[0] < 11 || box[1] < 11 || box[2] > 117 || box[3] > 117)) bad.push(`outside safe area ${box}`);
+      if (n !== 'spacer' && !/^(bar_|branch_|line_vertical|congrats_|congratulations_)/.test(n) && box && (box[0] < 11 || box[1] < 11 || box[2] > 117 || box[3] > 117)) bad.push(`outside safe area ${box}`);
       if (bad.length) fails++;
       out.push(`${bad.length ? 'FAIL' : 'ok  '} ${n.padEnd(22)} box=${box} ink=${ink}% ${bad.join(', ')}`);
     }
