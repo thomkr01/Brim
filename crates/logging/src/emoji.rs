@@ -179,6 +179,8 @@ pub const TICKET_REPLY: Emoji = e("modmail_reply", "💬");
 /// The Enter button of a giveaway; the default of the button emoji setting as `{e:giveaway_enter}`.
 pub const GIVEAWAY_ENTER: Emoji = e("giveaway_enter", "🎫");
 pub const TROPHY: Emoji = e("trophy", "🏆");
+pub const STAR_FOUR: Emoji = e("star_four", "✨");
+pub const STAR_FOUR_HOLLOW: Emoji = e("star_four_hollow", "✨");
 pub const MAILBOX: Emoji = e("mailbox", "📪");
 pub const TICKET_CLOSE: Emoji = e("modmail_close", "📪");
 pub const TICKET_BLOCK: Emoji = e("modmail_block", "⛔");
@@ -392,6 +394,8 @@ mod tests {
             MAILBOX,
             GIVEAWAY_ENTER,
             TROPHY,
+            STAR_FOUR,
+            STAR_FOUR_HOLLOW,
             KICK,
             PURGE,
             BAN,
