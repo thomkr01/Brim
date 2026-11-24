@@ -1723,3 +1723,10 @@ The Update page showed "Newest: Could not reach GitHub right now." and an empty 
 ## An identity value from a failed lookup went into a commit (2026-11-23)
 
 **A commit author email held an error text.** The email was read from a lookup that failed, and the failure text was stored as the value. It showed in the author and committer of a pushed commit, and it pointed to a tool. *Avoid:* set the author name and email as fixed literal values in the repo config, never from a command or an API call. Before every push, print `git log --format='%an <%ae> | %cn <%ce>'` for each commit to be pushed and read it. A wrong value in a pushed commit is not fixed by a new push: the commit stays public on its branch until the branch is deleted.
+
+
+## An emoji tag in a hint, and an icon on a line of its own (2026-11-24)
+
+**A variable hint showed `{e:error}` as raw text.** Hints (the second text of a variable) are plain words in the editor chips. Only sample values and message text are drawn through `fill_tags`. *Avoid:* a hint never holds an emoji tag; use words ("yes or no mark"). A test in `botmsg.rs` checks every hint.
+
+**The success icon sat on its own line above its text in a preview.** `icons::tag_html` put the icon file as it is into a span. The file ends in a newline, and the preview text is `white-space: pre-wrap`, so the newline became a line inside the inline icon and moved its baseline. Some icons looked fine by chance. *Avoid:* trim the svg text before it goes into HTML that is shown with `pre-wrap`; `icons.rs` has a test that no whitespace stays around the svg.

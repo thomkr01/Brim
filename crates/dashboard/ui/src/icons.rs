@@ -115,7 +115,8 @@ icons!(
 pub fn tag_html(name: &str) -> Option<String> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static N: AtomicU32 = AtomicU32::new(0);
-    let svg = svg(name);
+    // The file ends in a newline; inside a pre-wrap preview it would become a line of its own.
+    let svg = svg(name).trim();
     if svg.is_empty() {
         return None;
     }
@@ -161,4 +162,14 @@ pub fn icon(name: &'static str) -> AnyView {
         .replace(&format!("\"{name}-"), &format!("\"{name}{n}-"))
         .replace(&format!("#{name}-"), &format!("#{name}{n}-"));
     view! { <span class="i" aria-hidden="true" inner_html=svg></span> }.into_any()
+}
+
+#[cfg(test)]
+mod tag_tests {
+    /// A newline left inside the icon span drops the icon onto a line of its own in a preview.
+    #[test]
+    fn a_tag_icon_has_no_whitespace_around_its_svg() {
+        let h = super::fill_tags("DM-Members: {e:success}");
+        assert!(h.contains("</svg></span>"), "{h}");
+    }
 }

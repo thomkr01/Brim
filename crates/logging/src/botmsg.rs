@@ -1305,7 +1305,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ("locks", "The active locks, one per line", "{e:lock} Channels"),
     (
         "lists",
-        "Each whitelist with {e:success} (on it) or {e:error} (not on it), one per line",
+        "Each whitelist marked yes (on it) or no (not on it), one per line",
         "{e:success} Spam Whitelist\n{e:error} Ping Whitelist",
     ),
     ("prefix", "The server's command prefix", "t!"),
@@ -1314,7 +1314,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
         "Where every command is explained: the dashboard's commands page, or the commands command",
         "https://example.com/#/commands",
     ),
-    ("quarantine_role", "The quarantine role, or {e:error}", "@Quarantined"),
+    ("quarantine_role", "The quarantine role, or a no mark", "@Quarantined"),
     ("anti_nuke_on", "Anti Nuke on or off", "{e:toggle_on}"),
     ("heat_on", "Heat System on or off", "{e:toggle_on}"),
     ("verification_on", "Verification on or off", "{e:toggle_off}"),
@@ -1408,7 +1408,7 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ("effect", "What it means for the server", "It will not come back on release."),
     ("reverted", "Changes reverted, of all", "`5/5`"),
     ("reinvite", "Members kicked by the nuker, to invite back", "@alex"),
-    ("applied", "Whether the action was applied ({e:success} or {e:error})", "{e:success}"),
+    ("applied", "Whether the action was applied (yes or no mark)", "{e:success}"),
     (
         "bot_role",
         "Whether the bot role was cleared (empty for a person)",
@@ -8492,6 +8492,17 @@ mod bot_wide_tests {
     fn every_outside_server_entry_is_a_default() {
         for k in BOT_WIDE {
             assert!(find(k).is_some(), "{k}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod hint_tests {
+    /// A hint is plain text in the editor: an emoji tag there shows as raw text. Samples may use tags.
+    #[test]
+    fn no_variable_hint_holds_an_emoji_tag() {
+        for (name, hint, _) in super::FACT_VARS.iter().chain(super::VAR_INFO) {
+            assert!(!hint.contains("{e:"), "{name}: {hint}");
         }
     }
 }
