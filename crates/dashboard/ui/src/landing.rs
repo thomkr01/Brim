@@ -38,8 +38,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
         ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
-        ("Make the panel your own", "base", &[P("Messages", &["Title|Verification Required!", "Description|To access `{guild.name}`, you need to pass the verification first.", ">Add field"]), E("verify_panel"), P("Preview", &["?Brim adds the buttons itself.", ">Edit message"]), C("Panel")]),
-        ("Make the panel your own, in the builder", "builder", &[B]),
+        ("Make the panel your own", "builder", &[B]),
         ("Set up in the dashboard", "dash", &[D("Server Joins", "Verification", "General Settings", &[
             ("General", &[
                 r#"{"path":"verification.enabled","kind":"bool","title":"Use the verification module","tip":"Off: new members get full access without a check."}"#,
@@ -137,36 +136,34 @@ fn fit() {
         let Some(b) = html(boxes.item(i)) else { continue };
         let w = f64::from(b.client_width());
         let Ok(scenes) = b.query_selector_all(".scene") else { continue };
+        // Each scene is as wide as the box at most (a wide one is scaled down) and sits centred in it; the box is as tall as the tallest.
         let mut all = vec![];
         for j in 0..scenes.length() {
             let Some(s) = html(scenes.item(j)) else { continue };
             cap_message(&s);
-            all.push((s.clone(), group(&s)));
+            let g = group(&s);
+            all.push((s.clone(), g, (bw / g.0.max(1.0)).min(1.0)));
         }
-        let max = |f: fn(&(f64, f64, f64, f64)) -> f64| all.iter().map(|(_, g)| f(g)).fold(0.0, f64::max);
-        let (mgw, mgh, mh1) = (max(|g| g.0), max(|g| g.1), max(|g| g.3));
-        let mnw1 = all.iter().map(|(_, g)| g.2).fold(f64::MAX, f64::min);
-        // The bottom stars sit 72 px under the first piece, so a first piece that is the tallest gets more room below.
-        let pad = (mh1 + 72.0 - mgh).max(48.0);
-        let bh = mgh + 2.0 * pad;
+        // The bottom stars sit 72 px under the first piece, so a scene whose first piece is its tallest part needs more room below.
+        let bh = all.iter().map(|(_, g, f)| { let gh = g.1 * f; gh + 2.0 * (48.0_f64).max(g.3 * f + 72.0 - gh) }).fold(0.0, f64::max);
         let k = (w / bw).min(0.85);
-        let (l, t) = ((bw - mgw) / 2.0, pad);
-        // Every scene starts at the same corner (the union of all groups is centred), so the stars stay clear of each one.
-        for (s, _) in &all {
-            let _ = s.style().set_property("--k", &k.to_string());
-            let _ = s.style().set_property("--dx", &format!("{}px", (w - bw * k) / 2.0 + l * k));
-            let _ = s.style().set_property("--dy", &format!("{}px", t * k));
+        for (s, g, f) in &all {
+            let _ = s.style().set_property("--k", &(k * f).to_string());
+            let _ = s.style().set_property("--dx", &format!("{}px", (w - bw * k) / 2.0 + (bw - g.0 * f) / 2.0 * k));
+            let _ = s.style().set_property("--dy", &format!("{}px", (bh - g.1 * f) / 2.0 * k));
         }
         let _ = b.style().set_property("--k", &k.to_string());
         let _ = b.style().set_property("--sh", &format!("{}px", bh * k));
         let _ = b.style().set_property("--fxl", &format!("{}px", (w - bw * k) / 2.0));
         let _ = b.style().set_property("--fxw", &format!("{}px", bw * k));
+        // The stars follow the open scene (the first one before any is open).
+        let Some((_, (gw, gh, w1, h1), f)) = all.iter().find(|(s, _, _)| s.class_list().contains("on")).or(all.first()) else { continue };
+        let (gw, gh, w1, h1) = (gw * f, gh * f, w1 * f, h1 * f);
+        let (l, t) = ((bw - gw) / 2.0, (bh - gh) / 2.0);
         // Centres of the six stars in the box: top left pair, top right pair, bottom left pair.
         let slots = if phone {
-            [(l + 22.0, t - 22.0), (l + 52.0, t - 30.0), (l + mgw - 24.0, t - 20.0), (l + mgw - 52.0, t - 28.0), (l + 24.0, t + mgh + 22.0), (l + 54.0, t + mgh + 30.0)]
+            [(l + 22.0, t - 22.0), (l + 52.0, t - 30.0), (l + gw - 24.0, t - 20.0), (l + gw - 52.0, t - 28.0), (l + 24.0, t + gh + 22.0), (l + 54.0, t + gh + 30.0)]
         } else {
-            // The stars follow the open scene's first piece (a dashboard page or the builder is wider and taller than a sample message).
-            let (w1, h1) = all.iter().find(|(s, _)| s.class_list().contains("on")).map_or((mnw1, mh1), |(_, g)| (g.2, g.3));
             let bx = l + 0.115 * w1; // left of the third piece, which starts 23% into the first
             [(l - 41.0, t + 64.0), (l - 64.0, t + 38.0), (l + w1 + 14.0, t + 10.0), (l + w1 + 40.0, t + 30.0), (bx, t + h1 + 22.0), (bx - 6.0, t + h1 + 56.0)]
         };
@@ -209,6 +206,9 @@ fn effects(seed: usize) -> impl IntoView {
         })
         .collect::<Vec<_>>()
 }
+
+/// The verification panel's default text as the editor shows it (the bot's default in botmsg.rs, public variable name).
+const PANEL_TEXT: &str = "To access `{guild.name}`, you need to pass the verification first.";
 
 const REPO: &str = "https://github.com/thomkr01/Brim/blob/main";
 
@@ -334,7 +334,7 @@ pub fn Landing(
                                         // The panel's own default text with its variable, as the editor shows it.
                                         let mut body = sample("verify_panel");
                                         // The samples load after the first draw; until then the editor shows an empty message.
-                                        if let Some(e) = body["embeds"].get_mut(0) { e["description"] = "To access `{guild.name}`, you need to pass the verification first.".into(); } else { body = serde_json::json!({}); }
+                                        if let Some(e) = body["embeds"].get_mut(0) { e["description"] = PANEL_TEXT.into(); } else { body = serde_json::json!({}); }
                                         let cur = RwSignal::new(serde_json::json!({"body": body}));
                                         let ed = crate::embeds::Editor::new(cur, StoredValue::new(String::new()), true);
                                         let (message_tab, preview_tab, pop_view) = ed.views();
@@ -416,8 +416,7 @@ mod tests {
     #[test]
     fn verification_scene_text_is_the_bot_default() {
         let bot = include_str!("../../../logging/src/botmsg.rs");
-        let rows: Vec<&str> = SECTIONS.iter().flat_map(|(_, t)| t.iter()).flat_map(|(_, _, items)| items.iter()).filter_map(|it| match it { Item::P(_, rows) => Some(rows.iter().copied()), _ => None }).flatten().collect();
-        let desc = rows.iter().find_map(|r| r.strip_prefix("Description|To access")).expect("the verification scene has the panel description");
+        let desc = super::PANEL_TEXT.strip_prefix("To access").expect("the panel text starts with To access");
         // The editor shows the public name (`{guild.name}`). The code holds either that or the old code name `{server}`, which a mapping turns into it.
         let esc = |t: String| t.replace('{', "{{").replace('}', "}}");
         let public = esc(format!("To access{desc}"));
