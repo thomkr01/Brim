@@ -45,6 +45,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
                 r#"{"path":"verification.target","kind":"choice","title":"Verification targets","options":["Everyone","SuspiciousOnly"],"default":"Everyone"}"#,
                 r#"{"path":"verification.on_fail","kind":"choice","title":"Fail action","options":["Nothing","Kick","Ban","Quarantine"],"default":"Kick","tip":"Kick, Ban and Quarantine run when the verification duration ends after the join."}"#,
                 r#"{"path":"verification.mode","kind":"choice","title":"Verification mode","options":["Captcha","Web","Dm","SimpleCaptcha","Button"],"default":"Captcha"}"#,
+                r#"{"path":"verification.roles","kind":"roles","title":"Verification roles"}"#,
             ]),
             ("Captcha", &[
                 r#"{"path":"verification.captcha.length","kind":"int","title":"Captcha answer length","default":6,"min":1,"max":10}"#,
@@ -343,8 +344,8 @@ pub fn Landing(
                                     }
                                     D(module, page, big, cards) => {
                                         // The page's own `Field` on a local copy of its settings; nothing is saved.
-                                        let val = RwSignal::new(serde_json::json!({"verification": {"enabled": true}}));
-                                        let dc = RwSignal::new(serde_json::json!({"channels": [], "roles": []}));
+                                        let val = RwSignal::new(serde_json::json!({"verification": {"enabled": true, "roles": ["1"]}}));
+                                        let dc = RwSignal::new(serde_json::json!({"channels": [], "roles": [{"id": "1", "name": "Member"}]}));
                                         view! { <div class="win dash" inert=true><crate::common::Head guild=String::new() page=page.to_string() big=big.to_string() module=Some((module.to_string(), "#".to_string())) /><div class="cards">{cards.iter().map(|(name, fields)| view! { <div class="col"><div class="card"><h2>{*name}</h2>{fields.iter().map(|f| view! { <crate::form::Field f=serde_json::from_str(f).unwrap_or_default() val dc /> }).collect_view()}</div></div> }).collect_view()}</div></div> }.into_any()
                                     }
                                     T(name, rows) => view! { <div class="win tbl"><b>{name}</b><table class="data"><tbody>{rows.iter().map(|(a, b)| view! { <tr><td>{*a}</td><td>{b.split('|').map(|c| view! { <span class="chip">{c}</span>" " }).collect_view()}</td></tr> }).collect_view()}</tbody></table></div> }.into_any(),
