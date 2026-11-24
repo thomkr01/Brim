@@ -693,6 +693,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .win.dash { text-align:left; } @media (min-width:761px) { .land .scene > .win.dash:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 13.5); } } .land .scene > .win.dash { padding:0; background:none; box-shadow:none; overflow:visible; }
 .land .scene > .win.builder { padding:0; background:none; box-shadow:none; overflow:visible; }
 .land .win.builder .msplit, .land .win.builder .mcard { background:none; padding:0; margin:0; box-shadow:none; }
+.land .win.builder .mview { position:relative; left:calc(var(--space-56) * -2.05); top:calc(var(--space-56) * 3.75); z-index:2; }
 .land .win.builder .pvtop, .land .win.builder .tools, .land .win.builder .pvnote, .land .win.builder .addembed, .land .win.builder button[aria-label="Remove embed"], .land .win.builder button[aria-label="Remove button row"] { display:none; }
 @media (min-width:761px) { .land .scene > .win.builder:not(.pane):not(.lcard):not(.tbl) { width:calc(var(--space-56) * 15); } }
 .land .win.dash .head { margin:0 0 var(--space-16); } .land .win.dash .chip { white-space:nowrap; } .land .scene.l-dash > .co { position:absolute; left:62%; top:72%; z-index:7; } .land .win.dash .cards { align-items:flex-start; gap:var(--space-16); } .land .win.dash .card { padding:var(--space-16); }
