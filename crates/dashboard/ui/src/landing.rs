@@ -146,7 +146,10 @@ fn fit() {
             all.push((s.clone(), g, (bw / g.0.max(1.0)).min(1.0)));
         }
         // The bottom stars sit 72 px under the first piece, so a scene whose first piece is its tallest part needs more room below.
-        let bh = all.iter().map(|(_, g, f)| { let gh = g.1 * f; gh + 2.0 * (48.0_f64).max(g.3 * f + 72.0 - gh) }).fold(0.0, f64::max);
+        let own = |g: &(f64, f64, f64, f64), f: &f64| { let gh = g.1 * f; gh + 2.0 * (48.0_f64).max(g.3 * f + 72.0 - gh) };
+        let tall = all.iter().map(|(_, g, f)| own(g, f)).fold(0.0, f64::max);
+        // A phone has no empty box around a short scene: the box is as tall as the open scene.
+        let bh = if phone { all.iter().find(|(s, _, _)| s.class_list().contains("on")).or(all.first()).map_or(tall, |(_, g, f)| own(g, f)) } else { tall };
         let k = (w / bw).min(0.85);
         for (s, g, f) in &all {
             let _ = s.style().set_property("--k", &(k * f).to_string());
