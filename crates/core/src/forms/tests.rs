@@ -602,7 +602,7 @@ async fn prune_keeps_the_cap_and_open_responses() {
 /// questions is refused, not stored. Times go to stderr.
 #[tokio::test]
 async fn ten_thousand_members_send_one_form() {
-    let Some((pool, gid)) = db(5).await else {
+    let Some((_, gid)) = db(5).await else {
         return;
     };
     // Same size as the real pool, but 10,000 tasks queue for 10 connections at once, so the
