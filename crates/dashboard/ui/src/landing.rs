@@ -37,7 +37,7 @@ const SECTIONS: [(&str, &[Scene]); 9] = [
         ("Switch on the protection you want", "stk", &[P("Automod status", &["?Do you want Brim to monitor messages?", "Enable Automod", "Moderate invite links posted", "Filter out NSFW links", ">Next step"]), P("Antinuke status", &["?Do you want Brim to monitor moderation actions made by your staff members?", "Enable Antinuke"]), P("Quarantine", &["?Do you want the quarantine system that keeps your server safe from being destroyed?", "Use the auto quarantine module", "Guard the server's vanity url", "Quarantine role|@Quarantine"])]),
         ("Set up verification in one step", "basec", &[P("Verification status", &["?Do you want to filter in only genuine members? Use the verification and fend off bots!", "Enable Verification", "Verification mode|Captcha ▾", ">Next step"]), E("verify_panel"), P("Join Gate status", &["Enable Join Gate"])])]),
     ("Verification.", &[
-        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), M("Mika", "Hi, I just joined!"), C("Captcha")]),
+        ("Members solve a captcha before they talk", "base", &[T("Join log", &[("Mika joined", "new"), ("Mika solved the captcha", "verified"), ("bot-4821 failed the captcha", "kicked")]), E("verify_captcha"), C("Captcha")]),
         ("Make the panel your own", "builder", &[B]),
         ("Set up in the dashboard", "dash", &[D("Server Joins", "Verification", "General Settings", &[
             ("General", &[
