@@ -1727,3 +1727,8 @@ The Update page showed "Newest: Could not reach GitHub right now." and an empty 
 ## Restoring names that must be unique (2026-11-23)
 
 **A backup load could fail on category names that were swapped after the backup.** The load freed a clashing name by renaming it to "name (id)". That new name could already exist (a staff member can type "B (5)"), and the unique check runs row by row, so the whole load stopped. Free every name first with a value the dashboard can never make (a leading space: names are trimmed), then set the names from the backup. Fixed in `crates/bot/src/msgbackup.rs`; test `swapped_category_names_still_load`.
+
+
+## A join test that raced the runner's speed (2026-11-24)
+
+**`a_join_is_credited_and_a_raid_does_not_wait` failed on a busy CI runner.** It asserted that a raid join returned in less than the tracker's batch time (window plus settle, 1.25 s). The join itself (database and mock calls) took 2.6 s on that runner, so the test failed although the join never waited for the tracker. *Avoid:* a test that proves "A does not wait for B" holds B back (here the mock's invite list waits on a flag) and gives A a generous timeout; it never compares A's time with B's usual time. The mock has `hang_invites` for this.

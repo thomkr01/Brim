@@ -972,23 +972,26 @@ mod tests {
         assert_eq!((r.0.as_str(), r.1), ("single", Some(500)));
 
         uses(&t, 7);
+        // The tracker's invite list is held back, so its batch cannot end: a raid join that
+        // waited for it would hang. The limit is far above any runner's speed (a time limit near
+        // the batch time was flaky on a loaded runner).
+        t.set(|m| m.hang_invites = true);
         // The gateway loop hands both joins over before their tasks run.
         let joins = [member_add(&t, 812, at), member_add(&t, 813, at)];
         for m in &joins {
             observe(&t.app, &Event::MemberAdd(Box::new(m.clone())));
         }
         for m in &joins {
-            let started = std::time::Instant::now();
-            crate::joingate::on_join(&t.app, m, false).await.unwrap();
-            // The tracker's batch takes at least its window and settle time; the join must not
-            // wait for it (a fixed 900 ms was flaky on a loaded runner).
-            assert!(
-                started.elapsed() < WINDOW + SETTLE,
-                "{:?}",
-                started.elapsed()
-            );
+            tokio::time::timeout(
+                Duration::from_secs(60),
+                crate::joingate::on_join(&t.app, m, false),
+            )
+            .await
+            .expect("a raid join waited for the invite tracker")
+            .unwrap();
         }
         assert!(t.banned(0, 813).is_some(), "the raid join was not punished");
+        t.set(|m| m.hang_invites = false);
         let r = row(&t, 813, |_, _| true).await;
         assert_eq!(r.0, "group", "812 and 813 share one batch and a +2");
         t.cleanup().await;

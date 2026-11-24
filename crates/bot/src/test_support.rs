@@ -26,6 +26,8 @@ pub(crate) struct Mock {
     /// Members by (guild, user) with their role ids.
     pub(crate) members: HashMap<(u64, u64), Vec<u64>>,
     pub(crate) fail_get: bool,
+    /// The guild invite list waits until this is false again (a tracker fetch hangs, so a test can prove who waits).
+    pub(crate) hang_invites: bool,
     pub(crate) fail_put: bool,
     pub(crate) fail_put_5xx: bool,
     pub(crate) fail_member: bool,
@@ -488,6 +490,9 @@ async fn answer(mut s: TcpStream, mock: Arc<StdMutex<Mock>>) {
     let (method, target) = (first.next().unwrap_or(""), first.next().unwrap_or(""));
     let target = target.split_once("/api/v10").map_or(target, |p| p.1);
     let reason = decode(&header("x-audit-log-reason").unwrap_or_default());
+    while method == "GET" && target.ends_with("/invites") && mock.lock().unwrap().hang_invites {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     let delay = mock.lock().unwrap().delay_ms;
     if delay > 0 {
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
