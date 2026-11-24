@@ -105,18 +105,9 @@ pub fn set_bot_vars(vars: &[(String, String, String)]) {
     BOT.with(|b| *b.borrow_mut() = v);
 }
 
-/// The one sentence about placeholders, with examples from this message's own variables; none
-/// where the message has no variables.
+/// One short line that points to the variable search; none where the message has no variables.
 pub fn placeholder_hint() -> Option<AnyView> {
-    let names: Vec<String> = BOT.with(|b| b.borrow().iter().take(3).map(|v| format!("{{{}}}", v.0)).collect());
-    let list = match names.as_slice() {
-        [] => return None,
-        [a] => a.clone(),
-        [a, b] => format!("{a} and {b}"),
-        [a, b, c] => format!("{a}, {b} and {c}"),
-        _ => return None,
-    };
-    Some(view! { <p class="muted small pvnote">{format!("Placeholders such as {list} show each post's own details: Brim fills them in every time it posts, so one design works every time. Press ")}<b>"{ }"</b>" to add one."</p> }.into_any())
+    bot_mode().then(|| view! { <p class="muted small pvnote">"Press "<b>"{ }"</b>" to search all variables."</p> }.into_any())
 }
 
 fn bot_mode() -> bool {

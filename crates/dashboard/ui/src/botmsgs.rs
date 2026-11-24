@@ -639,23 +639,22 @@ pub fn BotMessages(
         let bot_text = move || {
             needs.then(|| {
                 let gone = cur.with(|c| !missing(&r3, &c["body"]).is_empty());
-                let what = what.clone();
                 let r4 = r3.clone();
                 let all: Vec<String> = r3["required"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|v| format!("{{{v}}}")).collect();
                 let lost = missing(&r3, &cur.with(|c| c["body"].clone()));
                 let many = all.len() > 1;
                 let button = if many || r3["in_text"] == true { "Put them back" } else { "Insert Bot text" };
                 let place = if r3["in_text"] == true { "in the text or the first embed" } else { "in the first embed" };
-                let hide = if r3["plain_facts"] == true { " Don't hide them in a spoiler or a link." } else { "" };
+                let hide = if r3["plain_facts"] == true { " Not in a spoiler or a link." } else { "" };
                 // Each variable copies itself on a click, missing ones in red.
                 let info = vars_of(&r3);
                 let chips = all.into_iter().map(|v| {
                     let miss = lost.iter().any(|l| format!("{{{l}}}") == v);
                     // What it is and an example, on hover.
-                    let tip = info.iter().find(|(n, ..)| format!("{{{n}}}") == v).map_or("Click to copy.".to_string(), |(_, l, ex)| match ex.is_empty() {
-                        true => format!("{l}. Click to copy."),
-                        false => format!("{l}, for example “{}”. Click to copy.", ex.replace(['*', '`'], "")),
-                    });
+                    let tip = info.iter().find(|(n, ..)| format!("{{{n}}}") == v).map_or(String::new(), |(_, l, ex)| match ex.is_empty() {
+                        true => format!("{l}. "),
+                        false => format!("{l}, for example “{}”. ", ex.replace(['*', '`'], "")),
+                    }) + &format!("Keep it {place}.{hide} Click to copy.");
                     let t = v.clone();
                     view! { <button class="chip copyvar" class:need=miss on:mouseenter=move |e| place_bubble(&e) on:focus=move |e| place_bubble(&e) on:click=move |_| { let t = t.clone(); spawn_local(async move { if copy_text(&t).await { msg.ok(format!("Copied {t}")) } }) }>{v}<span class="bubble">{tip}</span></button> }
                 }).collect_view();
@@ -663,7 +662,6 @@ pub fn BotMessages(
                     <div class="note req-text" class:bad=gone>
                         <b>{if gone { "The red ones are missing. Put them back to save." } else if many { "Keep these in the message:" } else { "Keep this in the message:" }}</b>
                         <span class="chipset">{chips}</span>
-                        <span class="muted">{format!("Brim fills them in with {what}. Write what you like around them, but keep them {place}.{hide}")}</span>
                         {gone.then(|| view! { <button class="ghost" on:click=move |_| { cur.update(|c| insert_required(&r4, &mut c["body"])); ed.reset() }>{button}</button> })}
                     </div>
                 }
