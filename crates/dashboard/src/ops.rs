@@ -373,6 +373,9 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
     }
     rows.extend(enforce_permits_check(&config));
     let mut rows = json!(rows);
+    rows.as_array_mut()
+        .into_iter()
+        .for_each(|r| r.extend(crate::security_setup::rows(&config)));
     // Move into range's confirm names each value and where it goes.
     if let Some(r) = rows
         .as_array_mut()
@@ -1566,6 +1569,35 @@ async fn setup_fix(
             )
             .await?;
             done(json!({"ok": true, "version": version}))
+        }
+        crate::security_setup::BACKUPS_FIX => {
+            if level < crate::access::write_bar("backups").0 {
+                return Err(ApiError::Forbidden("you cannot change the backups"));
+            }
+            config["backups"]["enabled"] = json!(true);
+            crate::api::validate("backups", &config["backups"], &c["backups"])?;
+            let version = save_fix(st, s, guild, cur, &config, "turned on backups").await?;
+            done(json!({"ok": true, "version": version}))
+        }
+        crate::security_setup::FIX => {
+            let keys = crate::security_setup::apply(&mut config, level)?;
+            if keys.is_empty() {
+                return done(json!({"ok": true}));
+            }
+            for k in crate::access::SECTIONS {
+                if config[*k] != c[*k] {
+                    crate::api::validate(k, &config[*k], &c[*k])?;
+                }
+            }
+            if let Some(e) = brim_automod::join::web_mode_error(&config) {
+                return Err(ApiError::BadRequest(e.into()));
+            }
+            let what = format!(
+                "used the recommended security setup ({} settings)",
+                keys.len()
+            );
+            let version = save_fix(st, s, guild, cur, &config, &what).await?;
+            done(json!({"ok": true, "version": version, "changed": keys}))
         }
         CLAMP => {
             let mut moved = vec![];
@@ -3138,6 +3170,89 @@ mod tests {
             .unwrap()
             .0;
         assert!(row(&v).is_none(), "no saved roles, no row");
+    }
+
+    /// The recommended setup: a server with no saved values gets the profile row and the Backups
+    /// row, the Fix writes every difference once, and both rows are gone afterwards.
+    #[tokio::test]
+    async fn security_setup_row_and_fix() {
+        let Some((mut st, s, g)) = crate::api::g3_handler_tests::setup(9_901_400_000).await else {
+            return;
+        };
+        let roles = json!([
+            {"id": g.to_string(), "name": "@everyone", "permissions": "1024", "position": 0},
+            {"id": "60", "name": "Brim", "permissions": "8", "position": 1, "managed": true},
+        ]);
+        mock_discord(&mut st, g, roles).await;
+        wipe(&st, g).await;
+        sqlx::query("insert into guild_config (guild_id, version, config) values ($1, 1, $2)")
+            .bind(g)
+            .bind(json!({"verification": {"time_limit_ms": 120000}}))
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let rows = |v: &Value, id: &str| {
+            v["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == id)
+                .cloned()
+        };
+        let v = score(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        let r = rows(&v, "security_profile").expect("the row is shown");
+        assert_eq!(r["fix"]["setting"], crate::security_setup::FIX);
+        let lines = r["changes"].as_array().unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.as_str().unwrap().contains("2 minute(s) to 5 minute(s)")),
+            "{lines:?}"
+        );
+        assert!(rows(&v, "backups_off").is_some());
+        let f = fix(
+            State(st.clone()),
+            s.clone(),
+            Path(g),
+            body(crate::security_setup::BACKUPS_FIX),
+        )
+        .await
+        .unwrap();
+        assert_eq!(f.0["ok"], true);
+        let f = fix(
+            State(st.clone()),
+            s.clone(),
+            Path(g),
+            body(crate::security_setup::FIX),
+        )
+        .await
+        .unwrap();
+        assert!(f.0["changed"].as_array().unwrap().len() > 30, "{}", f.0);
+        let (_, c) = crate::store::current(&st.db, g).await.unwrap();
+        assert_eq!(c["verification"]["time_limit_ms"], 300_000);
+        assert_eq!(c["backups"]["enabled"], true);
+        assert_eq!(c["antinuke"]["enabled"], true);
+        assert_eq!(c["automod"]["filters"]["bad_sites"]["action"], "timeout");
+        assert_eq!(c["misc"]["warn_actions"].as_array().unwrap().len(), 2);
+        let v = score(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        assert!(rows(&v, "security_profile").is_none() && rows(&v, "backups_off").is_none());
+        // Pressed again with nothing left to change: no new version.
+        let f = fix(
+            State(st.clone()),
+            s.clone(),
+            Path(g),
+            body(crate::security_setup::FIX),
+        )
+        .await
+        .unwrap();
+        assert!(f.0["changed"].is_null());
+        wipe(&st, g).await;
     }
 
     /// Move to main roles: each main role gets @everyone's bits, @everyone ends with none, and

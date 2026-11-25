@@ -1287,7 +1287,13 @@ pub fn Section(
                 );
                 // Unset values take their defaults, so changing one and back leaves nothing to save.
                 let mut c = val.get_untracked();
-                let unset: Vec<&str> = cards.into_iter().flatten().flat_map(|c| c.preset).copied().filter(|p| get_path(&c, p).is_null()).collect();
+                // The wizard fills the recommended values (`profile.json`) where nothing is saved yet.
+                let prefix = format!("{n}.");
+                let unset: Vec<(&str, Value)> = if cards.is_some() {
+                    crate::wizard::profile().iter().filter(|(p, _)| p.starts_with(&prefix)).map(|(p, v)| (p.as_str(), v.clone())).filter(|(p, _)| get_path(&c, p).is_null()).collect()
+                } else {
+                    vec![]
+                };
                 for f in fields.get_untracked() {
                     let p = f["path"].as_str().unwrap_or("");
                     // `fallback`: an older field of the same section that held this value in other units.
@@ -1310,8 +1316,8 @@ pub fn Section(
                 }
                 orig.set(c.clone());
                 // A wizard switch that starts on and was never saved shows as an unsaved change.
-                for p in unset {
-                    set_path(&mut c, p, json!(true));
+                for (p, v) in unset {
+                    set_path(&mut c, p, v);
                 }
                 val.set(c);
             }
@@ -1620,12 +1626,6 @@ mod enforce_tests {
         assert!(super::enforce_text(Ok(json!({"count": 0}))).contains("Nobody loses a role now."));
         let t = super::enforce_text(Err("timeout".into()));
         assert!(t.contains("could not read") && t.contains("without a permit"), "{t}");
-    }
-
-    /// The wizard offers the switch where the saved settings have no value for it.
-    #[test]
-    fn wizard_offers_dangerous_role_removal() {
-        assert!(crate::wizard::MISC.iter().any(|c| c.preset == ["misc.enforce_permits"] && c.fields[0].0 == "misc.enforce_permits"));
     }
 }
 

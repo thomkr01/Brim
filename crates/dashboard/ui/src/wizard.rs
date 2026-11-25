@@ -23,8 +23,14 @@ pub struct Card {
     pub alert: Option<&'static str>,
     /// (field, follower): changing the field sets the follower to the same value.
     pub links: &'static [(&'static str, &'static str)],
-    /// Switches the wizard turns on while the saved settings have no value for them yet.
-    pub preset: &'static [&'static str],
+}
+
+/// The recommended values, one file for the wizard and the Overview Fix (`crates/dashboard/src/profile.rs`
+/// reads the same file): `section.path` -> value. The wizard fills the ones the server has no
+/// saved value for; the owner sees them on the cards and saves once.
+pub fn profile() -> &'static serde_json::Map<String, Value> {
+    static P: std::sync::OnceLock<serde_json::Map<String, Value>> = std::sync::OnceLock::new();
+    P.get_or_init(|| serde_json::from_str(include_str!("profile.json")).unwrap_or_default())
 }
 
 const fn card(
@@ -45,7 +51,6 @@ const fn card(
         when: &[],
         alert: None,
         links: &[],
-        preset: &[],
     }
 }
 
@@ -112,8 +117,7 @@ pub const MISC: &[Card] = &[
     },
     Card {
         notes: &["Before it saves, Brim lists the members who lose roles now. Give them a permit first if they must keep them."],
-        // Switched on here for every server that has not chosen yet; the save lists who loses roles.
-        preset: &["misc.enforce_permits"],
+        // `profile.json` switches it on for every server that has not chosen yet; the save lists who loses roles.
         ..card("Dangerous roles", "Should Brim take roles with dangerous permissions from members who have no permit?", &[("misc.enforce_permits", "Remove dangerous roles from members without permits")], |c, _| {
             text(if on(c, "misc.enforce_permits", false) {
                 "Members without a permit lose roles with dangerous permissions. The owner, Extra Owners, Trusted Admins and permit holders keep theirs."
@@ -122,7 +126,28 @@ pub const MISC: &[Card] = &[
             })
         })
     },
+    card(
+        "Moderation defaults",
+        "How long a timeout lasts when staff give none, how many days of messages a ban deletes, and what Brim does by itself as warn points add up.",
+        &[
+            ("misc.default_timeout_secs", "Default timeout length"),
+            ("misc.ban_purge_days", "Days of messages deleted on ban"),
+            ("misc.warn_actions", "Warn points that punish by themselves"),
+        ],
+        |_, _| text("Staff can still type any length or number. These are only what a command uses when nothing is typed."),
+    ),
+    DISCORD_SETTINGS,
 ];
+
+pub const DISCORD_SETTINGS: Card = Card {
+    action: Some(("Set Discord's three settings", "wizard/discord-settings")),
+    ..card(
+        "Discord server settings",
+        "Discord's own server settings: a medium verification level, the explicit media filter for everyone, and default notifications for mentions only. Brim changes one only when Discord has a weaker value now.",
+        &[],
+        |_, _| text("Brand new accounts cannot post at once, media from every member is scanned, and a raid does not notify everyone."),
+    )
+};
 
 pub const AUTOMOD: &[Card] = &[
     boxed(card(
@@ -155,13 +180,16 @@ pub const AUTOMOD: &[Card] = &[
             "automod.filters.chars_lower.enabled",
             "automod.filters.chars_upper.enabled",
         )],
-        // Owner decision 2026-11-22: on unless the owner already chose.
-        preset: &["automod.filters.suspicion.enabled"],
+        // Owner decision 2026-11-22: on unless the owner already chose (`profile.json`).
         ..boxed(card(
             "Antispam module",
             "Do you want Brim to also monitor and fight off spam in your server?",
             &[
                 ("automod.anti_spam", "Enable Anti Spam"),
+                (
+                    "automod.filters.regular.enabled",
+                    "Monitor regular message spam",
+                ),
                 (
                     "automod.filters.mentions.enabled",
                     "Track and stop @mention spam",
@@ -208,6 +236,33 @@ pub const AUTOMOD: &[Card] = &[
             })
         },
     ),
+    card(
+        "Link filter actions",
+        "What should Brim do when a member posts a bad link or an invite link?",
+        &[
+            ("automod.filters.bad_sites.action", "Malicious links: action"),
+            ("automod.filters.bad_sites.duration_secs", "Malicious links: timeout length"),
+            ("automod.filters.scam_links.action", "Scam links and login QR codes: action"),
+            ("automod.filters.scam_links.duration_secs", "Scam links and login QR codes: timeout length"),
+            ("automod.filters.nsfw_links.action", "NSFW links: action"),
+            ("automod.filters.invites.action", "Invite links: action"),
+            ("automod.filters.invites.duration_secs", "Invite links: timeout length"),
+        ],
+        |_, _| text("A hacked account keeps posting links, so a timeout stops it at once. A timeout is easy for staff to lift."),
+    ),
+    Card {
+        when: &[("automod.auto_lockdown.mention_window_ms", "automod.auto_lockdown.enabled")],
+        ..boxed(card(
+            "Timeouts and lockdown",
+            "Should repeat offenders get longer timeouts, and should Brim lock the server when many members are mentioned at once?",
+            &[
+                ("automod.auto_lockdown.enabled", "Lock the server when mentions flood"),
+                ("automod.auto_lockdown.mention_window_ms", "Count mentions within"),
+                ("automod.strike.multiply", "Make timeouts longer for repeat offenders"),
+            ],
+            |_, _| show("automod_timeout"),
+        ))
+    },
 ];
 
 pub const ANTINUKE: &[Card] = &[
@@ -222,6 +277,21 @@ pub const ANTINUKE: &[Card] = &[
         ("antinuke.limits.WebhookDelete.enabled", "Monitor webhook deletions"),
         ("antinuke.limits.IntegrationCreate.enabled", "Monitor app additions"),
     ], |_, _| show("nuke_quarantined"))),
+    card(
+        "More things Antinuke watches",
+        "These things cannot be undone, or hide an attack. Should Brim count them too?",
+        &[
+            ("antinuke.prune", "Member prunes"),
+            ("antinuke.limits.GuildUpdate.enabled", "Changes to the server settings"),
+            ("antinuke.limits.AutoModRuleDelete.enabled", "Deleted Discord AutoMod rules"),
+            ("antinuke.limits.AutoModRuleUpdate.enabled", "Changed Discord AutoMod rules"),
+            ("antinuke.limits.EmojiDelete.enabled", "Deleted emojis"),
+            ("antinuke.limits.StickerDelete.enabled", "Deleted stickers"),
+            ("antinuke.limits.SoundboardDelete.enabled", "Deleted soundboard sounds"),
+            ("antinuke.limits.IntegrationDelete.enabled", "Removed apps"),
+        ],
+        |_, _| show("nuke_quarantined"),
+    ),
     Card {
         notes: &["Leave the role empty and Auto Setup makes @Quarantine for you (old Quarantine roles are deleted). Pick a role and Auto Setup removes all of its permissions and denies it in every channel and category."],
         ..boxed(card("Quarantine", "Do you want the quarantine system that keeps your server safe from being destroyed?", &[
@@ -288,18 +358,37 @@ pub const WHITELIST: &[Card] = &[
 ];
 
 pub const JOINGATE: &[Card] = &[Card {
-    when: &[("joingate.min_age_override_ms", "joingate.account_age.enabled"), ("joingate.username_strict", "joingate.username_filter.enabled"), ("joingate.username_terms", "joingate.username_filter.enabled")],
+    when: &[
+        ("joingate.unauthorized_bot.action", "joingate.unauthorized_bot.enabled"),
+        ("joingate.unverified_bot.action", "joingate.unverified_bot.enabled"),
+        ("joingate.account_age.action", "joingate.account_age.enabled"),
+        ("joingate.min_age_override_ms", "joingate.account_age.enabled"),
+        ("joingate.invite_in_name.action", "joingate.invite_in_name.enabled"),
+        ("joingate.suspicious.action", "joingate.suspicious.enabled"),
+        ("joingate.spammer.action", "joingate.spammer.enabled"),
+        ("joingate.username_filter.action", "joingate.username_filter.enabled"),
+        ("joingate.username_strict", "joingate.username_filter.enabled"),
+        ("joingate.username_terms", "joingate.username_filter.enabled"),
+    ],
     ..boxed(card("Join Gate status", "If you want to use instant detection filters for new members joining your server, this is the module to tweak.", &[
     ("joingate.enabled", "Enable Join Gate"),
+    ("joingate.dm_punished", "DM members who are stopped"),
     ("joingate.unauthorized_bot.enabled", "Bots added by unauthorized members"),
+    ("joingate.unauthorized_bot.action", "Bots added by unauthorized members: action"),
     ("joingate.account_age.enabled", "Accounts younger than the minimum age"),
+    ("joingate.account_age.action", "Accounts younger than the minimum age: action"),
     ("joingate.min_age_override_ms", "Minimum account age"),
     ("joingate.no_avatar.enabled", "Accounts that have no profile picture"),
     ("joingate.unverified_bot.enabled", "Discord unverified bots added by anyone"),
+    ("joingate.unverified_bot.action", "Discord unverified bots: action"),
     ("joingate.invite_in_name.enabled", "Accounts with invite links in usernames"),
+    ("joingate.invite_in_name.action", "Invite links in usernames: action"),
     ("joingate.suspicious.enabled", "Accounts Brim deems suspicious"),
+    ("joingate.suspicious.action", "Suspicious accounts: action"),
     ("joingate.spammer.enabled", "Accounts Discord flags as likely spammers"),
+    ("joingate.spammer.action", "Likely spammers: action"),
     ("joingate.username_filter.enabled", "Accounts that have certain names"),
+    ("joingate.username_filter.action", "Certain names: action"),
     ("joingate.username_strict", "Strict words"),
     ("joingate.username_terms", "Wildcard words"),
 ], |c, _| view! { {text(if on(c, "joingate.enabled", false) { "New members are checked the moment they join." } else { "Join Gate is off." })}{show("joingate_kick")} }.into_any()))
@@ -311,7 +400,10 @@ pub const JOINRAID: &[Card] = &[Card {
     ("joinraid.enabled", "Enable Join Raid"),
     ("joinraid.count", "Joins that count as a raid"),
     ("joinraid.span_ms", "Within"),
+    ("joinraid.active_ms", "A raid lasts"),
+    ("joinraid.action", "What happens to flagged accounts"),
     ("joinraid.lock", "Lock when a raid starts"),
+    ("joinraid.voice.enabled", "Stop raids in voice channels"),
 ], |_, _| view! { {show("raid")}{show("raid_report")} }.into_any()))
 }];
 
@@ -325,6 +417,9 @@ pub const VERIFICATION: &[Card] = &[Card {
         &[
             ("verification.enabled", "Enable Verification"),
             ("verification.mode", "Verification mode"),
+            ("verification.time_limit_ms", "Time to verify"),
+            ("verification.on_fail", "When time runs out"),
+            ("verification.replace_roles", "Replace the member's roles with the main roles after verifying"),
         ],
         |c, _| {
             let mode = c["verification"]["mode"].as_str().unwrap_or("Captcha").to_string();
@@ -337,6 +432,41 @@ pub const VERIFICATION: &[Card] = &[Card {
         },
     )
 }];
+
+pub const BACKUPS: &[Card] = &[boxed(card(
+    "Backups status",
+    "Backups let Brim put back the channels and roles an attacker deletes. Without one, nothing can be restored.",
+    &[
+        ("backups.enabled", "Allow backups"),
+        ("backups.auto", "Make a backup by itself"),
+        ("backups.interval_hours", "Hours between backups"),
+        ("backups.max_images", "Backups kept"),
+        ("backups.restore", "Restore after a nuke"),
+    ],
+    |c, _| text(if on(c, "backups.enabled", false) { "Brim makes a backup by itself and can put the server back after an attack." } else { "Backups are off, so Brim cannot put back what an attacker deletes." }),
+))];
+
+pub const PANIC: &[Card] = &[card(
+    "Panic mode",
+    "Panic mode locks the server when more than one account has to be quarantined in a short time.",
+    &[
+        ("panic.executors", "Quarantined accounts that start Panic mode"),
+        ("panic.duration_secs", "How long it lasts"),
+        ("panic.heat_algorithm", "Also start it on heat"),
+        ("panic.load_backup", "Load the latest backup after Panic mode"),
+    ],
+    |c, _| text(if on(c, "panic.load_backup", true) { "The latest backup is loaded when Panic mode starts, if backups and their restore are on." } else { "Panic mode loads no backup." }),
+)];
+
+pub const RAIDER_LIST: &[Card] = &[boxed(card(
+    "Raider List",
+    "A list of accounts caught raiding other servers, checked by the bot owner. What should Brim do when a listed account joins?",
+    &[
+        ("raider_list.enabled", "Use the Raider List"),
+        ("raider_list.action", "Action"),
+    ],
+    |_, _| text("Every entry is checked by the bot owner first. When one is removed, the ban is lifted here too."),
+))];
 
 /// A sample with `{key}` placeholders filled in; null while the samples load.
 fn filled(key: &str, with: &[(&str, &str)]) -> Value {
@@ -516,6 +646,29 @@ mod tests {
         let mut c2 = c.clone();
         c2["permits"]["custom"][0]["whitelist"] = json!(["reports"]);
         assert_eq!(super::score(&c2, &dc, "1"), 88);
+    }
+
+    /// Every recommended value is on a wizard card, so the owner sees it before saving, and no
+    /// card sits twice in the steps.
+    #[test]
+    fn every_recommended_value_is_on_a_card() {
+        let all: Vec<&super::Card> = [
+            super::MISC, super::AUTOMOD, super::ANTINUKE, super::BACKUPS, super::PANIC, super::WHITELIST,
+            super::JOINGATE, super::JOINRAID, super::RAIDER_LIST, super::VERIFICATION, super::TICKETS,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let shown: Vec<&str> = all.iter().flat_map(|c| c.fields.iter().map(|f| f.0)).collect();
+        let missing: Vec<&String> = super::profile().keys().filter(|k| !shown.contains(&k.as_str())).collect();
+        assert!(missing.is_empty(), "values the wizard never shows: {missing:?}");
+        // A `when` pair names two fields of its own card.
+        for c in &all {
+            for (field, switch) in c.when {
+                assert!(c.fields.iter().any(|f| f.0 == *field) && c.fields.iter().any(|f| f.0 == *switch), "{} {field}", c.title);
+            }
+        }
+        assert!(super::profile().len() > 50);
     }
 
     #[test]
