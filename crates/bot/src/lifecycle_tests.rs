@@ -529,6 +529,15 @@ async fn a_failed_join_gate_log_does_not_retry_a_done_punishment() {
     crate::joingate::punish_or_retry(&t.app, &c, t.g(0), 790, ban, "join raid", d).await;
     assert!(t.banned(0, 790).is_some());
     assert!(pending(&t, 0, "raid_punish").await.is_empty());
+    // The stats count the ban as a join raid ban, apart from other Join Gate bans.
+    let n: i64 = sqlx::query_scalar(
+        "SELECT coalesce(sum(n), 0)::bigint FROM stat_daily WHERE guild_id = $1 AND kind = 'ban' AND feature = 'join_raid'",
+    )
+    .bind(t.g(0).get() as i64)
+    .fetch_one(&t.app.pool)
+    .await
+    .unwrap();
+    assert_eq!(n, 1);
     t.cleanup().await;
 }
 

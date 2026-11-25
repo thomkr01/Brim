@@ -104,6 +104,9 @@ pub struct Flags {
     pub no_avatar: bool,
     #[serde(default)]
     pub voice: bool,
+    /// The part of Brim that acts for the stats (`catch`); None: staff, or `brim` for the bot.
+    #[serde(skip)]
+    pub by: Option<&'static str>,
 }
 
 /// `s` is the message text with the prefix already stripped. Targets are mentions, raw ids, or names (words before the first `?flag`; with commas,

@@ -298,8 +298,51 @@ async fn fold_adds_each_finished_day_once() {
     .await
     .unwrap();
     assert!(today.is_some(), "today's server count is set");
+    // Servers ever: a known server is counted, and stays counted after its purge.
+    sqlx::query(
+        "INSERT INTO guild_owners (guild_id, owner_id) VALUES ($1, 1) ON CONFLICT DO NOTHING",
+    )
+    .bind(g)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let ever = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT n FROM stat_daily_all WHERE day = (now() AT TIME ZONE 'UTC')::date AND kind = 'servers_ever'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+    fold(&pool).await.unwrap();
+    let counted = ever().await;
+    let known: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM stat_servers_ever WHERE key = sha256($1::text::bytea)",
+    )
+    .bind(g)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(known, 1);
     for guild in [g, g + 1] {
         crate::db::purge_guild(&pool, guild).await.unwrap();
     }
     assert_eq!(all().await, (7, 2), "the totals keep a purged server");
+    fold(&pool).await.unwrap();
+    assert!(ever().await >= counted, "servers ever never goes down");
+    let still: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM stat_servers_ever WHERE key = sha256($1::text::bytea)",
+    )
+    .bind(g)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(still, 1, "the purge keeps the server in servers ever");
+    let active: Option<i64> = sqlx::query_scalar(
+        "SELECT n FROM stat_daily_all WHERE day = (now() AT TIME ZONE 'UTC')::date AND kind = 'servers_active_30d'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
+    assert!(active.is_some());
 }
