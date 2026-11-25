@@ -1363,7 +1363,7 @@ impl RetentionCfg {
     }
 }
 
-/// What the catch channel does to a writer; `Log` is the test mode.
+/// What the golden channel does to a writer; `Log` is the test mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 pub enum CatchAction {
     Ban,
@@ -1504,7 +1504,7 @@ impl Default for GiveawaysCfg {
 
 /// The position that puts channel `me` (id, parent, position) below every other channel of
 /// category `cat` in `others`; None when it is there already. Discord orders by position, then
-/// id. Shared by the bot's catch channel keeper and the dashboard's Auto Setup.
+/// id. Shared by the bot's golden channel keeper and the dashboard's Auto Setup.
 pub fn bottom_position(
     others: &[(u64, Option<u64>, i64)],
     me: (u64, Option<u64>, i64),

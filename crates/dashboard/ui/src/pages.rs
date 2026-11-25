@@ -382,7 +382,7 @@ const SYSTEMS: [(&str, &str, &str, bool); 5] = [
 
 /// (module, description) of the modules shown after the systems. Their switches are the sidebar's (`modules::switch_of`).
 const MODULE_CARDS: [(&str, &str); 4] = [
-    ("Moderation", "Cases, notes, reports, mod stats and the catch channel."),
+    ("Moderation", "Cases, notes, reports, mod stats and the golden channel."),
     ("Tickets", "Members DM Brim, and staff answer in a private ticket channel."),
     ("Messages", "Your own messages, the messages Brim sends by itself, and feeds."),
     ("Logging", "Choose where Brim logs what happens."),
@@ -467,7 +467,7 @@ fn SystemToggle(
 }
 
 /// What a fix that answered ok still could not do, in plain words: Discord refused some
-/// changes (`failed`), or the catch channel kept its access (`catch_stays`). Such a fix is not
+/// changes (`failed`), or the golden channel kept its access (`catch_stays`). Such a fix is not
 /// counted as done (the test server, 2026-11-18).
 fn refused(v: &Value) -> Option<String> {
     let mut why = vec![];
@@ -477,7 +477,7 @@ fn refused(v: &Value) -> Option<String> {
         Some(n) => why.push(format!("Discord refused {n} changes. Check that Brim has Manage Roles and the permissions it gives, then try again")),
     }
     if let Some(c) = v["catch_stays"].as_str() {
-        why.push(format!("the catch channel kept its access: {c}"));
+        why.push(format!("the golden channel kept its access: {c}"));
     }
     (!why.is_empty()).then(|| why.join("; "))
 }
@@ -494,7 +494,7 @@ fn action(r: &Value) -> String {
         }
         (Some("member_role"), _) => "Create a Member role and make it the main role".into(),
         (Some("staff_access"), _) => "Let every staff role into the Logs and Staff categories".into(),
-        (Some("catch_channel"), _) => "Make a new catch channel where Auto Setup puts it".into(),
+        (Some("catch_channel"), _) => "Make a new golden channel where Auto Setup puts it".into(),
         (Some("ticket_log_place"), _) => "Move the ticket log into the Logs category".into(),
         (Some("bot_hoist"), _) => {
             "Give Brim its own role, so it is its own group in the member list".into()
@@ -1387,7 +1387,7 @@ fn RouteNote(guild: String) -> impl IntoView {
     }
 }
 
-/// Catch channel: one click makes the honeypot channel and turns it on, then the settings form.
+/// Golden channel: one click makes the honeypot channel and turns it on, then the settings form.
 #[component]
 pub fn Catch(guild: String) -> impl IntoView {
     let (msg, need) = (Msg::default(), step_up());
@@ -1398,7 +1398,7 @@ pub fn Catch(guild: String) -> impl IntoView {
     let g = guild.clone();
     let busy = RwSignal::new(false);
     let setup = move |_| {
-        let sure = "This creates #do-not-write at the top of the server and turns the catch channel on: anyone without a permit who writes there gets the action below. Continue?";
+        let sure = "This creates #golden-channel at the top of the server and turns the golden channel on: anyone without a permit who writes there gets the action below. Continue?";
         if !web_sys::window()
             .unwrap()
             .confirm_with_message(sure)
@@ -1425,7 +1425,7 @@ pub fn Catch(guild: String) -> impl IntoView {
             },
         );
     };
-    // The setup button hides once the catch channel is set and still exists in Discord.
+    // The setup button hides once the golden channel is set and still exists in Discord.
     let set_up = RwSignal::new(true);
     let g3 = guild.clone();
     Effect::new(move |_| {

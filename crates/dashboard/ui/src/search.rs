@@ -211,9 +211,9 @@ mod tests {
         assert_eq!(score("Quarantine role", "quarantien"), 0);
         assert_eq!(score("Quarantine role", "quarntine"), 20);
         assert!(one_typo("role", "role") && one_typo("rloe", "role") == false);
-        let f = json!({"title": "Catch channel", "group": "General", "help": "hacked accounts"});
-        assert!(field_score(&f, "catch") > field_score(&f, "hacked"));
-        assert!(field_score(&f, "hacked catch") > 0);
+        let f = json!({"title": "Golden channel", "group": "General", "help": "hacked accounts"});
+        assert!(field_score(&f, "golden") > field_score(&f, "hacked"));
+        assert!(field_score(&f, "hacked golden") > 0);
         assert_eq!(field_score(&f, "nothing"), 0);
     }
 
