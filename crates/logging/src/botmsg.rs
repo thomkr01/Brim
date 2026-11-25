@@ -564,7 +564,9 @@ fn build() -> Vec<Def> {
     security_answers(&mut out);
     settings_errors(&mut out);
     for d in &mut out {
-        if shown(&d.template).iter().any(|v| v == "text") {
+        // The ticket panel works through its buttons: its `{text}` (the panels' descriptions) is
+        // offered, never forced.
+        if d.key != "ticket.panel" && shown(&d.template).iter().any(|v| v == "text") {
             d.required = vec!["text"];
             d.important.retain(|v| *v != "text");
             d.what = what(&d.key);
@@ -7823,6 +7825,15 @@ mod tests {
         }
     }
 
+    /// The ticket panel has its buttons from Brim: an edit without `{text}` saves and renders.
+    #[test]
+    fn ticket_panel_needs_no_text() {
+        let d = find("ticket.panel").unwrap();
+        assert!(d.required.is_empty() && d.vars.contains(&"text"));
+        let m = json!({"content": "", "embeds": [{"description": "Press a button."}]});
+        assert!(missing_text("ticket.panel", &m).is_none());
+    }
+
     /// The CONGRATS word (`congrats_1` to `congrats_8`) opens what an ended giveaway says to its
     /// winners and nothing else; the mentions stay in the text, so they still ping.
     #[test]
@@ -8179,7 +8190,8 @@ mod tests {
                 assert_eq!(d.required, ["link"], "{}", d.key);
                 continue;
             }
-            let has = d.template.to_string().contains("{text}");
+            // The ticket panel offers `{text}` but needs none (its buttons come from Brim).
+            let has = d.template.to_string().contains("{text}") && d.key != "ticket.panel";
             assert!(missing_text(&d.key, &d.template).is_none(), "{}", d.key);
             if d.strict() && !d.required.contains(&"text") {
                 // Security texts and moderation logs with their own facts (`{code}`, `{name}` and `{page}`, `{id}`).
