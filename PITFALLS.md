@@ -1748,3 +1748,7 @@ The CONGRATS word is eight tags in a row (`{e:congrats_1}{e:congrats_2}`). The d
 ## A fixed line in a default shows in every state of that message (2026-11-25)
 
 The CONGRATS word was a fixed first line of the ended giveaway card, so a giveaway that nobody won said CONGRATS above "Result: Nobody". *Avoid:* a line that must not show in some state is a variable alone on its line (`{ga_congrats}`, code name `congrats`, passed by `giveaways.rs`), empty in that state; `fill_text` drops a line whose variables are all empty. Search for the same pattern when a default gets a celebratory or state-bound line: a state without that fact needs its own default or an empty variable.
+
+## The test send of a default message posted raw emoji tags (2026-11-25)
+
+"Send test to me" posted `{e:trophy}` and the CONGRATS tags as text in winners, reroll and every other message whose text sits above the embeds. Root cause: `fill_emoji` fills only the title, description, footer and fields of embeds. *Avoid:* the test send fills every text of the message with `fill_all` (all strings, like the bot's own `fill_tags`), so it matches the real post.

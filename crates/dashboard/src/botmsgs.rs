@@ -273,6 +273,17 @@ fn fill_emoji(m: &mut Value) {
     }
 }
 
+/// Every text of a message with its Brim emoji tags filled, as the bot's own post does it (also the
+/// text above the embeds, which `fill_emoji` leaves).
+fn fill_all(v: &mut Value) {
+    match v {
+        Value::String(s) => *s = brim_logging::emoji::fill(s),
+        Value::Array(a) => a.iter_mut().for_each(fill_all),
+        Value::Object(o) => o.values_mut().for_each(fill_all),
+        _ => {}
+    }
+}
+
 /// The outside-server keys, for SQL.
 fn bot_wide() -> Vec<String> {
     botmsg::BOT_WIDE.iter().map(|k| k.to_string()).collect()
@@ -807,7 +818,7 @@ async fn test(
     let ex = examples(d, &server);
     let vars: Vec<(&str, &str)> = ex.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = botmsg::render(&key, stored.as_ref(), &vars);
-    fill_emoji(&mut m);
+    fill_all(&mut m);
     let content = format!(
         "-# Test of “{}” from the dashboard, with example values.\n{}",
         d.name,
@@ -845,6 +856,14 @@ async fn test(
 
 #[cfg(test)]
 mod tests {
+
+    /// A test send fills the tags in the text above the embeds too, not only in the embeds.
+    #[test]
+    fn a_test_send_fills_emoji_tags_in_every_text() {
+        let mut m = json!({"content": "{e:trophy} {e:congrats_1}\nHi", "embeds": [{"title": "{e:star} T", "fields": [{"name": "{e:clock} N", "value": "v"}]}]});
+        fill_all(&mut m);
+        assert!(!m.to_string().contains("{e:"), "{m}");
+    }
 
     #[test]
     fn the_banner_example_follows_the_server_choice() {
