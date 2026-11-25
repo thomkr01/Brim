@@ -7321,6 +7321,11 @@ pub fn missing_text(key: &str, msg: &Value) -> Option<String> {
 
 fn missing_code(d: &Def, msg: &Value) -> Option<String> {
     let key = d.key.as_str();
+    // The panel message is sent as its first embed with Brim's buttons: a copy with only text
+    // would be dropped for the default.
+    if key == "ticket.panel" && msg["embeds"].as_array().is_none_or(Vec::is_empty) {
+        return Some("The ticket panel message needs an embed: Brim puts its buttons under it. Add an embed, or use Revert to default.".into());
+    }
     let frame = is_frame(d, msg);
     if d.strict() && !frame {
         if let Some(why) = hides_facts(d, msg) {
@@ -7832,6 +7837,11 @@ mod tests {
         assert!(d.required.is_empty() && d.vars.contains(&"text"));
         let m = json!({"content": "", "embeds": [{"description": "Press a button."}]});
         assert!(missing_text("ticket.panel", &m).is_none());
+        // Text only, with or without the variable: the panel would send the default instead.
+        for t in ["Press a button.", "{text}"] {
+            let only = json!({"content": t, "embeds": []});
+            assert!(missing_text("ticket.panel", &only).is_some(), "{t}");
+        }
     }
 
     /// The CONGRATS word (`congrats_1` to `congrats_8`) opens what an ended giveaway says to its
