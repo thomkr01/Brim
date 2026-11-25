@@ -564,9 +564,7 @@ fn build() -> Vec<Def> {
     security_answers(&mut out);
     settings_errors(&mut out);
     for d in &mut out {
-        // The ticket panel works through its buttons: its `{text}` (the panels' descriptions) is
-        // offered, never forced.
-        if d.key != "ticket.panel" && shown(&d.template).iter().any(|v| v == "text") {
+        if shown(&d.template).iter().any(|v| v == "text") {
             d.required = vec!["text"];
             d.important.retain(|v| *v != "text");
             d.what = what(&d.key);
@@ -5573,7 +5571,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         "Ticket panel message",
         g,
         false,
-        &["text"],
+        &["panels"],
         embed(
             "{e:ticket} Open a Ticket",
             BLUE,
@@ -5583,7 +5581,7 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
                 "{e:note} **Have ready:** names, message links or screenshots.".into(),
                 "{e:clock} **One ticket per issue.** Staff answer as soon as they can.".into(),
                 String::new(),
-                "{text}".into(),
+                "{panels}".into(),
             ],
         ),
     );
@@ -5662,7 +5660,8 @@ fn tickets_and_verify(out: &mut Vec<Def>) {
         GREEN,
         &format!("To access `{{guild.name}}`, you need to pass the verification first.\n{ARROW} Press on the **Verify** button below."),
     );
-    d.required = vec!["guild.name"];
+    // The Verify button does the job: the server's name is recommended (a warning), not required.
+    d.important = vec!["guild.name"];
     out.push(d);
     out.push(plain(
         "verify.wrong",
@@ -6326,7 +6325,6 @@ fn what(key: &str) -> &'static str {
         "ticket.greeting" => {
             "the greeting text from the Tickets tab (the panel's own, else the server's)"
         }
-        "ticket.panel" => "a line per ticket panel that has a description (Tickets tab)",
         "ticket.closing" => "the closing text of the ticket type",
         "reply.lock.updates_notice" => "the last five lock updates, newest last",
         "reply.lock.locked_notice" => "the numbered lock updates (empty until staff send one)",
@@ -6608,6 +6606,11 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "case #14 came after it",
     ),
     ("text", "Bot text (required)", "The text Brim writes here."),
+    (
+        "panels",
+        "A line per ticket panel that has a description (Tickets tab)",
+        "**Support**\nAsk staff for help.",
+    ),
 ];
 
 /// The variables of the feed entries, which reuse common names (`{title}`) with their own meaning.
@@ -6825,6 +6828,8 @@ pub fn to_public(key: &str, msg: &Value) -> Value {
                 .chain(OLD_DISCORD_NAMES)
                 .find(|(o, _)| *o == n)
                 .map_or(n, |(_, to)| to);
+            // The panel message's `{text}` (before migration 4071) is `{tk_panels}`.
+            let n = if key == "ticket.panel" && n == "text" { "panels" } else { n };
             d.vars
                 .iter()
                 .find(|v| **v == n)
@@ -6880,7 +6885,6 @@ pub fn var_info(key: &str, name: &str) -> (&'static str, &'static str) {
             "ticket.reply" => Some("Thanks, we are looking into it."),
             "ticket.greeting" => Some("Hi @member, thanks for reaching out. Tell us what you need, and staff will answer here soon."),
             "ticket.closing" => Some("Your ticket is closed. Thanks for contacting us."),
-            "ticket.panel" => Some("**Support**\nAsk staff for help."),
             "reply.ticket.usage" | "reply.error.usage" => Some("ban <member> [reason]"),
             "reply.error.wrong_use" => Some("That member is not in this server."),
             "reply.confirm.question" => Some("@sam"),
@@ -7547,8 +7551,9 @@ mod tests {
         let mut m = ok.clone();
         m["embeds"][0]["description"] = json!("Welcome {ga_prize}");
         let why = fits("verify.panel", &m, 1);
-        assert_eq!(why.len(), 2, "{why:?}");
-        assert!(why[0].contains("{ga_prize}") && why[1].contains("{guild.name}"));
+        // The server name is recommended, not required: no second reason.
+        assert_eq!(why.len(), 1, "{why:?}");
+        assert!(why[0].contains("{ga_prize}"));
         let link = json!({"type": 2, "style": 5, "label": "Site", "url": "https://example.com"});
         m = ok.clone();
         m["components"] = json!(vec![json!({"type": 1, "components": [link]}); 4]);
@@ -7823,11 +7828,12 @@ mod tests {
     #[test]
     fn ticket_panel_needs_no_text() {
         let d = find("ticket.panel").unwrap();
-        assert!(d.required.is_empty() && d.vars.contains(&"text"));
+        assert!(d.required.is_empty() && d.vars.contains(&"panels"));
+        assert_eq!(public_name("ticket.panel", "panels"), "tk_panels");
         let m = json!({"content": "", "embeds": [{"description": "Press a button."}]});
         assert!(missing_text("ticket.panel", &m).is_none());
         // Text only, with or without the variable: the panel would send the default instead.
-        for t in ["Press a button.", "{text}"] {
+        for t in ["Press a button.", "{tk_panels}"] {
             let only = json!({"content": t, "embeds": []});
             assert!(missing_text("ticket.panel", &only).is_some(), "{t}");
         }
@@ -8189,8 +8195,7 @@ mod tests {
                 assert_eq!(d.required, ["link"], "{}", d.key);
                 continue;
             }
-            // The ticket panel offers `{text}` but needs none (its buttons come from Brim).
-            let has = d.template.to_string().contains("{text}") && d.key != "ticket.panel";
+            let has = d.template.to_string().contains("{text}");
             assert!(missing_text(&d.key, &d.template).is_none(), "{}", d.key);
             if d.strict() && !d.required.contains(&"text") {
                 // Security texts and moderation logs with their own facts (`{code}`, `{name}` and `{page}`, `{id}`).
