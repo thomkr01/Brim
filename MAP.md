@@ -14,7 +14,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 
 ## Dashboard pages (UI source in `crates/dashboard/ui/src/`, server code in `crates/dashboard/src/`)
 - Routing: page keys in `main.rs` (the match near `bot_messages`, `feeds`, `bot_profile`); icons per key in the `"overview" => "info"` table of `main.rs`; page titles in the table below it.
-- Home (server list and front of a server): `home.rs`. Front page (before login): `landing.rs`. Style guide page (`#/ui`): `styleguide.rs`.
+- Home (server list and front of a server): `home.rs` (cards on the `.home-grid` grid in `style.css`). Front page (before login): `landing.rs`. Style guide page (`#/ui`): `styleguide.rs`.
 - Setup wizard: `wizard.rs` (steps, cards, `score`) and `pages.rs::Wizard`. Overview and score ring: `pages.rs::Score`, `pages::Ring`. Server side of the score and Fix: `ops.rs` (`live`, `score`, `fix`, route `/api/guilds/{guild}/score/fix`).
 - Channel Setup: `channels.rs` (UI) and `crates/dashboard/src/channels.rs` (drafts, `issues`, `plan`, Push), access rules in `channel_access.rs`.
 - Permits: `permits.rs`. Extra rules per page: `crates/dashboard/src/access.rs` and `sections.rs`. The optional Staff role (switch card `StaffRole` in `permits.rs`, also in wizard step 1): route, on/off order, Overview row and its Fix in `crates/dashboard/src/staff_role.rs`; who gets it in `crates/core/src/permits.rs` (`STAFF`, `staff_role`, `LEVEL_ROLES_OF`); migration `4065_staff_level_role.sql`; the bot's job `staff_role_off` in `permit_sync.rs`; its Channel Setup rule is `Ctx::staff_role` in `crates/dashboard/src/channels.rs`.

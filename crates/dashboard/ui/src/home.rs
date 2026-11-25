@@ -69,16 +69,16 @@ pub fn Home(guild: String) -> impl IntoView {
             <Show when=move || score.get().is_some()><Ring pct /></Show>
         </div>
     }.into_any();
-    // The cards grid (two columns that flow up, no holes); a task card the viewer cannot open is left out.
+    // The task cards sit on a real grid (every row aligned); a task card the viewer cannot open is left out.
     let tasks = move || {
         let cards = CARDS.iter().filter(|(p, ..)| access.of(p) != "hidden").map(|(p, t, b)| {
-            (1, view! { <div class="card"><h3>{*t}</h3><p class="muted">{blurb(p)}</p><a class="ghost" href=format!("#/{guild}/{p}")>{*b}</a></div> }.into_any())
-        }).collect();
-        view! { <Cards cards /> }
+            view! { <div class="card"><h3>{*t}</h3><p class="muted">{blurb(p)}</p><a class="ghost" href=format!("#/{guild}/{p}")>{*b}</a></div> }.into_any()
+        }).collect::<Vec<_>>();
+        view! { <div class="home-grid">{cards}</div> }
     };
     view! {
         <div class="home">
-            <Cards cards=vec![(1, wizard), (1, overview)] />
+            <div class="home-grid">{wizard}{overview}</div>
             {tasks}
         </div>
     }
