@@ -18,7 +18,7 @@ pub fn MessageSwitch(guild: String, keys: Vec<(&'static str, &'static str)>) -> 
     let g = StoredValue::new(guild);
     let tabs = keys.into_iter().map(|(k, l)| Tab::state(k, l)).collect();
     view! {
-        <PageTabs tabs id="messages" active=Signal::derive(move || pick.get().to_string()) on_pick=Callback::new(move |k| crate::guard::leave(move || pick.set(k))) />
+        <PageTabs tabs active=Signal::derive(move || pick.get().to_string()) on_pick=Callback::new(move |k| crate::guard::leave(move || pick.set(k))) />
         <div class="msgswitch">{move || view! { <BotMessages guild=g.get_value() open_key=pick.get().to_string() embedded=true /> }}</div>
     }
 }

@@ -209,11 +209,12 @@ pub fn blurb(p: &str) -> &'static str {
     }
 }
 
-/// The module's On/Off line under its title (nothing while the config loads).
+/// The module's On/Off line under its title (nothing while the config loads). Both texts take their place, so the
+/// line keeps its height when the module is switched and the cards below do not move.
 #[component]
 pub fn ModState(group: String) -> impl IntoView {
     let cfg = expect_context::<Cfg>().0;
-    move || module_on(&cfg.get(), &group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted">{if on { "Turn it on or off with the switch in the menu." } else { "Nothing below runs until you turn it on with the switch in the menu. The settings are kept." }}</span></p> })
+    move || module_on(&cfg.get(), &group).map(|on| view! { <p class="mod-state"><span class="chip" class:green=on>{if on { "On" } else { "Off" }}</span><span class="muted ms-text"><span class:hid=!on>"Turn it on or off with the switch in the menu."</span><span class:hid=on>"Nothing below runs until you turn it on with the switch in the menu. The settings are kept."</span></span></p> })
 }
 
 #[component]

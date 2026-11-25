@@ -818,6 +818,7 @@ pub fn Score(guild: String) -> impl IntoView {
         view! { <div class="row note chk" class:bad={class == "err"}><div><b class=class>{crate::icons::icon(icon)}" "{title}</b>" "<span class="muted">{detail}</span>{manual}</div>{(chip.is_some() || fix.is_some()).then(|| view! { <span class="acts">{chip}{fix}</span> })}</div> }
     };
     let (id, g2, g3) = (guild.clone(), guild.clone(), guild.clone());
+    let shown = crate::common::eased(problems, |r: &Value| s(&r["id"]));
     view! {
         <div class="card facts"><h2>"Details"</h2>
             {move || guilds.get().into_iter().find(|x| x["id"] == id.as_str()).map(|x| view! {
@@ -834,11 +835,12 @@ pub fn Score(guild: String) -> impl IntoView {
             let fix_all = fix_all.clone();
             (n > 0).then(|| view! { <div class="fixall"><button class="go" disabled=move || access.rank() < 3 || busy.get().is_some() on:click=fix_all>{move || if busy.get().as_deref() == Some("*") { view! { <Working /> }.into_any() } else { format!("Fix all ({n})").into_any() }}</button><span class="muted">"Runs every fix below that needs no choice from you, one by one."</span></div> }).into_any()
         }}
-        <For each=problems key=|r| s(&r["id"]) children=row.clone() />
-        <Show when=move || { passed.with(|p| !p.is_empty()) }>
+        // A fixed check eases out and a new one eases in, so the cards below do not jump.
+        <For each=move || shown.get() key=|(r, ..)| s(&r["id"]) children={ let row = row.clone(); move |(r, open, appear)| { let row = row.clone(); view! { <Grow when=open appear>{row(r.clone())}</Grow> } } } />
+        <Grow when=Signal::derive(move || passed.with(|p| !p.is_empty()))>
             <details class="passed"><summary>{move || match passed.with(Vec::len) { 1 => "1 check passed".to_string(), n => format!("{n} checks passed") }}</summary>
             <For each=move || passed.get() key=|r| s(&r["id"]) children=row.clone() /></details>
-        </Show></div>
+        </Grow></div>
         <h2 class="center">"Quick Systems Overview"</h2>
         <div class="tiles">
             {SYSTEMS.iter().map(|(k, t, d, sw)| view! { <div class="card sys"><h3>{*t}</h3><p>{*d}</p><div class="foot"><a class="btn" href=format!("#/{g2}/{k}")>"Settings"</a>{sw.then(|| view! { <SystemToggle guild=g2.clone() section=*k title=*t all locked=Signal::derive(move || busy.get().is_some()) saved=refresh /> })}</div></div> }).collect_view()}
@@ -1308,15 +1310,11 @@ pub fn LostControl() -> impl IntoView {
 
 /// Logging page: Brim and Discord tabs, each with essential and customize sub-tabs.
 #[component]
-pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
+pub fn Logging(guild: String, #[prop(into)] tab: Signal<String>, #[prop(into)] sub: Signal<String>) -> impl IntoView {
+    // The address picks the tabs; the page stays while they switch (a new page lost the setup button until it loaded again).
     // Any other tab, also the old `logging/tommybot/...` links from before the rename, opens Brim's.
-    let tab = if tab == "discord" { "discord" } else { "brim" };
-    let sub = if sub == "customize" {
-        "customize"
-    } else {
-        "essential"
-    };
-    let part = format!("{tab}_{sub}");
+    let tab = Memo::new(move |_| if tab.get() == "discord" { "discord" } else { "brim" });
+    let sub = Memo::new(move |_| if sub.get() == "customize" { "customize" } else { "essential" });
     let (msg, need) = (Msg::default(), step_up());
     // Bumped after a setup so the form below reloads the config the setup changed.
     // A setup rebuilds the form from the server: edits not saved yet would be lost.
@@ -1359,11 +1357,12 @@ pub fn Logging(guild: String, tab: String, sub: String) -> impl IntoView {
     });
     view! {
         <div class="row"><Show when=move || todo.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Create a channel per log type")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
-        <PageTabs tabs=vec![Tab::link("brim", "brim", format!("#/{guild}/logging/brim/{sub}")), Tab::link("discord", "discord", format!("#/{guild}/logging/discord/{sub}"))] active=tab.to_string() />
-        <PageTabs tabs=vec![Tab::link("essential", "essential", format!("#/{guild}/logging/{tab}/essential")), Tab::link("customize", "customize", format!("#/{guild}/logging/{tab}/customize"))] active=sub.to_string() />
-        {move || { fresh.track(); let (g, part) = (guild.clone(), part.clone()); view! {
+        // Each row's links keep the other row's tab, so a row is built again only when the other row switches.
+        {let g = guild.clone(); move || { let sub = sub.get(); view! { <PageTabs tabs=vec![Tab::link("brim", "brim", format!("#/{g}/logging/brim/{sub}")), Tab::link("discord", "discord", format!("#/{g}/logging/discord/{sub}"))] active=Signal::derive(move || tab.get().to_string()) /> } }}
+        {let g = guild.clone(); move || { let tab = tab.get(); view! { <PageTabs tabs=vec![Tab::link("essential", "essential", format!("#/{g}/logging/{tab}/essential")), Tab::link("customize", "customize", format!("#/{g}/logging/{tab}/customize"))] active=Signal::derive(move || sub.get().to_string()) /> } }}
+        {move || { fresh.track(); let (g, tab, sub) = (guild.clone(), tab.get(), sub.get()); view! {
             {(tab == "brim" && sub != "customize").then(|| view! { <RouteNote guild=g.clone() /> })}
-            <Section guild=g name="logging".to_string() part dirty />
+            <Section guild=g name="logging".to_string() part=format!("{tab}_{sub}") dirty />
         } }}
     }
 }
@@ -1456,7 +1455,7 @@ pub fn Catch(guild: String) -> impl IntoView {
 
 /// Tickets settings with a one-click setup that creates the category and the ticket log.
 #[component]
-pub fn Tickets(guild: String, tab: String) -> impl IntoView {
+pub fn Tickets(guild: String, #[prop(into)] tab: Signal<String>) -> impl IntoView {
     let (msg, need) = (Msg::default(), step_up());
     // Bumped after a setup so the form below reloads the config the setup changed.
     // A setup rebuilds the form from the server: edits not saved yet would be lost.
@@ -1506,24 +1505,24 @@ pub fn Tickets(guild: String, tab: String) -> impl IntoView {
         });
     });
     // The parts stay mounted and are only hidden; the address picks the open one (the hub's cards link to them).
-    let tab = if ["publish", "cases", "stats"].contains(&tab.as_str()) { tab } else { "settings".into() };
+    let tab = Memo::new(move |_| tab.with(|t| if ["publish", "cases", "stats"].contains(&t.as_str()) { t.clone() } else { "settings".into() }));
     let tabs: [(&str, &str); 4] = [("settings", "Settings"), ("publish", "Panels"), ("cases", "Cases"), ("stats", "Stats")];
     let g4 = guild.clone();
-    let t2 = tab.clone();
+    let not = move |k: &'static str| move || tab.with(|t| t != k);
     view! {
-        <PageTabs tabs=tabs.map(|(k, t)| Tab::link(k, t, if k == "settings" { format!("#/{g4}/tickets") } else { format!("#/{g4}/tickets/{k}") })).to_vec() active=t2 />
-        <div class:hide=tab != "settings">
+        <PageTabs tabs=tabs.map(|(k, t)| Tab::link(k, t, if k == "settings" { format!("#/{g4}/tickets") } else { format!("#/{g4}/tickets/{k}") })).to_vec() active=tab />
+        <div class:hide=not("settings")>
         <div class="row"><Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up the ticket category and log")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="tickets".to_string() dirty on_save=Callback::new(move |_| saved.update(|n| *n += 1)) /> } }}
         </div>
-        <div class:hide=tab != "publish">
+        <div class:hide=not("publish")>
         <crate::tickets::Publish guild=g2.clone() saved />
         </div>
-        <div class:hide=tab != "cases">
-        <crate::tickets::Cases guild=g2.clone() />
+        <div class:hide=not("cases")>
+        <crate::tickets::Cases guild=g2.clone() open=Signal::derive(move || tab.get() == "cases") />
         </div>
-        <div class:hide=tab != "stats">
-        <crate::tickets::Stats guild=g2 />
+        <div class:hide=not("stats")>
+        <crate::tickets::Stats guild=g2 open=Signal::derive(move || tab.get() == "stats") />
         </div>
     }
 }

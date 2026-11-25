@@ -153,7 +153,8 @@ pub fn Publish(guild: String, saved: RwSignal<u32>) -> impl IntoView {
 
 /// Open or closed tickets, newest first, a page at a time.
 #[component]
-pub fn Cases(guild: String) -> impl IntoView {
+pub fn Cases(guild: String, /// Loads again each time the tab opens (the Tickets page keeps it while hidden).
+    #[prop(optional, into)] open: Option<Signal<bool>>) -> impl IntoView {
     let (rows, more, msg, loaded) = (
         RwSignal::new(Vec::<Value>::new()),
         RwSignal::new(false),
@@ -197,6 +198,9 @@ pub fn Cases(guild: String) -> impl IntoView {
         });
     };
     load();
+    if let Some(open) = open {
+        Effect::new(move |prev: Option<bool>| { let o = open.get(); if prev == Some(false) && o { load() } o });
+    }
     let name = move |id: String| names.with(|n| n.get(&id).cloned()).unwrap_or(id);
     let pick = move |k: &'static str| {
         status.set(k);
@@ -239,10 +243,11 @@ pub fn Cases(guild: String) -> impl IntoView {
 
 /// Tickets of the last 30 days: counts, the median first staff answer and opens per panel.
 #[component]
-pub fn Stats(guild: String) -> impl IntoView {
+pub fn Stats(guild: String, /// Loads again each time the tab opens; the last numbers stay until the new ones come.
+    #[prop(optional, into)] open: Option<Signal<bool>>) -> impl IntoView {
     let (data, msg) = (RwSignal::new(Value::Null), Msg::default());
     let path = format!("/api/guilds/{guild}/tickets/stats");
-    spawn_local(async move {
+    let load = move || { let path = path.clone(); spawn_local(async move {
         let r = api("GET", &path, None).await;
         if data.is_disposed() {
             return;
@@ -251,7 +256,11 @@ pub fn Stats(guild: String) -> impl IntoView {
             Ok(v) => data.set(v),
             Err(e) => msg.err(e),
         }
-    });
+    }) };
+    load();
+    if let Some(open) = open {
+        Effect::new(move |prev: Option<bool>| { let o = open.get(); if prev == Some(false) && o { load() } o });
+    }
     let num = move |k: &str| data.with(|d| d[k].as_i64().unwrap_or(0).to_string());
     view! { <div class="card">
         <h2>"Last 30 days"</h2>

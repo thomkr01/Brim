@@ -120,6 +120,7 @@ A module's setup is simple: one on/off switch, a few clear fields, and defaults 
 ## Look rules that apply everywhere
 
 - Orange is one gradient (`--orange-grad`) and the accent colour; there is no second brand colour. Effects are stars only. The star is the list marker (orange outline idle, white outline on hover, filled with the static glow only when selected). No tilt, no transparency, no blur (the Servers page is the one allowed blur besides Loading dots). Every feature heading has the turf under its first letters (see above) for now.
+- No motion jumps (owner rule, 2026-11-25): no animation shows two states through each other, slides or snaps a part out of place, or shifts the layout. A tab click keeps its tab row and header and changes only the part under it (main.rs router); the underline slides from the old tab. A row, note or field that comes or goes under a switch eases open and closed with `Grow` (a list with `eased`) in `common.rs`, never a bare `Show`.
 - Nothing is called by another bot's name in the repo (code, comments, docs, UI, commit text); describe the behaviour.
 
 ## Process for visual work

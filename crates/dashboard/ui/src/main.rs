@@ -330,13 +330,15 @@ fn module_of(guild: &str, p: &str, part: Option<&str>, visible: impl Fn(&str) ->
 fn Tabs(
     guild: String,
     items: &'static [(&'static str, &'static str)],
-    active: String,
+    #[prop(into)] active: Signal<String>,
+    #[prop(into)] read: Signal<bool>,
 ) -> impl IntoView {
     let access = expect_context::<Access>();
+    // A memo: the access is fetched again on every page change, and an unchanged answer must not build the row again.
+    let shown = Memo::new(move |_| items.iter().filter(|(p, _)| access.of(p.split('/').next().unwrap_or(p)) != "hidden").copied().collect::<Vec<_>>());
     view! { {move || {
-        let tabs = items.iter().filter(|(p, _)| access.of(p.split('/').next().unwrap_or(p)) != "hidden").map(|(p, t)| Tab::link(p, t, format!("#/{guild}/{p}"))).collect();
-        let active = active.clone();
-        view! { <PageTabs tabs active=Signal::derive(move || active.clone()) /> }
+        let tabs = shown.get().into_iter().map(|(p, t)| Tab::link(p, t, format!("#/{guild}/{p}"))).collect();
+        view! { <PageTabs tabs active dim=read /> }
     }} }
 }
 
@@ -663,7 +665,9 @@ fn App() -> impl IntoView {
     window_event_listener(leptos::ev::hashchange, move |e| {
         let next = hash();
         // A new page (server or page part changed) starts at the top; tab switches keep the scroll.
-        if guard::hold(&e) {
+        // Tickets keeps its parts mounted, so a switch between its tabs loses no edits and does not ask.
+        let keeps = route.with_untracked(|r| r.get(1).is_some_and(|p| p == "tickets") && body_of(r) == body_of(&next));
+        if !keeps && guard::hold(&e) {
             return;
         }
         if !route.get_untracked().iter().take(2).eq(next.iter().take(2)) {
@@ -762,6 +766,10 @@ fn App() -> impl IntoView {
     // The open page's access as one value. The access is fetched again on every page change; an
     // unchanged answer must not rebuild the page (that loaded its settings twice), and another
     // server's answer must not show while this one's is still on its way.
+    // What the router builds, from the address: a tab click changes only the parts it must (see the page arm below).
+    let frame_key = Memo::new(move |_| route.with(|r| frame_of(r)));
+    let body_key = Memo::new(move |_| route.with(|r| body_of(r)));
+    let top_key = Memo::new(move |_| route.with(|r| (r.get(1).cloned().unwrap_or_default(), r.get(2..).map(<[String]>::to_vec).unwrap_or_default())));
     let page_access = Memo::new(move |_| {
         let r = route.get();
         match (r.first(), r.get(1)) {
@@ -778,6 +786,8 @@ fn App() -> impl IntoView {
             _ => String::new(),
         }
     });
+    // Only a change between "may open" and loading, hidden or failed builds the whole page again.
+    let page_gate = Memo::new(move |_| Some(page_access.get()).filter(|a| matches!(a.as_str(), "loading" | "hidden" | "failed")).unwrap_or_default());
     // Home of a server with no level, or whose access failed. A memo, so an unchanged answer does not
     // rebuild the page.
     // Some(failed), so a retry that changes the kind rebuilds the card.
@@ -957,7 +967,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !route.get().is_empty()><Pose pose=Brim::Peeking class="peek" /></Show>
                 </nav>
                 <main>
-                    {move || { page_tick.track(); match route.get().as_slice() {
+                    {move || { page_tick.track(); match frame_key.get().as_slice() {
                         [] => view! {
                             <Head guild=String::new() page="Brim".into() big="Servers".into() />
                             <div class="row"><input placeholder="Filter: [Type name or ID]" aria-label="filter servers" prop:value=filter on:input=move |e| set_filter.set(event_target_value(&e)) /><LostControl /><button class="ghost" on:click=move |_| { set_guilds_note.set("Loading servers...".into()); spawn_local(load_guilds()) }>"Refresh servers"</button></div>
@@ -1022,100 +1032,161 @@ fn App() -> impl IntoView {
                         // No level on this server, or its access did not load: no Home (it offered the wizard).
                         [g] if home_blocked.get().is_some() => view! { <Head guild=g.clone() page="Home".to_string() />{no_access(access, home_blocked.get_untracked() == Some(true), "You have no access to this server in Brim. Ask a server owner if you need it.")} }.into_any(),
                         [g] => view! { <Head guild=g.clone() page="Home".to_string() /><home::Home guild=g.clone() /> }.into_any(),
-                        [g, p, rest @ ..] => {
+                        [g, _, ..] => {
+                            let p = &route.with_untracked(|r| r[1].clone());
                             // Nothing of the page is built before its access is known, so a hidden page loads nothing.
-                            let acc = page_access.get();
+                            let acc = page_gate.get();
                             if acc == "loading" || acc == "hidden" || acc == "failed" {
                                 let body = if acc != "loading" { no_access(access, acc == "failed", "Your permit does not give access to this page. Ask a server owner if you need it.") } else { view! { <div class="skel"></div> }.into_any() };
                                 return view! { <Head guild=g.clone() page=title(p).0 />{body} }.into_any();
                             }
-                            let sec = |name: &str, part: &str| view! { <Section guild=g.clone() name=name.to_string() part=part.to_string() /> }.into_any();
-                            let page = match (p.as_str(), rest.first()) {
-                                ("module", Some(slug)) => match modules::group_by_slug(slug) { Some(grp) => view! { <modules::ModulePage guild=g.clone() group=grp /> }.into_any(), None => view! { <div class="card empty"><Pose pose=Brim::Shrug class="pose-top" /><h2>"No such module"</h2></div> }.into_any() },
-                                ("permits", _) => view! { <Permits guild=g.clone() /> }.into_any(),
-                                ("logging", _) => view! { <Logging guild=g.clone() tab=rest.first().cloned().unwrap_or_default() sub=rest.get(1).cloned().unwrap_or_default() /> }.into_any(),
-                                ("embeds", _) => view! { <Embeds guild=g.clone() open_id=rest.first().cloned().unwrap_or_default() /> }.into_any(),
-                                ("bot_messages", _) => view! { <botmsgs::BotMessages guild=g.clone() open_key=rest.first().cloned().unwrap_or_default() from_tickets=rest.get(1).is_some_and(|r| r == "from-tickets") /> }.into_any(),
-                                ("feeds", _) => view! { <feeds::Feeds guild=g.clone() /> }.into_any(),
-                                ("giveaways", _) => view! { <giveaways::Giveaways guild=g.clone() /> }.into_any(),
-                                ("history", _) => view! { <History guild=g.clone() /> }.into_any(),
-                                ("overview", _) => view! { <Score guild=g.clone() /> }.into_any(),
-                                ("wizard", _) => view! { <Wizard guild=g.clone() /> }.into_any(),
-                                ("revert", _) => view! { <Revert guild=g.clone() /> }.into_any(),
-                                ("backups", _) => view! { <Backups guild=g.clone() open=rest.first().cloned().unwrap_or_default() /> }.into_any(),
-                                ("channel_setup", _) => view! { <ChannelSetup guild=g.clone() /> }.into_any(),
-                                ("automod_panic", _) => view! { <Panic guild=g.clone() part="heat,general" /> }.into_any(),
-                                ("antinuke_panic", _) => view! { <Panic guild=g.clone() part="nuke,general" /> }.into_any(),
-                                ("tickets", Some(l)) if l == "log" && rest.len() == 3 => view! { <TicketLog guild=g.clone() channel=rest[1].clone() message=rest[2].clone() /> }.into_any(),
-                                ("tickets", _) => view! { <Tickets guild=g.clone() tab=rest.first().cloned().unwrap_or_default() /> }.into_any(),
-                                ("rescue", _) => view! { <Rescue guild=g.clone() /> }.into_any(),
-                                ("bot_profile", _) => view! { <profile::BotProfile guild=g.clone() /> }.into_any(),
-                                ("misc", _) => view! { {sec("misc", "")}<PurgeData guild=g.clone() /> }.into_any(),
-                                ("lockdown", _) => view! { <Tabs guild=g.clone() items=LOCK_TABS active=p.clone() /><LockdownManage guild=g.clone() /> }.into_any(),
-                                ("lockdown_settings", _) => view! { <Tabs guild=g.clone() items=LOCK_TABS active=p.clone() /><LockdownSettings guild=g.clone() /> }.into_any(),
-                                ("discord_automod", _) => view! { <DiscordRules guild=g.clone() /> }.into_any(),
-                                ("appeal_list", _) => view! { <Tabs guild=g.clone() items=APPEAL_TABS active=p.clone() /><AppealList guild=g.clone() /> }.into_any(),
-                                ("appeal_blacklist", _) => view! { <Tabs guild=g.clone() items=APPEAL_TABS active=p.clone() /><Blacklist guild=g.clone() base="appeals" purge=true /> }.into_any(),
-                                ("joinraid", _) => view! { <Tabs guild=g.clone() items=RAID_TABS active=p.clone() />{sec("joinraid", "")} }.into_any(),
-                                ("raid_log", _) => view! { <Tabs guild=g.clone() items=RAID_TABS active=p.clone() /><RaidLog guild=g.clone() /> }.into_any(),
-                                ("raider_list", _) => view! { <Tabs guild=g.clone() items=RAIDER_TABS active=p.clone() />{sec("raider_list", "")} }.into_any(),
-                                ("raider_matches", _) => view! { <Tabs guild=g.clone() items=RAIDER_TABS active=p.clone() /><RaiderMatches guild=g.clone() /> }.into_any(),
-                                ("joingate", _) => view! { <Tabs guild=g.clone() items=GATE_TABS active=p.clone() />{sec("joingate", "")} }.into_any(),
-                                ("joingate_log", _) => view! { <Tabs guild=g.clone() items=GATE_TABS active=p.clone() /><JoinGateLog guild=g.clone() /> }.into_any(),
-                                ("catch", _) => view! { <Catch guild=g.clone() /> }.into_any(),
-                                ("cases", Some(no)) => view! { <CasePage guild=g.clone() no=no.clone() /> }.into_any(),
-                                ("cases", _) => view! { <CaseList guild=g.clone() /> }.into_any(),
-                                ("mod_stats", _) => view! { <ModStats guild=g.clone() /> }.into_any(),
-                                ("notes", _) => view! { <NoteList guild=g.clone() /> }.into_any(),
-                                ("report_list", _) => view! { <Tabs guild=g.clone() items=REPORT_TABS active=p.clone() /><ReportList guild=g.clone() /> }.into_any(),
-                                ("report_blacklist", _) => view! { <Tabs guild=g.clone() items=REPORT_TABS active=p.clone() /><Blacklist guild=g.clone() base="reports" /> }.into_any(),
-                                ("appeals", _) => view! { <Tabs guild=g.clone() items=APPEAL_TABS active=p.clone() />{sec("appeals", "")} }.into_any(),
-                                ("filters", None) => view! { <div class="stack">{FILTER_PAGES.iter().map(|(sub, t, d)| view! { <a class="card link" href=format!("#/{g}/filters/{sub}")><span class="ico">{icons::icon(page_icon(sub))}</span><span><h3>{*t}</h3><span class="muted">{*d}</span></span><span class="sp"></span>{icons::icon("chevron_right")}</a> }).collect_view()}</div> }.into_any(),
-                                ("filters", Some(sub)) => {
-                                    let tabs = sub.starts_with("spam_").then(|| view! { <Tabs guild=g.clone() items=SPAM_TABS active=format!("filters/{sub}") /> });
-                                    view! { {tabs}<h3 class="center">{match sub.as_str() { "spam_text" => "Text Message Filters", "spam_mentions" => "Mention Filters", "spam_attach" => "Attachment Filters", _ => "" }}</h3>{sec("automod", sub)} }.into_any()
-                                }
-                                ("whitelist", sub) => {
-                                    let active = sub.map_or_else(|| "whitelist".to_string(), |s| format!("whitelist/{s}"));
-                                    view! { <Tabs guild=g.clone() items=WL_TABS active />{sec("whitelist", sub.map_or("general", String::as_str))} }.into_any()
-                                }
-                                ("automod", _) => sec("automod", "general"),
-                                ("antinuke", _) => view! { {sec("antinuke", "general")}<NukeCoverage guild=g.clone() /> }.into_any(),
-                                ("antinuke_filters", _) => sec("antinuke", "limits"),
-                                _ => sec(p, ""),
-                            };
-                            if p == "module" { return page.into_any(); }
-                            { let (page_name, big) = title(p);
-                              // Untracked: reading the access here rebuilt the whole page (and cleared typed text) each time the access was fetched again.
-                              let (module, page_name) = untrack(|| module_of(g, p, if p == "logging" { Some(if rest.first().is_some_and(|r| r == "discord") { "discord" } else { "brim" }) } else { rest.first().map(String::as_str) }, |k| access.of(k) != "hidden")).map_or((None, page_name), |(m, n)| (Some(m), n)); let help = help::steps(nav_key(p));
-                              // A detail page's crumb adds its parent ("Moderation › Filters › Anti Spam"); there is no back button.
-                              let detail = match (p.as_str(), rest.first()) {
-                                  ("filters", Some(sub)) => Some(("Filters", "filters", FILTER_PAGES.iter().find(|(s, ..)| sub.starts_with(s) || (*s == "spam_text" && sub.starts_with("spam_"))).map_or(String::new(), |(_, t, _)| t.to_string()))),
-                                  ("cases", Some(no)) => Some(("Cases", "cases", format!("Case #{no}"))),
-                                  ("backups", Some(code)) => Some(("Backups", "backups", format!("Backup #{code}"))),
-                                  _ => None,
-                              };
-                              let (up, page_name, big) = match detail {
-                                  Some((parent, path, name)) => (Some((parent.to_string(), format!("#/{g}/{path}"))), name.clone(), Some(name)),
-                                  None => (None, page_name, big),
-                              };
-                              // A page inside a module shows its own name as the big title.
-                              let big = big.or_else(|| module.as_ref().map(|_| page_name.clone()));
-                              let pose = page_pose(p);
-                              let head = match big { Some(b) => view! { <Head guild=g.clone() page=page_name big=b module up help pose /> }.into_any(), None => view! { <Head guild=g.clone() page=page_name module up help pose /> }.into_any() };
-                              let page = match acc.as_str() {
-                                  "read" => view! { <p class="card info" role="note">"You can view this page, but your permit does not let you change it."</p><fieldset class="ro" disabled>{page}</fieldset> }.into_any(),
-                                  _ => page,
-                              };
-                              // Hard pages open with a folded "How it works" box (the same steps as the header's "?").
-                              let how = help.map(|steps| view! { <details class="card how"><summary>"How it works"</summary><ol>{steps.iter().map(|s| view! { <li>{*s}</li> }).collect_view()}</ol></details> });
-                              view! { {head}{how}{page} }.into_any() }
+                            // A tab click must not build the tab row or the page again (that blanked the page, faded it in twice
+                            // and moved the underline late): the header, the tab row and the body each follow only their own part.
+                            let read = Signal::derive(move || page_access.get() == "read");
+                            let tabs = tab_group(p, route.with_untracked(|r| r.get(2).cloned()).as_deref()).map(|items| {
+                                let active = Signal::derive(move || route.with(|r| tab_key(r.get(1).map_or("", String::as_str), r.get(2).map(String::as_str))));
+                                view! { <Tabs guild=g.clone() items active read /> }
+                            });
+                            let g2 = g.clone();
+                            let top = move || top_key.with(|(p, rest)| if p.is_empty() { ().into_any() } else { page_top(&g2, p, rest, &page_access.get(), access) });
+                            let g3 = g.clone();
+                            let (tab, sub) = (part_at(route, 2), part_at(route, 3));
+                            let body = move || body_key.with(|r| {
+                                if r.len() < 2 { return ().into_any(); }
+                                let page = page_body(&g3, &r[1], &r[2..], tab, sub);
+                                if read.get() { view! { <fieldset class="ro" disabled>{page}</fieldset> }.into_any() } else { page }
+                            });
+                            view! { {top}{tabs}{body} }.into_any()
                         }
                     }}}
                 </main>
             </div>
         </Show>
     }
+}
+
+/// The tab of a route tab row that an address opens: the page, or "page/part" for Filters and Whitelist.
+fn tab_key(p: &str, part: Option<&str>) -> String {
+    match part {
+        Some(s) if p == "filters" || p == "whitelist" => format!("{p}/{s}"),
+        _ => p.to_string(),
+    }
+}
+
+/// The route tab row a page belongs to.
+fn tab_group(p: &str, part: Option<&str>) -> Option<&'static [(&'static str, &'static str)]> {
+    let key = tab_key(p, part);
+    [LOCK_TABS, APPEAL_TABS, RAID_TABS, RAIDER_TABS, GATE_TABS, REPORT_TABS, WL_TABS, SPAM_TABS].into_iter().find(|t| t.iter().any(|(k, _)| *k == key))
+}
+
+/// The address without the parts a page switches itself (the tabs of Tickets and Logging).
+fn body_of(r: &[String]) -> Vec<String> {
+    match r.get(1).map(String::as_str) {
+        Some("logging") => r[..2].to_vec(),
+        Some("tickets") if !(r.len() == 5 && r[2] == "log") => r[..2].to_vec(),
+        _ => r.to_vec(),
+    }
+}
+
+/// `body_of`, with every page of one route tab row as one key: the header and the tab row stay, only the body changes.
+fn frame_of(r: &[String]) -> Vec<String> {
+    let f = body_of(r);
+    match (f.first(), f.get(1).and_then(|p| tab_group(p, f.get(2).map(String::as_str)))) {
+        (Some(g), Some(items)) => vec![g.clone(), format!("tabs:{}", items[0].0)],
+        _ => f,
+    }
+}
+
+/// One part of the address, as a signal.
+fn part_at(route: ReadSignal<Vec<String>>, n: usize) -> Signal<String> {
+    Signal::derive(move || route.with(|r| r.get(n).cloned().unwrap_or_default()))
+}
+
+/// The body of a server page (below the header and its tab row). `tab` and `sub` are the address parts after the page,
+/// for the pages that switch their own tabs (Tickets, Logging) without being built again.
+fn page_body(g: &String, p: &str, rest: &[String], tab: Signal<String>, sub: Signal<String>) -> AnyView {
+    let sec = |name: &str, part: &str| view! { <Section guild=g.clone() name=name.to_string() part=part.to_string() /> }.into_any();
+    match (p, rest.first()) {
+        ("module", Some(slug)) => match modules::group_by_slug(slug) { Some(grp) => view! { <modules::ModulePage guild=g.clone() group=grp /> }.into_any(), None => view! { <div class="card empty"><Pose pose=Brim::Shrug class="pose-top" /><h2>"No such module"</h2></div> }.into_any() },
+        ("permits", _) => view! { <Permits guild=g.clone() /> }.into_any(),
+        ("logging", _) => view! { <Logging guild=g.clone() tab sub /> }.into_any(),
+        ("embeds", _) => view! { <Embeds guild=g.clone() open_id=rest.first().cloned().unwrap_or_default() /> }.into_any(),
+        ("bot_messages", _) => view! { <botmsgs::BotMessages guild=g.clone() open_key=rest.first().cloned().unwrap_or_default() from_tickets=rest.get(1).is_some_and(|r| r == "from-tickets") /> }.into_any(),
+        ("feeds", _) => view! { <feeds::Feeds guild=g.clone() /> }.into_any(),
+        ("giveaways", _) => view! { <giveaways::Giveaways guild=g.clone() /> }.into_any(),
+        ("history", _) => view! { <History guild=g.clone() /> }.into_any(),
+        ("overview", _) => view! { <Score guild=g.clone() /> }.into_any(),
+        ("wizard", _) => view! { <Wizard guild=g.clone() /> }.into_any(),
+        ("revert", _) => view! { <Revert guild=g.clone() /> }.into_any(),
+        ("backups", _) => view! { <Backups guild=g.clone() open=rest.first().cloned().unwrap_or_default() /> }.into_any(),
+        ("channel_setup", _) => view! { <ChannelSetup guild=g.clone() /> }.into_any(),
+        ("automod_panic", _) => view! { <Panic guild=g.clone() part="heat,general" /> }.into_any(),
+        ("antinuke_panic", _) => view! { <Panic guild=g.clone() part="nuke,general" /> }.into_any(),
+        ("tickets", Some(l)) if l == "log" && rest.len() == 3 => view! { <TicketLog guild=g.clone() channel=rest[1].clone() message=rest[2].clone() /> }.into_any(),
+        ("tickets", _) => view! { <Tickets guild=g.clone() tab /> }.into_any(),
+        ("rescue", _) => view! { <Rescue guild=g.clone() /> }.into_any(),
+        ("bot_profile", _) => view! { <profile::BotProfile guild=g.clone() /> }.into_any(),
+        ("misc", _) => view! { {sec("misc", "")}<PurgeData guild=g.clone() /> }.into_any(),
+        ("lockdown", _) => view! { <LockdownManage guild=g.clone() /> }.into_any(),
+        ("lockdown_settings", _) => view! { <LockdownSettings guild=g.clone() /> }.into_any(),
+        ("discord_automod", _) => view! { <DiscordRules guild=g.clone() /> }.into_any(),
+        ("appeal_list", _) => view! { <AppealList guild=g.clone() /> }.into_any(),
+        ("appeal_blacklist", _) => view! { <Blacklist guild=g.clone() base="appeals" purge=true /> }.into_any(),
+        ("joinraid", _) => view! { {sec("joinraid", "")} }.into_any(),
+        ("raid_log", _) => view! { <RaidLog guild=g.clone() /> }.into_any(),
+        ("raider_list", _) => view! { {sec("raider_list", "")} }.into_any(),
+        ("raider_matches", _) => view! { <RaiderMatches guild=g.clone() /> }.into_any(),
+        ("joingate", _) => view! { {sec("joingate", "")} }.into_any(),
+        ("joingate_log", _) => view! { <JoinGateLog guild=g.clone() /> }.into_any(),
+        ("catch", _) => view! { <Catch guild=g.clone() /> }.into_any(),
+        ("cases", Some(no)) => view! { <CasePage guild=g.clone() no=no.clone() /> }.into_any(),
+        ("cases", _) => view! { <CaseList guild=g.clone() /> }.into_any(),
+        ("mod_stats", _) => view! { <ModStats guild=g.clone() /> }.into_any(),
+        ("notes", _) => view! { <NoteList guild=g.clone() /> }.into_any(),
+        ("report_list", _) => view! { <ReportList guild=g.clone() /> }.into_any(),
+        ("report_blacklist", _) => view! { <Blacklist guild=g.clone() base="reports" /> }.into_any(),
+        ("appeals", _) => view! { {sec("appeals", "")} }.into_any(),
+        ("filters", None) => view! { <div class="stack">{FILTER_PAGES.iter().map(|(sub, t, d)| view! { <a class="card link" href=format!("#/{g}/filters/{sub}")><span class="ico">{icons::icon(page_icon(sub))}</span><span><h3>{*t}</h3><span class="muted">{*d}</span></span><span class="sp"></span>{icons::icon("chevron_right")}</a> }).collect_view()}</div> }.into_any(),
+        ("filters", Some(sub)) => {
+                                                view! { <h3 class="center">{match sub.as_str() { "spam_text" => "Text Message Filters", "spam_mentions" => "Mention Filters", "spam_attach" => "Attachment Filters", _ => "" }}</h3>{sec("automod", sub)} }.into_any()
+        }
+        ("whitelist", sub) => {
+            view! { {sec("whitelist", sub.map_or("general", String::as_str))} }.into_any()
+        }
+        ("automod", _) => sec("automod", "general"),
+        ("antinuke", _) => view! { {sec("antinuke", "general")}<NukeCoverage guild=g.clone() /> }.into_any(),
+        ("antinuke_filters", _) => sec("antinuke", "limits"),
+        _ => sec(p, ""),
+    }
+}
+
+/// The header of a server page: crumb and title, the folded "How it works" box and the read-only note.
+fn page_top(g: &String, p: &String, rest: &[String], acc: &str, access: Access) -> AnyView {
+    if p == "module" {
+        return ().into_any();
+    }
+    { let (page_name, big) = title(p);
+      // Untracked: reading the access here rebuilt the whole page (and cleared typed text) each time the access was fetched again.
+      let (module, page_name) = untrack(|| module_of(g, p, if p == "logging" { Some(if rest.first().is_some_and(|r| r == "discord") { "discord" } else { "brim" }) } else { rest.first().map(String::as_str) }, |k| access.of(k) != "hidden")).map_or((None, page_name), |(m, n)| (Some(m), n)); let help = help::steps(nav_key(p));
+      // A detail page's crumb adds its parent ("Moderation › Filters › Anti Spam"); there is no back button.
+      let detail = match (p.as_str(), rest.first()) {
+          ("filters", Some(sub)) => Some(("Filters", "filters", FILTER_PAGES.iter().find(|(s, ..)| sub.starts_with(s) || (*s == "spam_text" && sub.starts_with("spam_"))).map_or(String::new(), |(_, t, _)| t.to_string()))),
+          ("cases", Some(no)) => Some(("Cases", "cases", format!("Case #{no}"))),
+          ("backups", Some(code)) => Some(("Backups", "backups", format!("Backup #{code}"))),
+          _ => None,
+      };
+      let (up, page_name, big) = match detail {
+          Some((parent, path, name)) => (Some((parent.to_string(), format!("#/{g}/{path}"))), name.clone(), Some(name)),
+          None => (None, page_name, big),
+      };
+      // A page inside a module shows its own name as the big title.
+      let big = big.or_else(|| module.as_ref().map(|_| page_name.clone()));
+      let pose = page_pose(p);
+      let head = match big { Some(b) => view! { <Head guild=g.clone() page=page_name big=b module up help pose /> }.into_any(), None => view! { <Head guild=g.clone() page=page_name module up help pose /> }.into_any() };
+      let note = (acc == "read").then(|| view! { <p class="card info" role="note">"You can view this page, but your permit does not let you change it."</p> });
+      // Hard pages open with a folded "How it works" box (the same steps as the header's "?").
+      let how = help.map(|steps| view! { <details class="card how"><summary>"How it works"</summary><ol>{steps.iter().map(|s| view! { <li>{*s}</li> }).collect_view()}</ol></details> });
+      view! { {head}{how}{note} }.into_any() }
 }
 
 fn main() {

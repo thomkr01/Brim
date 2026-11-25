@@ -5,6 +5,9 @@ const base = process.env.DASHBOARD_URL || 'http://127.0.0.1:8080';
 const mock = process.env.DISCORD_API_BASE || 'http://127.0.0.1:9100';
 const out = process.env.E2E_OUT || '/tmp/e2e';
 const fs = require('fs');
+const path = require('path');
+// The jump detector, run through the browser's debugger so the page's script policy does not block it.
+const jumps = fs.readFileSync(path.join(__dirname, 'jumps.js'), 'utf8');
 fs.mkdirSync(out, { recursive: true });
 
 (async () => {
@@ -538,6 +541,30 @@ fs.mkdirSync(out, { recursive: true });
   }
   await page.locator('.cs-tabs button', { hasText: 'Channels' }).click();
   if (!(await page.locator('.cs-grid:has(select.addch)').isVisible())) failed.push('channel setup: Channels did not come back');
+  // A route tab click keeps its tab row: the page is not built again, so nothing blanks, fades twice or jumps (ui/PITFALLS.md, "A route tab built the whole page again").
+  for (const [from, tab] of [['tickets', 'Panels'], ['logging/brim/essential', 'discord'], ['lockdown', 'Settings']]) {
+    await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, `$1${from}`)}`);
+    await page.locator('main .tabs > .on').first().waitFor({ timeout: 5000 }).catch(() => failed.push(`route tabs: no open tab on ${from}`));
+    await page.evaluate(() => document.querySelectorAll('main .tabs').forEach((e) => { e.dataset.kept = '1'; }));
+    await page.evaluate(jumps);
+    await page.evaluate(() => window.__mon.start());
+    await page.locator('main .tabs > a', { hasText: tab }).first().click({ timeout: 5000 }).catch(() => failed.push(`route tabs: no ${tab} tab on ${from}`));
+    await page.waitForFunction((t) => [...document.querySelectorAll('main .tabs > .on')].some((e) => e.textContent.trim() === t), tab, { timeout: 5000 }).catch(() => failed.push(`route tabs: ${tab} did not open on ${from}`));
+    const { faults } = await page.evaluate(() => window.__mon.stop(900));
+    if (faults.length) failed.push(`route tabs: ${from} -> ${tab} jumped: ${JSON.stringify(faults)}`);
+    if (!(await page.locator('main .tabs[data-kept]').count())) failed.push(`route tabs: ${from} built its tab row again on a tab click`);
+  }
+  // A switch that turns a part off eases the cards' "Not in use right now" lines in and out: the cards below must not jump.
+  await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1automod')}`);
+  await page.locator('main input[type=checkbox].sw:not([disabled])').first().waitFor({ timeout: 5000 }).catch(() => failed.push('switch rows: no switch on automod'));
+  await page.evaluate(jumps);
+  for (const step of ['off', 'on']) {
+    await page.evaluate(() => window.__mon.start());
+    await page.locator('main input[type=checkbox].sw:not([disabled])').first().click({ timeout: 5000 }).catch(() => {});
+    const { faults } = await page.evaluate(() => window.__mon.stop(900));
+    if (faults.length) failed.push(`switch rows: automod switch ${step} jumped: ${JSON.stringify(faults)}`);
+  }
+  await page.click('.bar >> text=Cancel', { timeout: 3000 }).catch(() => {});
   // Number fields: a ">" inside a view! attribute once ended the tag and printed the code as text.
   await page.goto(`${base}/${links[0].replace(/^(#\/\d+\/).*/, '$1automod')}`);
   await page.waitForSelector('.step input', { timeout: 5000 }).catch(() => failed.push('automod: no number field'));

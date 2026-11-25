@@ -15,6 +15,150 @@ pub fn Fade(#[prop(into)] when: Signal<bool>, children: ChildrenFn) -> impl Into
     view! { <AnimatedShow when=when show_class="fade-wrap" hide_class="fade-wrap out" hide_delay=OUT>{children()}</AnimatedShow> }
 }
 
+/// How long a row takes to open or close; matches `--dur-slow` in style.css.
+const GROW: Duration = Duration::from_millis(320);
+const GROW_PROPS: [&str; 7] = ["height", "padding-top", "padding-bottom", "margin-top", "margin-bottom", "border-top-width", "border-bottom-width"];
+
+/// Eases an element's box (height, padding, margin, border) and opacity from where it is now to its resting place (`open`) or to
+/// nothing, with the approved ease. The last frame is the resting frame: the values it eases to are read from the element itself.
+fn ease_box(el: &web_sys::HtmlElement, open: bool, fresh: bool) {
+    let Some(w) = web_sys::window() else { return };
+    let num = |cs: &web_sys::CssStyleDeclaration, p: &str| cs.get_property_value(p).ok().and_then(|v| v.trim_end_matches("px").parse::<f64>().ok()).unwrap_or(0.0);
+    let read = |el: &web_sys::HtmlElement| w.get_computed_style(el).ok().flatten().map(|cs| {
+        let mut b: Vec<f64> = GROW_PROPS.iter().map(|p| num(&cs, p)).collect();
+        if cs.get_property_value("box-sizing").ok().as_deref() == Some("content-box") {
+            b[0] += b[1] + b[2] + b[5] + b[6]; // the box is eased as border-box
+        }
+        (b, num(&cs, "opacity"))
+    });
+    let st = el.style();
+    let set = |b: &[f64], o: f64| {
+        for (p, v) in GROW_PROPS.iter().zip(b) {
+            let _ = st.set_property(p, &format!("{v}px"));
+        }
+        let _ = st.set_property("opacity", &o.to_string());
+    };
+    let now = if fresh { None } else { read(el) };
+    for p in GROW_PROPS.iter().chain(&["opacity", "overflow", "box-sizing", "transition"]) {
+        let _ = st.remove_property(p);
+    }
+    let Some((rest, rest_o)) = read(el) else { return };
+    let _ = st.set_property("transition", "none");
+    let _ = st.set_property("box-sizing", "border-box");
+    let _ = st.set_property("overflow", "hidden");
+    // A closed box keeps its neighbours' margins apart (a flex or grid box does not let them collapse through it), so its
+    // bottom margin takes back the difference to no box at all: the closed state is laid out like the box is gone.
+    let mut shut = vec![0.0; 7];
+    let mut host = el.parent_element();
+    while let Some(h) = host.clone().filter(|h| w.get_computed_style(h).ok().flatten().and_then(|c| c.get_property_value("display").ok()).as_deref() == Some("contents")) {
+        host = h.parent_element();
+    }
+    if let Some(cs) = host.and_then(|h| w.get_computed_style(&h).ok().flatten()) {
+        set(&shut, 0.0);
+        let with = num(&cs, "height");
+        let _ = st.set_property("display", "none");
+        let without = num(&cs, "height");
+        let _ = st.remove_property("display");
+        shut[4] = without - with;
+    }
+    let (from, from_o) = now.unwrap_or_else(|| if open { (shut.clone(), 0.0) } else { (rest.clone(), rest_o) });
+    set(&from, from_o);
+    let _ = el.offset_width(); // the start is drawn once, then the box eases
+    let _ = st.set_property("transition", &GROW_PROPS.iter().chain(&["opacity"]).map(|p| format!("{p} {}ms var(--ease)", GROW.as_millis())).collect::<Vec<_>>().join(","));
+    if open { set(&rest, rest_o) } else { set(&shut, 0.0) }
+}
+
+/// Like `Show`, but the content eases open and closed (height and opacity, `ease_box`), so the rows and cards below slide
+/// into place instead of jumping. What shows on the first draw shows at once, unless `appear` (a row that came later).
+#[component]
+pub fn Grow(#[prop(into)] when: Signal<bool>, #[prop(optional)] appear: bool, children: ChildrenFn) -> impl IntoView {
+    let when = Memo::new(move |_| when.get());
+    let shown = RwSignal::new(when.get_untracked());
+    let wrap = NodeRef::<leptos::html::Div>::new();
+    let turn = StoredValue::new(0u32);
+    let each = move |f: &dyn Fn(&web_sys::HtmlElement)| {
+        use wasm_bindgen::JsCast;
+        let Some(Some(w)) = wrap.try_get_untracked() else { return };
+        let kids = w.children();
+        for i in 0..kids.length() {
+            if let Some(el) = kids.item(i).and_then(|e| e.dyn_into::<web_sys::HtmlElement>().ok()) {
+                f(&el)
+            }
+        }
+    };
+    // Eases at the next frame, before it is drawn: new content is built in this tick and must not show at full size first.
+    // The end comes from the start of the ease, so a slow frame does not cut it short.
+    let go = move |on: bool, fresh: bool| {
+        let Some(n) = turn.try_update_value(|t| { *t += 1; *t }) else { return };
+        request_animation_frame(move || {
+            if let Some(Some(w)) = wrap.try_get_untracked() {
+                let _ = w.class_list().remove_1("shut");
+            }
+            each(&|el| ease_box(el, on, fresh));
+            set_timeout(move || if turn.try_get_value() == Some(n) {
+                if on { each(&|el| { let st = el.style(); for p in GROW_PROPS.iter().chain(&["opacity", "overflow", "box-sizing", "transition"]) { let _ = st.remove_property(p); } }) } else { shown.try_set(false); }
+            }, GROW + Duration::from_millis(100));
+        });
+    };
+    Effect::new(move |prev: Option<bool>| {
+        let on = when.get();
+        match prev {
+            None if on && appear => go(true, true),
+            Some(p) if p != on => {
+                let fresh = on && !shown.get_untracked();
+                // New content is built closed (`.easebox.shut`), so it is never drawn at full size before its ease starts.
+                if fresh {
+                    if let Some(Some(w)) = wrap.try_get_untracked() {
+                        let _ = w.class_list().add_1("shut");
+                    }
+                }
+                shown.set(true);
+                go(on, fresh)
+            }
+            _ => {}
+        }
+        on
+    });
+    view! { <div class="easebox" class:shut=appear && when.get_untracked() node_ref=wrap><Show when=move || shown.get()>{children()}</Show></div> }
+}
+
+/// A list for `For` whose rows come and go with `Grow`: (row, open, appear). A row that leaves stays (closing) at its place
+/// until well after its ease ends (a slow frame starts the ease late); a row that comes later eases in (`appear`). Until the first rows come (a list loads empty), rows show at once.
+pub fn eased<T: Clone + Send + Sync + 'static, K: PartialEq + Clone + 'static>(rows: impl Fn() -> Vec<T> + 'static, key: fn(&T) -> K) -> ReadSignal<Vec<(T, RwSignal<bool>, bool)>> {
+    let (out, set_out) = signal(Vec::<(T, RwSignal<bool>, bool)>::new());
+    let first = StoredValue::new(true);
+    // The rows' signals belong to the list's owner: an effect run drops what it made in the run before.
+    let owner = Owner::current();
+    Effect::new(move |_| {
+        let new = rows();
+        let first = first.try_update_value(|f| std::mem::replace(f, *f && new.is_empty())).unwrap_or(false);
+        let old = out.get_untracked();
+        let mut next: Vec<(T, RwSignal<bool>, bool)> = new.into_iter().map(|r| match old.iter().find(|(o, ..)| key(o) == key(&r)) {
+            Some((_, s, a)) => {
+                s.try_set(true);
+                (r, *s, *a)
+            }
+            None => (r, owner.as_ref().map_or_else(|| RwSignal::new(true), |o| o.with(|| RwSignal::new(true))), !first),
+        }).collect();
+        // Each run drops only the rows that left in it: a later run's rows still have their whole ease.
+        let mut gone = vec![];
+        for (i, (r, s, a)) in old.into_iter().enumerate() {
+            if !next.iter().any(|(n, ..)| key(n) == key(&r)) {
+                if s.try_get_untracked() == Some(true) {
+                    gone.push(key(&r));
+                }
+                s.try_set(false);
+                next.insert(i.min(next.len()), (r, s, a));
+            }
+        }
+        set_out.set(next);
+        if !gone.is_empty() {
+            set_timeout(move || { set_out.try_update(|v| v.retain(|(r, s, _)| s.try_get_untracked() == Some(true) || !gone.contains(&key(r)))); }, GROW * 3);
+        }
+    });
+    out
+}
+
 thread_local! { pub static CSRF: RefCell<String> = const { RefCell::new(String::new()) }; }
 
 /// After a logout: no later 401 may send the page to sign-in (that signed the person in again).
@@ -475,7 +619,7 @@ impl Tab {
     }
 }
 
-thread_local! { static TAB_AT: std::cell::RefCell<std::collections::HashMap<&'static str, (f64, f64)>> = std::cell::RefCell::new(std::collections::HashMap::new()); static TAB_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+thread_local! { static TAB_FADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 
 /// `active` is the open tab's key. A state tab calls `on_pick` with its key; a route tab is a plain link.
 /// `row`: a name for a second tab row on the same page, so each row slides from its own last place.
@@ -484,11 +628,14 @@ pub fn PageTabs(
     tabs: Vec<Tab>,
     #[prop(into)] active: Signal<String>,
     #[prop(optional, into)] on_pick: Option<Callback<&'static str>>,
-    #[prop(default = "page")] id: &'static str,
+    /// Dimmed like the page below it (read only).
+    #[prop(optional, into)]
+    dim: MaybeProp<bool>,
 ) -> impl IntoView {
     let row = NodeRef::<leptos::html::Div>::new();
     // The orange underline slides to the open tab and the content below fades in (transform and opacity only, style.css `.tabs`).
-    // A route tab builds this row again on each page, so the last place is kept to slide from.
+    // The row stays while its tabs switch (main.rs router); a row built new puts its underline in place with no motion.
+    let at = StoredValue::new(None::<(f64, f64)>);
     Effect::new(move |_| {
         active.track();
         let go = move |fade: bool| {
@@ -501,9 +648,12 @@ pub fn PageTabs(
             };
             let on: web_sys::HtmlElement = on.unchecked_into();
             let (x, w) = (f64::from(on.offset_left()), f64::from(on.offset_width()));
-            let from = TAB_AT.with(|t| t.borrow_mut().insert(id, (x, w)));
+            let Some(from) = at.try_update_value(|a| a.replace((x, w))) else { return };
             let first = from.is_none();
             let st = row.style();
+            if first {
+                let _ = row.set_attribute("data-still", "");
+            }
             if let Some((fx, fw)) = from {
                 let _ = st.set_property("--tx", &format!("{fx}px"));
                 let _ = st.set_property("--tw", &fw.to_string());
@@ -512,6 +662,10 @@ pub fn PageTabs(
             let _ = st.set_property("--tx", &format!("{x}px"));
             let _ = st.set_property("--tw", &w.to_string());
             let _ = row.set_attribute("data-slide", "");
+            if first {
+                let _ = row.offset_width();
+                let _ = row.remove_attribute("data-still");
+            }
             if fade && !first && from != Some((x, w)) {
                 let mut next = row.next_element_sibling();
                 let flip = TAB_FADE.with(|f| f.replace(!f.get()));
@@ -529,7 +683,7 @@ pub fn PageTabs(
         set_timeout(move || go(false), Duration::from_millis(400));
     });
     view! {
-        <div class="tabs" node_ref=row>
+        <div class="tabs" class:ro=move || dim.get().unwrap_or(false) node_ref=row>
             {tabs.into_iter().map(|t| {
                 let (key, ico) = (t.key, t.icon.map(crate::icons::icon));
                 let on = move || active.get() == key;
