@@ -92,7 +92,7 @@ pub fn module_on(cfg: &Value, group: &str) -> Option<bool> {
 fn off_effect(section: &str) -> &'static str {
     match section {
         "server_joins" => "New members are not checked: Join Gate, Join Raid, Verification and the Raider List stop. Their settings are kept.",
-        "moderation" => "Staff lose the moderation commands: ban, kick, timeout, warn, purge, slowmode, cases, notes and the others. Members cannot report messages and the catch channel stops. Lock, unlock, unquarantine, unban, untimeout, unwarn and closecase still work, and Anti Nuke and Auto Mod still punish and record cases. Their settings are kept.",
+        "moderation" => "Staff lose the moderation commands: ban, kick, timeout, warn, purge, slowmode, cases, notes and the others. Members cannot report messages and the golden channel stops. Lock, unlock, unquarantine, unban, untimeout, unwarn and closecase still work, and Anti Nuke and Auto Mod still punish and record cases. Their settings are kept.",
         "messages" => "Triggers, sticky messages, schedules, tags and automatic feed posts stop. Their settings are kept.",
         "logging" => "Event logs (messages, members, channels, roles and more) stop. Security and moderation logs still post.",
         "antinuke" => "Nobody is counted or punished for dangerous actions. Changes only permit holders may make (dangerous permissions, the vanity URL) are still undone.",
@@ -101,7 +101,7 @@ fn off_effect(section: &str) -> &'static str {
         "joingate" => "New members are no longer checked against your join filters.",
         "joinraid" => "Brim no longer looks for many accounts joining in a short time.",
         "verification" => "New members no longer pass a check before they get access.",
-        "catch" => "Brim no longer punishes anyone who writes in the catch channel.",
+        "catch" => "Brim no longer punishes anyone who writes in the golden channel.",
         "raider_list" => "New members are no longer checked against the Raider List.",
         _ => "",
     }

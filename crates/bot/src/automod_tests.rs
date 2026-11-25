@@ -336,7 +336,7 @@ async fn a_button_reply_is_deleted_but_punishes_nobody() {
     t.cleanup().await;
 }
 
-/// The catch channel's test mode only logs, so automod still sees the message.
+/// The golden channel's test mode only logs, so automod still sees the message.
 #[tokio::test]
 async fn catch_log_mode_leaves_the_message_to_automod() {
     let Some(t) = T::new(92).await else { return };
@@ -813,7 +813,7 @@ async fn whitelisted_pings_do_not_lock_the_server() {
     t.cleanup().await;
 }
 
-/// A permit holder writing in the catch channel is caught; only Owner, Extra Owners and Trusted
+/// A permit holder writing in the golden channel is caught; only Owner, Extra Owners and Trusted
 /// Admins are left alone.
 #[tokio::test]
 async fn the_catch_channel_catches_permit_holders() {

@@ -2471,7 +2471,7 @@ fn d5_entries(out: &mut Vec<Def>) {
     }
 }
 
-/// The D7 entries: ticket, report, appeal and catch channel logs. Each default reads exactly as
+/// The D7 entries: ticket, report, appeal and golden channel logs. Each default reads exactly as
 /// the code builds it (`crates/bot/src/d7_texts_tests.rs` compares them). Footers, thumbnails and
 /// the ticket closer's author line stay as the code builds them unless an edit sets its own.
 fn d7_entries(out: &mut Vec<Def>) {
@@ -2692,10 +2692,10 @@ fn d7_entries(out: &mut Vec<Def>) {
         out,
         (
             "auto_mod.catch_channel_test_mode",
-            "Catch channel (test mode)",
+            "Golden channel (test mode)",
             "Automod logs",
         ),
-        "Catch channel (test mode)",
+        "Golden channel (test mode)",
         RED,
         &[
             l("Member", "{member}"),
@@ -2709,10 +2709,10 @@ fn d7_entries(out: &mut Vec<Def>) {
         out,
         (
             "auto_mod.catch_channel_action_failed",
-            "Catch channel action failed",
+            "Golden channel action failed",
             "Automod logs",
         ),
-        "Catch channel action failed",
+        "Golden channel action failed",
         RED,
         &[
             l("Member", "{member}"),
@@ -5196,7 +5196,7 @@ fn confirm_and_button_replies(out: &mut Vec<Def>) {
     }
 }
 
-/// Report, case, note, whitelist and catch channel replies (`reply.report.*`, `reply.case.*`,
+/// Report, case, note, whitelist and golden channel replies (`reply.report.*`, `reply.case.*`,
 /// `reply.note.*`, `reply.whitelist.*`, `reply.catch.*`). The whitelist command is a security
 /// command, so its replies are security texts like `cmd.whitelist`.
 fn report_case_replies(out: &mut Vec<Def>) {
@@ -5217,11 +5217,11 @@ fn report_case_replies(out: &mut Vec<Def>) {
     ));
     out.push(def(
         "reply.catch.warning",
-        "Catch channel warning",
-        "Catch channel",
+        "Golden channel warning",
+        "Golden channel",
         false,
         &["punishment"],
-        embed("Catch channel", RED, &["This channel is to catch bots which automatically spam each channel with scams before they are able to post to the rest of the server.\n\n**Sending a message in this channel will {punishment}.**".into()]),
+        embed("Golden channel", RED, &["This channel is to catch bots which automatically spam each channel with scams before they are able to post to the rest of the server.\n\n**Sending a message in this channel will {punishment}.**".into()]),
     ));
     type Reply = (
         &'static str,
@@ -6003,8 +6003,8 @@ pub const LOG_TYPES: &[(&str, &[&str])] = &[
             "Auto Slowmode Off Failed",
             "Webhooks Deleted",
             "Feed Post Blocked",
-            "Catch channel (test mode)",
-            "Catch channel action failed",
+            "Golden channel (test mode)",
+            "Golden channel action failed",
         ],
     ),
     (
@@ -6380,7 +6380,7 @@ pub fn area(d: &Def) -> Option<(&'static str, &'static str)> {
         "Verification logs" | "Join Gate logs" => ("Logging", "Verification and Join Gate"),
         "Ticket logs" => ("Logging", "Tickets"),
         "Punishment DMs" | "Member DMs" | "Cases and notes" | "Reports" | "Lockdown"
-        | "Catch channel" => ("Moderation", g),
+        | "Golden channel" => ("Moderation", g),
         "Tickets" if d.name.starts_with("Reply:") => ("Tickets", "Ticket replies"),
         "Tickets" => ("Tickets", "Ticket messages"),
         "Ticket commands" => ("Tickets", g),
@@ -6582,7 +6582,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
     ("command", "The command with its prefix", "t!claim"),
     (
         "punishment",
-        "What writing in the catch channel does",
+        "What writing in the golden channel does",
         "get you automatically banned",
     ),
     ("case", "Case number", "12"),

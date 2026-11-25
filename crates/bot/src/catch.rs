@@ -1,4 +1,4 @@
-//! Catch channel (honeypot): hacked accounts spam every channel, so whoever writes in it is
+//! Golden channel (honeypot): hacked accounts spam every channel, so whoever writes in it is
 //! punished through the normal mod path (case, mod log, appeal link) with the bot as moderator.
 use anyhow::Result;
 use brim_core::{permits::Level, sections::CatchAction};
@@ -25,7 +25,7 @@ use crate::{
     prefix::Flags,
 };
 
-const REASON: &str = "Wrote in the catch channel";
+const REASON: &str = "Wrote in the golden channel";
 
 /// What a member writes. A pin, boost or join notice is a system message by whoever caused it,
 /// so a moderator who pins a message there must not be punished.
@@ -65,7 +65,7 @@ fn writer(m: &MessageCreate, me: Id<UserMarker>) -> Option<Id<UserMarker>> {
     }
 }
 
-/// True when the message was in the catch channel by someone it punishes; nothing else should run.
+/// True when the message was in the golden channel by someone it punishes; nothing else should run.
 /// Log mode punishes nobody, so automod still runs.
 pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
     let Some(gid) = m.guild_id else {
@@ -82,7 +82,7 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
     let Some(uid) = writer(m, app.me) else {
         return Ok(false);
     };
-    // Threads of the catch channel catch too.
+    // Threads of the golden channel catch too.
     if catch != m.channel_id
         && !app
             .channel_scope(gid, m.channel_id)
@@ -113,7 +113,7 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         CatchAction::Log => {
             let log = test_log(uid.get());
             if let Err(e) = send_log(app, gid.get(), LogKind::AutoMod, log).await {
-                tracing::warn!(?e, "catch channel test log failed");
+                tracing::warn!(?e, "golden channel test log failed");
             }
             return Ok(false);
         }
@@ -172,7 +172,7 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
     let log = failed_log(uid.get(), &text);
     // The member was caught: a failed log must not hand the message on as uncaught.
     if let Err(e) = send_log(app, gid.get(), LogKind::AutoMod, log).await {
-        tracing::warn!(?e, "catch channel failure log failed");
+        tracing::warn!(?e, "golden channel failure log failed");
     }
     Ok(true)
 }
@@ -203,14 +203,17 @@ async fn count(app: &App, gid: u64, action: CatchAction) {
 }
 
 pub(crate) fn test_log(uid: u64) -> Log {
-    Log::new("Catch channel (test mode)", RED)
+    // The entry keeps its old key, so a server's edited version still applies after the rename.
+    Log::new("Golden channel (test mode)", RED)
+        .entry("log.auto_mod.catch_channel_test_mode")
         .user("Member", uid)
         .line("Action", "None, test mode only logs")
         .var("member", &brim_logging::embed::user(uid))
 }
 
 pub(crate) fn failed_log(uid: u64, error: &str) -> Log {
-    Log::new("Catch channel action failed", RED)
+    Log::new("Golden channel action failed", RED)
+        .entry("log.auto_mod.catch_channel_action_failed")
         .user("Member", uid)
         .line("Error", error)
         .var("member", &brim_logging::embed::user(uid))
@@ -218,9 +221,12 @@ pub(crate) fn failed_log(uid: u64, error: &str) -> Log {
 }
 
 /// The title of the default warning (entry `reply.catch.warning`).
-const NOTICE: &str = "Catch channel";
+const NOTICE: &str = "Golden channel";
+/// The default title before the rename (2026-11-25): a warning posted then still counts, so a
+/// save does not post a second one.
+const OLD_NOTICE: &str = "Catch channel";
 
-/// What writing in the catch channel does, for the warning's `{punishment}`.
+/// What writing in the golden channel does, for the warning's `{punishment}`.
 fn punishment(a: CatchAction) -> &'static str {
     match a {
         CatchAction::Ban | CatchAction::Softban => "get you automatically banned",
@@ -230,14 +236,14 @@ fn punishment(a: CatchAction) -> &'static str {
     }
 }
 
-/// Posts the warning in the catch channel once: skipped when the bot's warning is already there.
+/// Posts the warning in the golden channel once: skipped when the bot's warning is already there.
 pub async fn post_notice(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     let cfg = app.cfg(gid.get()).await?;
     let c = &cfg.catch;
     let Some(ch) = c.channel.filter(|_| c.enabled) else {
         return Ok(());
     };
-    // Deleted in Discord: Overview shows "The catch channel was deleted" with a fix, so each save
+    // Deleted in Discord: Overview shows "The golden channel was deleted" with a fix, so each save
     // does not log a failed post (test server, 2026-11-18).
     let live = match app.http.channel(ch).await {
         Err(e) if crate::http_err::gone(&e) => return Ok(()),
@@ -246,7 +252,7 @@ pub async fn post_notice(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     // A stored id from before the save-time checks may name another server's channel.
     anyhow::ensure!(
         live.guild_id == Some(gid),
-        "not posting the catch channel warning in {ch}: that channel is not in this server"
+        "not posting the golden channel warning in {ch}: that channel is not in this server"
     );
     let recent = app
         .http
@@ -262,7 +268,8 @@ pub async fn post_notice(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     let title = said.embeds.first().and_then(|e| e.title.as_deref());
     let mine = |m: &twilight_model::channel::Message| {
         let titled = |e: &twilight_model::channel::message::Embed| {
-            e.title.as_deref() == Some(NOTICE) || (title.is_some() && e.title.as_deref() == title)
+            matches!(e.title.as_deref(), Some(NOTICE | OLD_NOTICE))
+                || (title.is_some() && e.title.as_deref() == title)
         };
         let same_text = !said.text.is_empty() && m.content == said.text;
         m.author.id == app.me && (m.embeds.iter().any(titled) || same_text)
@@ -278,7 +285,7 @@ pub async fn post_notice(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     Ok(())
 }
 
-/// Moves the catch channel back into place when someone drags it: the bottom of its Information
+/// Moves the golden channel back into place when someone drags it: the bottom of its Information
 /// category when that is set and still there, else the top of the server.
 pub async fn keep_top(app: &App, ch: &Channel) -> Result<()> {
     let Some(gid) = ch.guild_id else {
@@ -312,7 +319,7 @@ pub async fn keep_top(app: &App, ch: &Channel) -> Result<()> {
     Ok(())
 }
 
-/// The catch channel's category in the newest saved config, past the cache.
+/// The golden channel's category in the newest saved config, past the cache.
 async fn saved_category(app: &App, gid: Id<GuildMarker>) -> Result<Option<Id<ChannelMarker>>> {
     let id: Option<String> = sqlx::query_scalar(
         "SELECT config->'catch'->>'category' FROM guild_config WHERE guild_id = $1 ORDER BY version DESC LIMIT 1",
