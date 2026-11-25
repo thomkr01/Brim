@@ -1,10 +1,7 @@
 use crate::modules;
 use crate::common::*;
 use crate::form::Section;
-use crate::wizard::{
-    Card, ANTINUKE, AUTOMOD, BACKUPS, JOINGATE, JOINRAID, MISC, PANIC, RAIDER_LIST, TICKETS,
-    VERIFICATION, WHITELIST,
-};
+use crate::wizard::{Card, MISC, TICKETS, WHITELIST};
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
@@ -41,35 +38,16 @@ const OPTIONAL_LOGS: [(&str, &str); 10] = [
 
 #[component]
 pub fn Wizard(guild: String) -> impl IntoView {
-    const STEPS: [&str; 14] = [
+    const STEPS: [&str; 7] = [
         "Auto Setup",
         "Misc",
-        "Automod",
-        "Antinuke",
-        "Backups",
-        "Panic mode",
+        "Security",
         "Whitelist",
-        "Join Gate",
-        "Join Raid",
-        "Raider List",
-        "Verification",
         "Tickets",
         "Rescue",
         "Wrap",
     ];
-    const CARDS: [(&str, &[Card]); 11] = [
-        ("misc", MISC),
-        ("automod", AUTOMOD),
-        ("antinuke", ANTINUKE),
-        ("backups", BACKUPS),
-        ("panic", PANIC),
-        ("whitelist", WHITELIST),
-        ("joingate", JOINGATE),
-        ("joinraid", JOINRAID),
-        ("raider_list", RAIDER_LIST),
-        ("verification", VERIFICATION),
-        ("tickets", TICKETS),
-    ];
+    const CARDS: [(&str, &[Card]); 3] = [("misc", MISC), ("whitelist", WHITELIST), ("tickets", TICKETS)];
     // Step and Auto Setup picks are kept per server in this browser, so leaving the wizard and
     // coming back resumes it; the last step clears them. Nothing secret is stored.
     let key = format!("wizard:{guild}");
@@ -306,10 +284,11 @@ pub fn Wizard(guild: String) -> impl IntoView {
                     <Toast msg />
                 </div> }.into_any())
             }
-            12 => arrows(view! { <Rescue guild=g.clone() /> }.into_any()),
-            13 => { if !marked.get_value() { marked.set_value(true); let g = g.clone(); spawn_local(async move { let _ = api("POST", &format!("/api/guilds/{g}/wizard/done"), None).await; }) }
+            2 => arrows(view! { <crate::security_step::Security guild=g.clone() /> }.into_any()),
+            5 => arrows(view! { <Rescue guild=g.clone() /> }.into_any()),
+            6 => { if !marked.get_value() { marked.set_value(true); let g = g.clone(); spawn_local(async move { let _ = api("POST", &format!("/api/guilds/{g}/wizard/done"), None).await; }) }
                 view! { <div class="card"><Pose pose=Brim::ThumbsUp class="pose-side" /><h2>"All done!"</h2><p>"Brim is set up. Every setting can be changed later on its own page, and the Overview shows your security score."</p><a class="btn go" href=format!("#/{}/overview", g)>"Go to Overview"</a></div> }.into_any() }
-            i => { let (name, cards) = CARDS[i - 1]; view! { <Section guild=g.clone() name=name.to_string() cards next=Callback::new(move |_| step.update(|i| *i += 1)) /> }.into_any() }
+            i => { let (name, cards) = CARDS[if i > 2 { i - 2 } else { i - 1 }]; view! { <Section guild=g.clone() name=name.to_string() cards next=Callback::new(move |_| step.update(|i| *i += 1)) /> }.into_any() }
         }}</div> }
         }}
     }

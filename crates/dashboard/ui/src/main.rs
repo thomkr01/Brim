@@ -39,6 +39,7 @@ mod roles;
 mod recovery;
 mod search;
 mod secure;
+mod security_step;
 mod styleguide;
 mod tickets;
 mod update;
