@@ -1448,8 +1448,16 @@ pub fn Catch(guild: String) -> impl IntoView {
             set_up.try_set(done);
         });
     });
+    // Members caught in this server; a dash until it loads, so the row keeps its size.
+    let caught = RwSignal::new("-".to_string());
+    let g4 = guild.clone();
+    spawn_local(async move {
+        if let Ok(v) = api("GET", &format!("/api/guilds/{g4}/catch/count"), None).await {
+            caught.try_set(v["count"].to_string());
+        }
+    });
     view! {
-        <div class="row"><Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up channel")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
+        <div class="row">{move || view! { <Stat label="Caught" value=caught.get() copy=false /> }}<Show when=move || !set_up.get()><button disabled=move || dirty.get() || busy.get() on:click=setup.clone()>{busy_label(move || busy.get(), "Set up channel")}</button><Show when=move || dirty.get()><span class="chip orange">"Save your changes first"</span></Show></Show><Toast msg /></div>
         {move || { fresh.track(); view! { <Section guild=guild.clone() name="catch".to_string() dirty /> } }}
     }
 }

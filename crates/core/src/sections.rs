@@ -1362,12 +1362,27 @@ impl RetentionCfg {
 /// What the catch channel does to a writer; `Log` is the test mode.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 pub enum CatchAction {
-    #[default]
     Ban,
+    /// The default (owner decision 2026-11-25): a ban that deletes 7 days of messages, then an
+    /// unban, so a hacked member can come back once the account is safe.
+    #[default]
     Softban,
     Kick,
     Timeout,
     Log,
+}
+
+impl CatchAction {
+    /// The stored name, for the caught counter's rows.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Ban => "ban",
+            Self::Softban => "softban",
+            Self::Kick => "kick",
+            Self::Timeout => "timeout",
+            Self::Log => "log",
+        }
+    }
 }
 
 /// Master switches of the modules without one of their own. A missing switch is on, so a server
@@ -1868,7 +1883,7 @@ mod tests {
     #[test]
     fn catch_is_off_and_bans_by_default() {
         let c: CatchCfg = serde_json::from_value(json!({})).unwrap();
-        assert!(!c.enabled && c.channel.is_none() && c.action == CatchAction::Ban);
+        assert!(!c.enabled && c.channel.is_none() && c.action == CatchAction::Softban);
         let c: CatchCfg = serde_json::from_value(json!({"action": "Log"})).unwrap();
         assert_eq!(c.action, CatchAction::Log);
     }

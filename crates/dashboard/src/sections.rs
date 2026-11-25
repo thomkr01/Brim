@@ -36,6 +36,7 @@ pub fn routes() -> Router<AppState> {
             post(captcha_preview),
         )
         .route("/api/guilds/{guild}/catch/setup", post(catch_channel))
+        .route("/api/guilds/{guild}/catch/count", get(catch_count))
         .route("/api/guilds/{guild}/tickets/setup", post(tickets_setup))
         .route(
             "/api/guilds/{guild}/tickets/log/{channel}/{message}",
@@ -1197,10 +1198,10 @@ pub(crate) async fn make_catch(
             json!({"name": "do-not-write", "type": 0, "parent_id": parent, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
         }
         None => {
-            // @everyone: View, Send, History; no reactions, embeds or files. The bot also
-            // deletes and pins.
+            // @everyone: View, Send, History, Attach Files (a picture-only spam bot is caught too);
+            // no reactions or embeds. The bot also deletes and pins.
             let overwrites = json!([
-                {"id": guild.to_string(), "type": 0, "allow": "68608", "deny": "49216"},
+                {"id": guild.to_string(), "type": 0, "allow": "101376", "deny": "16448"},
                 {"id": st.discord.client_id, "type": 1, "allow": "93184"}
             ]);
             json!({"name": "do-not-write", "type": 0, "position": 0, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
@@ -1269,6 +1270,16 @@ async fn catch_channel(
     }
     let channel = &config["catch"]["channel"];
     Ok(Json(json!({"version": version, "channel": channel})))
+}
+
+/// How many members the catch channel caught in this server (counted since 2026-11-25).
+async fn catch_count(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+    api::require(&st, &s, guild, Level::Viewer, false).await?;
+    let n: i64 = sqlx::query_scalar("SELECT count(*) FROM catch_hits WHERE guild_id = $1")
+        .bind(guild)
+        .fetch_one(&st.db)
+        .await?;
+    Ok(Json(json!({"count": n})))
 }
 
 /// One click: a private "Tickets" category with #ticket-logs. Channels already set are reused.

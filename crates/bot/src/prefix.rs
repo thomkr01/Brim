@@ -104,6 +104,9 @@ pub struct Flags {
     pub no_avatar: bool,
     #[serde(default)]
     pub voice: bool,
+    /// A ban or softban deletes the full 7 days of messages, whatever the server's purge days.
+    #[serde(default)]
+    pub full_purge: bool,
 }
 
 /// `s` is the message text with the prefix already stripped. Targets are mentions, raw ids, or names (words before the first `?flag`; with commas,
