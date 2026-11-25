@@ -1233,6 +1233,9 @@ pub struct PanicCfg {
     /// Categories panic mode leaves unlocked.
     pub whitelisted_categories: Vec<Id<ChannelMarker>>,
     pub lock_on_trigger: bool,
+    /// Load the latest backup when Panic mode starts. On needs backups and their restore on too;
+    /// Anti Nuke's own restore of a nuker's deletes is not changed by this.
+    pub load_backup: bool,
 }
 
 impl Default for PanicCfg {
@@ -1249,6 +1252,7 @@ impl Default for PanicCfg {
             heat_decay: 0.01,
             whitelisted_categories: vec![],
             lock_on_trigger: true,
+            load_backup: true,
         }
     }
 }
@@ -1807,6 +1811,17 @@ mod tests {
         for bad in ["help", ":ticket:", "<:help:123>", "🎫 x", "12"] {
             assert!(!with(bad), "{bad}");
         }
+    }
+
+    /// Loading a backup after Panic mode is on until the owner turns it off, also in a config saved
+    /// before the switch existed.
+    #[test]
+    fn panic_loads_a_backup_unless_switched_off() {
+        assert!(PanicCfg::default().load_backup);
+        let old: PanicCfg = serde_json::from_value(json!({"executors": 2})).unwrap();
+        assert!(old.load_backup);
+        let off: PanicCfg = serde_json::from_value(json!({"load_backup": false})).unwrap();
+        assert!(!off.load_backup);
     }
 
     #[test]

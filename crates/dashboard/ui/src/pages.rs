@@ -2,7 +2,8 @@ use crate::modules;
 use crate::common::*;
 use crate::form::Section;
 use crate::wizard::{
-    Card, ANTINUKE, AUTOMOD, JOINGATE, JOINRAID, MISC, TICKETS, VERIFICATION, WHITELIST,
+    Card, ANTINUKE, AUTOMOD, BACKUPS, JOINGATE, JOINRAID, MISC, PANIC, RAIDER_LIST, TICKETS,
+    VERIFICATION, WHITELIST,
 };
 use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
@@ -40,26 +41,32 @@ const OPTIONAL_LOGS: [(&str, &str); 10] = [
 
 #[component]
 pub fn Wizard(guild: String) -> impl IntoView {
-    const STEPS: [&str; 11] = [
+    const STEPS: [&str; 14] = [
         "Auto Setup",
         "Misc",
         "Automod",
         "Antinuke",
+        "Backups",
+        "Panic mode",
         "Whitelist",
         "Join Gate",
         "Join Raid",
+        "Raider List",
         "Verification",
         "Tickets",
         "Rescue",
         "Wrap",
     ];
-    const CARDS: [(&str, &[Card]); 8] = [
+    const CARDS: [(&str, &[Card]); 11] = [
         ("misc", MISC),
         ("automod", AUTOMOD),
         ("antinuke", ANTINUKE),
+        ("backups", BACKUPS),
+        ("panic", PANIC),
         ("whitelist", WHITELIST),
         ("joingate", JOINGATE),
         ("joinraid", JOINRAID),
+        ("raider_list", RAIDER_LIST),
         ("verification", VERIFICATION),
         ("tickets", TICKETS),
     ];
@@ -299,8 +306,8 @@ pub fn Wizard(guild: String) -> impl IntoView {
                     <Toast msg />
                 </div> }.into_any())
             }
-            9 => arrows(view! { <Rescue guild=g.clone() /> }.into_any()),
-            10 => { if !marked.get_value() { marked.set_value(true); let g = g.clone(); spawn_local(async move { let _ = api("POST", &format!("/api/guilds/{g}/wizard/done"), None).await; }) }
+            12 => arrows(view! { <Rescue guild=g.clone() /> }.into_any()),
+            13 => { if !marked.get_value() { marked.set_value(true); let g = g.clone(); spawn_local(async move { let _ = api("POST", &format!("/api/guilds/{g}/wizard/done"), None).await; }) }
                 view! { <div class="card"><Pose pose=Brim::ThumbsUp class="pose-side" /><h2>"All done!"</h2><p>"Brim is set up. Every setting can be changed later on its own page, and the Overview shows your security score."</p><a class="btn go" href=format!("#/{}/overview", g)>"Go to Overview"</a></div> }.into_any() }
             i => { let (name, cards) = CARDS[i - 1]; view! { <Section guild=g.clone() name=name.to_string() cards next=Callback::new(move |_| step.update(|i| *i += 1)) /> }.into_any() }
         }}</div> }
@@ -521,6 +528,7 @@ fn action(r: &Value) -> String {
         (Some("enforce_permits"), _) => {
             "Turn on: remove dangerous roles from members without permits".into()
         }
+        (Some("backups_on"), _) => "Turn on backups".into(),
         (Some(x), _) if x.starts_with("enable_") => {
             format!("Turn on {title} with its default settings")
         }
@@ -559,6 +567,10 @@ fn confirm_text(r: &Value, detail: &str) -> String {
             }
             None => format!("{detail} Brim could not count the members who hold no main role. They lose access to these channels."),
         },
+        Some("security_profile") => {
+            let m: Vec<String> = r["changes"].as_array().into_iter().flatten().map(|c| format!("- {}", s(c))).collect();
+            format!("{detail}\n{}", m.join("\n"))
+        }
         Some("clamp_stored") => {
             let m: Vec<String> = r["moves"].as_array().into_iter().flatten().map(s).collect();
             format!("These values change: {}.", m.join(", "))
@@ -634,7 +646,8 @@ pub fn Score(guild: String) -> impl IntoView {
             .filter(|x| {
                 // Remove dangerous roles takes roles from members: its own confirm lists them.
                 // Move to members gives Automod Immunity: who gets it is the owner's choice.
-                !["everyone_to_main", "clamp_stored", "enforce_permits", "exempt_roles"]
+                // The recommended setup changes many sections at once: the owner presses it on purpose.
+                !["everyone_to_main", "clamp_stored", "enforce_permits", "exempt_roles", "security_profile"]
                     .contains(&x["fix"]["setting"].as_str().unwrap_or_default())
             })
             .filter(|x| {
@@ -768,7 +781,7 @@ pub fn Score(guild: String) -> impl IntoView {
             let me = id.clone();
             // The fix route needs a Trusted Admin, like Roll back on History; Miscellaneous (Remove
             // dangerous roles) needs the owner or an Extra Owner.
-            let (bar, why) = if body["setting"] == "enforce_permits" { (4, "Needs the owner or an Extra Owner") } else { (3, "Needs a Trusted Admin or the owner") };
+            let (bar, why) = if matches!(body["setting"].as_str(), Some("enforce_permits" | "security_profile" | "backups_on")) { (4, "Needs the owner or an Extra Owner") } else { (3, "Needs a Trusted Admin or the owner") };
             view! { <button disabled=move || access.rank() < bar || busy.get().is_some() title=move || (access.rank() < bar).then_some(why) on:click=move |_| {
                 let (g, body, load, l, id, title) = (g.clone(), body.clone(), load.clone(), l.clone(), id.clone(), title.clone());
                 let enforce = (body["setting"] == "enforce_permits").then(|| (g.clone(), id.clone()));

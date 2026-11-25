@@ -34,6 +34,7 @@ mod roles;
 mod schema;
 mod sections;
 mod secure;
+mod security_setup;
 mod staff_role;
 mod store;
 mod tickets;
