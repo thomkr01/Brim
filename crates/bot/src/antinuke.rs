@@ -2569,6 +2569,7 @@ async fn open_case(
             duration_s: None,
             proof: None,
             inverse: Some(json!({"op": "unquarantine", "user": actor.get()})),
+            feature: "antinuke",
         },
     )
     .await

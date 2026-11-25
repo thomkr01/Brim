@@ -356,6 +356,7 @@ mod tests {
             duration_s: None,
             proof: None,
             inverse: None,
+            feature: "staff",
         };
         let n = brim_core::cases::create(&t.app.pool, case).await.unwrap();
         t.ban(0, target, "x");
@@ -412,6 +413,7 @@ mod tests {
             duration_s: None,
             proof: None,
             inverse: None,
+            feature: "staff",
         };
         let later = brim_core::cases::create(&t.app.pool, later).await.unwrap();
         super::handle(&t.app, &press(t.owner(), "unban"))

@@ -217,6 +217,7 @@ async fn decide(
                     case_no: None,
                     audit_id: None,
                     ai_client: None,
+                    feature: Some("appeal"),
                 },
             )
             .await

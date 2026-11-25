@@ -273,6 +273,7 @@ pub(super) async fn bot_case(
         duration_s: None,
         proof: None,
         inverse,
+        feature: "raider_list",
     };
     cases::create(&app.pool, case).await
 }
