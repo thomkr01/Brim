@@ -125,6 +125,7 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         soft,
         compact: true,
         full_purge: true,
+        by: Some("catch"),
         ..Default::default()
     };
     // The bot acts with owner rights, so the usual permit and hierarchy checks still refuse

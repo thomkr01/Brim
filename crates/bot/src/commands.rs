@@ -378,7 +378,9 @@ pub async fn apply_dm(
             duration_s,
             proof,
             inverse,
-            feature: if actor_id == app.me { "brim" } else { "staff" },
+            feature: flags
+                .by
+                .unwrap_or(if actor_id == app.me { "brim" } else { "staff" }),
         },
     )
     .await?;

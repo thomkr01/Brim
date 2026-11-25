@@ -107,6 +107,9 @@ pub struct Flags {
     /// A ban or softban deletes the full 7 days of messages, whatever the server's purge days.
     #[serde(default)]
     pub full_purge: bool,
+    /// The part of Brim that acts for the stats (`catch`); None: staff, or `brim` for the bot.
+    #[serde(skip)]
+    pub by: Option<&'static str>,
 }
 
 /// `s` is the message text with the prefix already stripped. Targets are mentions, raw ids, or names (words before the first `?flag`; with commas,
