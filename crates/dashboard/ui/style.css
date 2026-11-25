@@ -664,6 +664,8 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
 .land .feat-shot { position:relative; flex:1.5 1 0; min-width:0; isolation:isolate; }
 .land .feat-shot { display:grid; grid-template-columns:minmax(0,1fr); height:var(--sh, 0px); }
+/* A phone's stage is as tall as the open scene: it grows or shrinks with the switch's ease, so the page below does not jump. */
+@media (max-width:760px) { .land .feat-shot { transition:height .4s var(--ease); } }
 /* Switching lines: the old scene fades out fast while it drops a little; the new one fades in and rises into place, slowing down at the end (ease-out), so it settles without a snap. The new one starts when the old one is gone (0.1 s), so two scenes never show through each other. The stars (.fx) leave and arrive with the scene. Only opacity and transform change; every scene keeps its layer, so the last frame is the resting frame. */
 .land .feat-shot > .scene { grid-area:1/1; align-self:start; opacity:0; transform:translateY(var(--space-24)); pointer-events:none; transition:opacity .1s linear, transform .1s ease-in; will-change:transform, opacity; }
 .land .feat-shot > .scene.on { opacity:1; transform:none; pointer-events:auto; transition:opacity var(--dur-slow) var(--ease) .1s, transform .4s var(--ease) .1s; }
