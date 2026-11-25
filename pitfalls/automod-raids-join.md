@@ -132,3 +132,13 @@ A nuke run decided "already quarantined, only revert the late entries" from the 
 The Security score fix refused to run with "a main role no longer exists" when one saved main role was deleted in Discord, without naming the role or a way forward. Saved role lists keep ids of deleted roles (nothing cleans them), and the fix required every id to exist. *Avoid:* skip saved roles that no longer exist and act on the rest. When none is left, say where to pick them again (Lockdown > Main roles). Other dashboard fixes and the lockdown plan already work from the live role list.
 
 - **The in-Discord settings panel (`joingate 1a ?on`) saved the part on but left Server Joins off.** *Avoid:* both writers use `module_to_turn_on`; the panel asks for the same bar (Owner, Extra Owner or Trusted Admin with a fresh 2FA).
+
+**Another bot's role skipped verification.**
+An autorole or reaction-role bot handing out the verification role verified members without Brim. The quarantine hold took such a role back only for a join quarantine and only with anti-nuke on (#170), so verification without "quarantine on join" had no check. The rule lived in the anti-nuke hold, not in verification.
+*Avoid:* a rule about who may hand out a role sits with the feature that owns the role. `verify::given` takes back a verification role a bot (not Brim) gives a member who held none, logs it in the verification log, punishes nobody. Staff giving it by hand is fine; turning verification off lets another bot verify. A held member is left to the hold.
+
+**A normal join paid two Discord calls for Raider List evidence.**
+`join_raid` always calls `raiders::raid_flagged`, and `add_evidence` looked the server up (guild with counts, the bot's member) before it checked the list, also when nobody was flagged. Those calls ran before verification. *Avoid:* `add_evidence` returns at once for an empty list. A raid still pays them once per flagged batch.
+
+**The verify button judged "suspicious" on other names than Join Gate.**
+Join Gate checks the cured username and display name; the verification Start button checked only the raw username. A member caught by the username filter at join (lookalike letters or the display name) passed without a captcha in "suspicious only" mode. *Avoid:* build the name for `is_suspicious` with `joingate::names`. Discord's spammer flag has the same gap: only the join frame carries it, so the Start button asks Discord (`Api::public_flags`) when the flag would turn a Grant into a challenge, and a failed lookup means a captcha.

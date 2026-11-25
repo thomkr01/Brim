@@ -83,22 +83,6 @@ A bot whose adder could not be read (5xx, 429, entry not written yet), or whose 
 **A new delete type was not watched.**
 Deleting threads and forum posts (audit type 112) was not an anti-nuke action. *Avoid:* the "Thread & forum post deletions" card (`Action::ThreadDelete`, opt-in, nothing to restore). A new action needs the enum, `ALL`, `watched`, the dashboard's `NUKE_CARDS` and the UI's `NUKE_WORDS`.
 
-**A lost gateway session lost its audit entries.**
-Discord replays missed events only on a resume. After a new session (`Ready`) the audit entries made in the gap never arrived, so a nuke during a reconnect was never counted. *Avoid:* `welcome::saw_audit` keeps the newest audit id per guild; `on_ready` runs anti-nuke on the entries after it (`catch_up_audit`). The last handled id is saved in `audit_seen`, loaded before the gateway (`load_audit_seen`), so the first `Ready` after a restart reads entries made while the bot was down too.
-A replay is not a live event:
-(1) A replayed entry counts at its own time (snowflake), never now (`antinuke::replay_age`, `AntiNuke::on_actions_at`, `action_log.created_at` backdated, no heat); older than the hour window it is not counted; a burst in the gap still trips.
-(2) No gateway event, so its category comes from the channel or the latest backup (`replayed_parent`); a ticket made and closed in the gap is counted.
-(3) Take the start point in the gateway loop before the `Ready` task is spawned (`note_ready`); a second `Ready` keeps the older start; take the floor before `on_ready`'s first await.
-(4) Live and catch-up bring the same entries: `saw_audit` returns whether an entry is new (last 1000 ids per guild); both run anti-nuke only then. The dedupe ring (2500) must exceed a whole catch-up plus the live entries meanwhile.
-(5) Page back with `before` (newest first) up to 1000 entries; past that, or when every retry fails, the Anti Nuke log says the gap was not checked (the gap is unpinned).
-(6) Batch the `audit_seen` write every 2 s (`done_audit`, `flush_audit`): an UPSERT on one row per guild in the event path serialised a nuke's entries on its row lock.
-(7) "Replayed" is a flag from the catch-up (`antinuke::on_replayed`), never inferred from the host clock (a clock an hour fast made live entries too old to count).
-(8) A replayed entry re-judges every window that holds it, with the live entries already counted after it (`on_actions_at`): a nuke split across a reconnect tripped nothing.
-(9) Past the hour window an entry is still logged with `counted` 0 (revertable); the Anti Nuke log says how many were not counted.
-(10) The saved id never passes an entry still being handled (`audit_inflight`, left when its `InFlight` guard drops, also on panic; a 30 min expiry only bounds a leak) or a gap whose catch-up has not succeeded (`audit_pinned`); `action_log.audit_id` lets a catch-up skip entries counted before a crash lost the batched id.
-(11) Record every handled entry in `audit_handled` (tripwires, lock set-backs, voice and exempt entries too; not when anti-nuke is off or for the bot's own entries; pruned after a day); a catch-up skips them and every `action_log.audit_id`: replaying a tripwire entry from before a restart took back a role an Owner had since re-granted.
-(12) Replayed tripwire entries have no age limit, on purpose: `guard_perms`, `guard_permit_roles` and the holds judge a grant still in force, so an old one is undone and punished like a new one; only counting has the hour window.
-
 **A config read error skipped an audit entry's guards and count.**
 `on_audit_as` used `app.cfg(..)?`, and the cache is empty after each save, `relink` and a listener reconnect. The entry was marked handled with no count and no `action_log` row. *Avoid:* `App::cfg_or_last` falls back to the last config loaded (kept through `forget`, set only by a read that is not stale), else after one retry returns Err with the defaults: the guards undo with nobody punished, the action is saved with `counted` 0 (`log_uncounted`) so `/revert` can undo it, and staff are told. The nuke run and its later passes use the same fallback.
 

@@ -2,10 +2,6 @@
 
 Index and rules: [PITFALLS.md](../PITFALLS.md).
 
-**Another bot's role skipped verification.**
-An autorole or reaction-role bot handing out the verification role verified members without Brim. The quarantine hold took such a role back only for a join quarantine and only with anti-nuke on (#170), so verification without "quarantine on join" had no check. The rule lived in the anti-nuke hold, not in verification.
-*Avoid:* a rule about who may hand out a role sits with the feature that owns the role. `verify::given` takes back a verification role a bot (not Brim) gives a member who held none, logs it in the verification log, punishes nobody. Staff giving it by hand is fine; turning verification off lets another bot verify. A held member is left to the hold.
-
 **A short "gg" from seven members made a crowd.**
 Every short text's full heat went into the shared crowd pool, so seven members who each typed "gg" within about a second were all deleted, struck and timed out. *Avoid:* a text under 10 characters (after `cure` and the alphanumeric filter) with no link and no mention never joins a crowd pool (`Crowd::MIN_POOL_CHARS`); it still heats its author. Crowd defaults are unchanged.
 
@@ -32,9 +28,6 @@ The phishing and NSFW lists come from a third-party repo with no guard, so an en
 
 **Spam similarity was slow under the lock every server shares.**
 `check_message` holds `app.heat` while `heat` compares a message with up to 5 earlier ones (500x500 Levenshtein each), so a long-message spam raid slowed automod in every server. Moving the comparison out of the lock fails: two messages of one member run in parallel and each must see the other in the history, or a burst of copies is missed. *Avoid:* keep the read, score and remember under one lock; make the score cheap. `best_similarity` returns 1.0 for an identical text and skips a comparison whose length gap already caps it below the best so far.
-
-**A normal join paid two Discord calls for Raider List evidence.**
-`join_raid` always calls `raiders::raid_flagged`, and `add_evidence` looked the server up (guild with counts, the bot's member) before it checked the list, also when nobody was flagged. Those calls ran before verification. *Avoid:* `add_evidence` returns at once for an empty list. A raid still pays them once per flagged batch.
 
 **A Discord AutoMod rule edited by someone without a permit still drove Brim's punishments.**
 Brim runs its own actions (timeout, kick, ban) on hits of a native rule. Anyone with Manage Server can change that rule's keywords, so a member without a permit could make Brim punish innocent messages. *Avoid:* `native::on_rule_audit` reads the audit entry of every rule create or update (live and replayed, anti-nuke on or off). A change by someone who is not Owner, EO, TA or a `dashboard_edit` permit puts the rule in `automod_rule_untrusted` (migration 3925), and `on_native_hit` skips it until a trusted change. A failed permit lookup counts as untrusted; it runs once per entry inside the D20 inflight guard; the newest audit id per rule wins, so a replayed or slower older trusted entry cannot clear a newer untrusted one. Hits between the gateway's rule update and its audit entry wait up to 30 s (`native::rule_changed`). The bot's own entries keep the verdict, since its keyword sync rewrites only part of a rule; a dashboard edit marks the rule trusted itself (`lockdown::trust_rule`). A rollback drops an old `ban_sync` section. The bot's own keyword rule is synced back by `automod::on_rule_change`; no other Discord-side setting feeds a Brim action.
@@ -65,9 +58,6 @@ Whitelisted channels and roles still got base message heat, other bots' slash-co
 
 **A bot rename reads as a new name.**
 The post-join username filter dedupes on username + global name + nick. Its Rename action changes the nick, so the echo update looked like a new bad name and the bot would rename on every update; a dehoist nick on a member the filter already punished would punish them again. *Avoid:* for Rename the dedupe key leaves out the nick, and a clean nick counts as done (`joingate::post_join_key`). Auto-dehoist skips a name the filter matched, and its output always starts with a letter or digit, so dehoisting twice changes nothing.
-
-**The verify button judged "suspicious" on other names than Join Gate.**
-Join Gate checks the cured username and display name; the verification Start button checked only the raw username. A member caught by the username filter at join (lookalike letters or the display name) passed without a captcha in "suspicious only" mode. *Avoid:* build the name for `is_suspicious` with `joingate::names`. Discord's spammer flag has the same gap: only the join frame carries it, so the Start button asks Discord (`Api::public_flags`) when the flag would turn a Grant into a challenge, and a failed lookup means a captcha.
 
 **Personal heat has no ceiling, so a pool can be filled by one member.**
 "Heat punishes one member at 100% first" was used to drop auto slowmode's member count. But `HeatState::apply` never caps: one 20-mention message is 315% alone, and the pool is fed before the punishment gates (grace window, automod whitelist, failed timeouts, strikes off). One member could slow a channel, or every channel. *Avoid:* a shared pool caps each member's share at max heat (`ChannelHeat.shares`), and its trigger is above one share (`SLOW_PCT` from 200). The pool starts over when max heat or decay changes, or old heat outweighs the new caps. Before relying on "X stops it first", check that X has a ceiling and runs before the thing it guards.
