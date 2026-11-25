@@ -957,3 +957,7 @@ button.card.hub.sub { padding:var(--space-12) var(--space-16); margin:0 0 var(--
 .land .pane .tog .chip { text-transform:none; white-space:normal; }
 /* Home cards are fixed size, so they sit on a real grid: each row starts and ends on one line (the shared .cards columns stack on their own and ignore rows). Same column steps as .cards: 1, 2 from 900 px, 3 from 2300 px, 4 from 3200 px. */
 .home-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--space-24); } @media (min-width:900px) { .home-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (min-width:2300px) { .home-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } } @media (min-width:3200px) { .home-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+
+.sec-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.sec-row .sec-text { flex: 1; }
+.sec-row .sw, .sec-row button { flex: none; }

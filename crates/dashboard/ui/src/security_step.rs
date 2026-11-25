@@ -138,14 +138,14 @@ pub fn Security(guild: String) -> impl IntoView {
             <h2>"Recommended security"</h2>
             <p class="muted">"Brim sets these up with the settings we recommend. Turn off what you do not want, then save. Every setting can be tuned later on its own page in the menu on the left."</p>
             {ROWS.iter().map(|(sec, name, what)| view! {
-                <div class="row note" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
-                    <div style="flex:1"><b>{*name}</b><br/><span class="muted">{*what}</span></div>
-                    <input type="checkbox" class="sw" style="flex:none" aria-label=format!("Use {name}") prop:disabled=move || failed.get() prop:checked=move || is_on(&val.get(), sec)
+                <div class="row note sec-row">
+                    <div class="sec-text"><b>{*name}</b><br/><span class="muted">{*what}</span></div>
+                    <input type="checkbox" class="sw" aria-label=format!("Use {name}") prop:disabled=move || failed.get() prop:checked=move || is_on(&val.get(), sec)
                         on:change=move |e| { let on = event_target_checked(&e); val.update(|c| if on { turn_on(c, sec) } else { turn_off(c, sec) }) } />
                 </div>
             }).collect_view()}
-            <div class="row note" style="display:flex;align-items:center;justify-content:space-between;gap:16px">
-                <div style="flex:1"><b>"Discord's own server settings"</b><br/><span class="muted">"Sets a medium verification level, the media filter for everyone, and notifications for mentions only. Only where Discord has a weaker one now."</span></div>
+            <div class="row note sec-row">
+                <div class="sec-text"><b>"Discord's own server settings"</b><br/><span class="muted">"Sets a medium verification level, the media filter for everyone, and notifications for mentions only. Only where Discord has a weaker one now."</span></div>
                 <button class="ghost" disabled=move || val.get() != orig.get() on:click=discord>"Set them"</button>
             </div>
         </div>
