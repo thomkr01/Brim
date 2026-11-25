@@ -1752,3 +1752,7 @@ The CONGRATS word was a fixed first line of the ended giveaway card, so a giveaw
 ## The test send of a default message posted raw emoji tags (2026-11-25)
 
 "Send test to me" posted `{e:trophy}` and the CONGRATS tags as text in winners, reroll and every other message whose text sits above the embeds. Root cause: `fill_emoji` fills only the title, description, footer and fields of embeds. *Avoid:* the test send fills every text of the message with `fill_all` (all strings, like the bot's own `fill_tags`), so it matches the real post.
+
+## The ticket panel message demanded `{text}` it does not need (2026-11-25)
+
+The editor of `ticket.panel` showed "Keep this in the message: {text}" and refused a save without it. Root cause: `build` in `botmsg.rs` made `{text}` required for every default whose template shows it, but there `{text}` is only the list of panel descriptions; the buttons come from Brim and the panel works with no text. *Avoid:* a variable is required only when the message cannot do its job without it. `{text}` stays in the variable list and in the default text. Left as they are, because the variable is the content: frames around the bot's own text (`log.*`, `cmd.*`, `ticket.reply|sent|greeting|closing`, `reply.*usage`, `dm.*` frames) and feed links. Check a new entry: does it work with the variable gone? If yes, it is not required.
