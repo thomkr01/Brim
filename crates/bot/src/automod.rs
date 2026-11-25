@@ -226,13 +226,12 @@ async fn check_message(
         return Ok(());
     }
     let wl = &cfg.whitelist;
-    let roles = m.member.as_ref().map_or(&[][..], |mem| &mem.roles);
     // In a thread or forum post the whitelists of its parent channel apply.
     let (parent, category) = app
         .channel_scope(gid, m.channel_id)
         .await
         .unwrap_or((m.channel_id, None));
-    let listed = |l: &WhitelistList| l.covers(m.author.id, roles, parent, category, m.webhook_id);
+    let listed = |l: &WhitelistList| l.covers(m.author.id, parent, category, m.webhook_id);
     let partner = wl.partner_channels.contains(&parent);
     let now = now_ms();
     let text = filter_text(m);

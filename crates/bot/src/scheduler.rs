@@ -175,6 +175,7 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
         "owner_check" => crate::owner::owner_check_job(app, gid).await?,
         "rescue_expired" => crate::owner::rescue_expired_job(app, gid).await?,
         "permit_sync" => crate::permit_sync::sync(app, gid).await?,
+        crate::exempt_roles::KIND => crate::exempt_roles::run(app, gid, &job.payload).await?,
         "staff_role_off" => {
             let role = need(&job.payload, "role")?;
             crate::permit_sync::staff_role_off(app, gid, role).await?
@@ -274,7 +275,7 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
 /// Jobs a person queues on the dashboard. Each runs only while that person may still do it: a job
 /// whose asker lost the right while it waited is dropped and logged (security review, owner decision
 /// 2026-11-17). The checks are the dashboard's at the time it queued the job.
-const RECHECKED: [&str; 7] = [
+const RECHECKED: [&str; 8] = [
     "lock",
     "unlock",
     "lock_update",
@@ -282,6 +283,7 @@ const RECHECKED: [&str; 7] = [
     "panic_end",
     "backup_create",
     "backup_load",
+    crate::exempt_roles::KIND,
 ];
 
 /// Why a [`RECHECKED`] job must not run, or None. An error (Discord did not answer) fails the job,
@@ -307,6 +309,11 @@ async fn refused(app: &App, gid: Id<GuildMarker>, job: &Job) -> Result<Option<&'
     let mods_locked = app.mod_commands_locked(gid.get());
     let ok = match kind {
         "backup_create" | "backup_load" => matches!(level, Level::Owner | Level::ExtraOwner),
+        // The dashboard's Fix bar (Admin): it fills a permit.
+        crate::exempt_roles::KIND => matches!(
+            level,
+            Level::Owner | Level::ExtraOwner | Level::TrustedAdmin
+        ),
         "panic_start" | "panic_end" => matches!(
             level,
             Level::Owner | Level::ExtraOwner | Level::TrustedAdmin

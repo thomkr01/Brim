@@ -70,6 +70,10 @@ fn field(kind: char) -> &'static str {
 
 /// Config path of type `t` for target kind `kind`; None when the type does not apply.
 fn path(t: usize, kind: char) -> Option<String> {
+    // A role exempts nobody (owner rule): an old role menu saves nothing.
+    if kind == 'r' {
+        return None;
+    }
     let f = field(kind);
     Some(match t {
         0 => format!("whitelist.{f}"),
@@ -203,7 +207,7 @@ async fn target(app: &App, gid: Id<GuildMarker>, arg: &str) -> Result<Result<(ch
     // The bot is in many servers: a role, channel or webhook must be this server's.
     let ours = app.http.roles(gid).await?.models().await?;
     if ours.iter().any(|r| r.id.get() == id) {
-        return Ok(Ok(('r', id)));
+        return Ok(Err(say_line(app, gid, "reply.whitelist.role", &[]).await));
     }
     if arg.starts_with("<@&") {
         let id = id.to_string();
@@ -246,7 +250,7 @@ pub async fn run(app: &App, msg: &MessageCreate, args: &str) -> Result<()> {
     if arg.is_empty() {
         let line = [(
             "text",
-            "`whitelist @member|@role|#channel|category-id|webhook-id`",
+            "`whitelist @member|#channel|category-id|webhook-id`",
         )];
         return say(say_line(app, gid, "reply.error.usage", &line).await).await;
     }
@@ -436,12 +440,16 @@ mod tests {
                     apply(&mut doc, &p, Edit::Add(vec![json!("5")]));
                 }
             }
-            check_section("whitelist", &doc["whitelist"], &serde_json::Value::Null).unwrap();
+            if kind != 'r' {
+                check_section("whitelist", &doc["whitelist"], &serde_json::Value::Null).unwrap();
+            }
             if kind == 'u' {
                 check_section("antinuke", &doc["antinuke"], &serde_json::Value::Null).unwrap();
             }
             let got = current(&GuildCfg::parse(&doc), kind, 5);
-            assert_eq!(got, vec![true, true, true, kind == 'u', true], "{kind}");
+            // A role exempts nobody: an old role menu writes nothing.
+            let on = kind != 'r';
+            assert_eq!(got, vec![on, on, on, kind == 'u', on], "{kind}");
         }
     }
 

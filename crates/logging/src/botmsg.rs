@@ -1437,6 +1437,10 @@ const FACT_VARS: &[(&str, &str, &str)] = &[
     ),
     ("taken", "Who lost which roles", "@alex: @Moderators"),
     ("listed", "Who was listed in which permit", "@alex: Moderators"),
+    ("to_permit", "How many members went into the permit", "2 added to Automod Immunity"),
+    ("to_lists", "How many members went onto the Members lists", "1 added to the Members lists"),
+    ("already", "How many members were exempt already", "0 already exempt"),
+    ("not_moved", "Members who were not moved", "nobody"),
     (
         "gone",
         "Who left and what was removed from them",
@@ -2763,6 +2767,7 @@ pub const SECURITY_LOGS: &[(&str, &str, u32, &[&str], &[(&str, &str, bool)])] = 
     ("log.anti_nuke.audit_gap", "Anti-nuke: audit log not all checked", ALERT, &["**{reason}.** Actions made while it was away were not all checked by anti-nuke. Check the audit log."], &[]),
     ("log.anti_nuke.permit_roles_taken", "Permits: roles taken from members not listed", ALERT, &["{alert}", "Taken|{taken}", "Action|a role alone gives no permit, so nobody was punished. To give someone a permit, add them to it on the dashboard"], &[]),
     ("log.anti_nuke.permits_moved", "Permits: moved from roles to members", ORANGE, &["{alert}", "Each holder of a permit role was listed in the permit (one permit each). From now on Brim gives a permit's roles to its listed members and takes them from everyone else; change who is listed on the dashboard.", "Listed|{listed}"], &[]),
+    ("log.anti_nuke.exempt_roles_moved", "Permits: Auto Mod exemptions moved from roles to members", ORANGE, &["{alert}", "A role no longer exempts anyone from Auto Mod or the catch channel. Its members were listed by user ID. The role lists were emptied; History shows them.", "By|{by}", "Permit|{to_permit}", "Members lists|{to_lists}", "Already exempt|{already}", "Not moved|{not_moved}"], &[]),
     ("log.anti_nuke.permit_holders_left", "Permits: holders who left", ORANGE, &["{gone}"], &[]),
     ("log.anti_nuke.bot_check_failed", "Anti-nuke: bot check failed", ORANGE, &["Could not check if {accounts} are bots, so they stay listed. Only users can be Extra Owner, Trusted Admin or on the quarantine whitelist; the check runs again at the next start."], &[]),
     ("log.anti_nuke.bots_removed", "Anti-nuke: bots removed from user-only lists", ORANGE, &["Bot accounts were removed: {accounts}. Only users can be Extra Owner, Trusted Admin or on the quarantine whitelist. A bot permit gives a bot exactly the whitelist flags you pick: add the bot as a member of a permit on the dashboard's Permits page."], &[]),
@@ -5490,6 +5495,12 @@ fn report_case_replies(out: &mut Vec<Def>) {
                     "whitelist target is not a role here",
                     &["id"],
                     "`{id}` is not a role of this server",
+                ),
+                (
+                    "whitelist.role",
+                    "whitelist target is a role",
+                    &[],
+                    "Roles cannot be whitelisted. Add the member, or give them a permit with Automod Immunity.",
                 ),
                 (
                     "whitelist.not_yours",
