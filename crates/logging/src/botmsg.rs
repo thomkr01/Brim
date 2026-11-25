@@ -3949,6 +3949,13 @@ pub const SECURITY_ERRORS: &[(&str, &str, &[&str], &[&str], &str)] = &[
         "{target} cannot be a main role: {reason}",
     ),
     (
+        "reply.settings.staff_only_role",
+        "staff-only role given to members",
+        &["target", "level"],
+        &["target", "level"],
+        "{target} cannot be used here: it is the {level} role, which Brim gives only to staff",
+    ),
+    (
         "reply.settings.ta_usage",
         "Trusted Admins usage",
         &[],
@@ -6466,6 +6473,7 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "Brim's dangerous Discord permissions, one per line",
         "Administrator",
     ),
+    ("level", "Staff level (Staff, Trusted Admin or Owner)", "Staff"),
     ("reason", "Reason", "Spamming in #general"),
     ("moderator", "Moderator name", "alex"),
     (

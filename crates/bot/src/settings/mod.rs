@@ -649,6 +649,7 @@ pub(crate) fn page_of(mut e: Embed, per: usize, page: usize) -> (Embed, usize) {
 
 /// The main roles refusal entry (a security text).
 const MAIN_ROLE: &str = "reply.settings.not_main_role";
+const STAFF_ONLY_ROLE: &str = "reply.settings.staff_only_role";
 
 /// Whether `m` is a security panel (`botmsg::PANELS`): its replies are Security copies.
 fn security_panel(m: &Module) -> bool {
@@ -1107,6 +1108,35 @@ pub async fn try_run(app: &App, msg: &MessageCreate, rest: &str) -> Result<bool>
             None
         };
         if let Some(no) = no {
+            send_said(app, msg, no, true).await?;
+            return Ok(true);
+        }
+    }
+    // The dashboard's rule too: a level role (Staff, Trusted Admin, Owner) is never a role Brim
+    // gives to members, as permit_sync takes it back (`api::given_roles`).
+    let gives = [
+        "lockdown.main_roles",
+        "verification.roles",
+        "antinuke.quarantine_role",
+    ];
+    if gives.contains(&row.path) && !matches!(op, Op::Remove(..)) {
+        let levels = brim_core::permits::level_roles(&app.pool, gid.get() as i64).await?;
+        let hit = ids.iter().find_map(|&id| {
+            levels
+                .iter()
+                .find(|(_, r)| *r as u64 == id)
+                .map(|(l, _)| (id, l))
+        });
+        if let Some((id, level)) = hit {
+            let name = match level.as_str() {
+                brim_core::permits::STAFF => "Staff",
+                "trusted_admin" => "Trusted Admin",
+                _ => "Owner",
+            };
+            let vars = [("target", format!("<@&{id}>")), ("level", name.to_string())];
+            let no = Refusal(STAFF_ONLY_ROLE, vars.to_vec())
+                .say(app, gid, true)
+                .await;
             send_said(app, msg, no, true).await?;
             return Ok(true);
         }

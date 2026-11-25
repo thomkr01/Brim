@@ -677,7 +677,7 @@ pub(crate) async fn permit_roles_ok(
 
 /// The quarantine role and main roles the section adds (`roles::unfit`, the bot's rule too).
 /// Ids already stored are left alone, as in [`check_ids`].
-async fn check_held_roles(
+pub(crate) async fn check_held_roles(
     st: &AppState,
     guild: i64,
     section: &str,
@@ -688,6 +688,26 @@ async fn check_held_roles(
         .into_iter()
         .filter(|id| !held_roles(section, old).contains(id))
         .collect::<Vec<_>>();
+    let given = given_roles(section, new);
+    if !given.is_empty() {
+        let levels = permits::level_roles(&st.db, guild).await?;
+        let old_given = given_roles(section, old);
+        let level = given
+            .iter()
+            .filter(|r| !old_given.contains(r))
+            .find_map(|r| {
+                levels
+                    .iter()
+                    .find(|(_, l)| l.to_string() == *r)
+                    .map(|(name, _)| (r, name))
+            });
+        if let Some((r, name)) = level {
+            return Err(ApiError::BadRequest(format!(
+                "<@&{r}> cannot be used here: it is the {} role. Brim gives it only to staff and takes it from everyone else",
+                crate::staff_role::level_name(name)
+            )));
+        }
+    }
     if added.is_empty() {
         return Ok(());
     }
@@ -704,6 +724,29 @@ async fn check_held_roles(
     }
 }
 
+/// The roles a section has Brim give to members: [`held_roles`] and the verification roles. A
+/// level role (Staff, Trusted Admin, Owner) may not be one: `permit_sync` takes it back.
+pub(crate) fn given_roles(section: &str, v: &Value) -> Vec<String> {
+    let mut ids = held_roles(section, v);
+    if section == "verification" {
+        ids.extend(
+            v["roles"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(id_text),
+        );
+    }
+    ids
+}
+
+/// An id as text: the bot also reads a JSON number as an id.
+fn id_text(v: &Value) -> Option<String> {
+    v.as_str()
+        .map(String::from)
+        .or_else(|| v.as_u64().map(|n| n.to_string()))
+}
+
 /// `antinuke.quarantine_role` and `lockdown.main_roles`.
 fn held_roles(section: &str, v: &Value) -> Vec<String> {
     let ids = match section {
@@ -711,10 +754,7 @@ fn held_roles(section: &str, v: &Value) -> Vec<String> {
         "lockdown" => v["main_roles"].as_array().map_or(&[][..], Vec::as_slice),
         _ => &[],
     };
-    ids.iter()
-        .filter_map(|i| i.as_str())
-        .map(String::from)
-        .collect()
+    ids.iter().filter_map(id_text).collect()
 }
 
 pub async fn put_section(
@@ -1081,6 +1121,21 @@ pub async fn rollback(
             return Err(ApiError::Forbidden(
                 "only the server owner can roll back the Extra Owners list",
             ));
+        }
+        // A level role it brings back may not be a role Brim gives to members (`given_roles`).
+        if p["levels"].is_object() && roles(&p["levels"]) != roles(&cur["levels"]) {
+            let levels = p["levels"].as_object().into_iter().flatten();
+            let ids: Vec<String> = levels.filter_map(|(_, v)| id_text(v)).collect();
+            for k in ["antinuke", "lockdown", "verification"] {
+                if let Some(r) = given_roles(k, &old[k])
+                    .into_iter()
+                    .find(|r| ids.contains(r))
+                {
+                    return Err(ApiError::BadRequest(format!(
+                        "<@&{r}> was a Trusted Admin or Owner role in that version, and a setting gives it to members now. Pick another role there first"
+                    )));
+                }
+            }
         }
         permit_roles_ok(&st, guild, p, &cur).await?;
         store::write_permits(&mut tx, guild, p, s.user_id).await?;

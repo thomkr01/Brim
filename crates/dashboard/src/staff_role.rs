@@ -404,6 +404,53 @@ pub(crate) async fn overview_check(
     }))
 }
 
+/// "Staff", "Trusted Admin" or "Owner" for a `level_roles` level.
+pub(crate) fn level_name(level: &str) -> &'static str {
+    match level {
+        permits::STAFF => "Staff",
+        "trusted_admin" => "Trusted Admin",
+        _ => "Owner",
+    }
+}
+
+/// A setting saved before the check that has Brim give a level role to members (the quarantine
+/// role, main roles, verification roles). `permit_sync` takes it back from everyone who is not
+/// staff, so the setting and the sync fight. No Fix: the owner picks another role there.
+pub(crate) async fn given_check(
+    st: &AppState,
+    guild: i64,
+    config: &Value,
+) -> Result<Option<brim_antinuke::security::Check>, ApiError> {
+    let levels = permits::level_roles(&st.db, guild).await?;
+    let mut hits: Vec<String> = vec![];
+    for (section, title) in [
+        ("antinuke", "Anti Nuke quarantine role"),
+        ("lockdown", "Lockdown main roles"),
+        ("verification", "Verification roles"),
+    ] {
+        let given = crate::api::given_roles(section, &config[section]);
+        for (level, role) in &levels {
+            if given.contains(&role.to_string()) {
+                hits.push(format!("{title} (the {} role)", level_name(level)));
+            }
+        }
+    }
+    if hits.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(brim_antinuke::security::Check {
+        id: "level_role_given".into(),
+        severity: brim_antinuke::security::Severity::Warn,
+        title: "A staff-only role is given to members",
+        detail: format!(
+            "{}. Brim gives this role only to staff and takes it from everyone else, so these settings do not work. Pick another role there.",
+            hits.join(", ")
+        ),
+        fix: None,
+        steps: vec![],
+    }))
+}
+
 /// Fix setting of [`overview_check`].
 pub(crate) const FIX: &str = "staff_role";
 
@@ -481,6 +528,73 @@ mod tests {
     use serde_json::{json, Value};
     use std::sync::{Arc, Mutex};
     use tower::ServiceExt;
+
+    /// No setting may have Brim give a level role to members (the quarantine role, main roles,
+    /// verification roles): a new pick is refused, and one saved before shows on Overview.
+    #[tokio::test]
+    async fn a_level_role_is_never_given_to_members() {
+        let Ok(url) = brim_core::db::test_url() else {
+            return;
+        };
+        let db = brim_core::db::connect(&url).await.unwrap();
+        let g = 9_710_000_000 + std::process::id() as i64;
+        sqlx::query("insert into level_roles (guild_id, level, role_id) values ($1, 'staff', 1000), ($1, 'owner', 1001)")
+            .bind(g)
+            .execute(&db)
+            .await
+            .unwrap();
+        let st = AppState {
+            db: db.clone(),
+            discord: Discord {
+                http: reqwest::Client::builder().no_proxy().build().unwrap(),
+                client_id: "7".into(),
+                client_secret: String::new(),
+                bot_token: String::new(),
+                redirect_uri: String::new(),
+                // No Discord call may happen before the refusal.
+                api: "http://127.0.0.1:9".into(),
+                memo: Default::default(),
+                limits: Default::default(),
+            },
+            secure: false,
+            rate: Default::default(),
+            ips: Default::default(),
+            vpn_logged: Default::default(),
+        };
+        let pick = |v: Value| (v, json!({}));
+        let (new, old) = pick(json!({"roles": ["5", "1000"]}));
+        let e = crate::api::check_held_roles(&st, g, "verification", &new, &old).await;
+        assert!(format!("{e:?}").contains("the Staff role"), "{e:?}");
+        let (new, old) = pick(json!({"quarantine_role": "1001"}));
+        let e = crate::api::check_held_roles(&st, g, "antinuke", &new, &old).await;
+        assert!(format!("{e:?}").contains("the Owner role"), "{e:?}");
+        // A value saved before is left alone on save, and Overview names it.
+        let stored = json!({"roles": ["1000"]});
+        crate::api::check_held_roles(&st, g, "verification", &stored, &stored)
+            .await
+            .unwrap();
+        let row = super::given_check(&st, g, &json!({"verification": stored}))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.id, "level_role_given");
+        assert!(
+            row.detail.contains("Verification roles (the Staff role)"),
+            "{}",
+            row.detail
+        );
+        assert!(
+            super::given_check(&st, g, &json!({"verification": {"roles": ["5"]}}))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        sqlx::query("delete from level_roles where guild_id = $1")
+            .bind(g)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
 
     /// Only the Owner with a fresh 2FA turns it on; a dangerous role is refused; on writes the row,
     /// presets the empty alert lists and queues the sync; a rollback keeps it; off takes the role's

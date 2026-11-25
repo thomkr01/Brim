@@ -256,6 +256,7 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
     );
     rows.extend(crate::channels::overview_check(&st, guild, &config, &l).await?);
     rows.extend(crate::staff_role::overview_check(&st, guild, &l.image.roles).await?);
+    rows.extend(crate::staff_role::given_check(&st, guild, &config).await?);
     rows.extend(crate::msghooks::overview_check(&st, guild, &l.image.channels).await?);
     rows.extend(crate::feeds::overview_check(&st, guild, &l.image.channels).await?);
     // Its rows name paused and kept permit holders, which Viewers do not see (security review).
