@@ -4542,6 +4542,13 @@ const SECURITY: &str = "Security";
 /// the entries and the winner count.
 fn giveaways(out: &mut Vec<Def>) {
     const G: &str = "Giveaways";
+    // The word CONGRATS, one emoji per letter, as the first line of what an ended giveaway says
+    // to its winners. Without the uploaded emojis the tags drop out and the line is empty.
+    macro_rules! congrats {
+        () => {
+            "{e:congrats_1}{e:congrats_2}{e:congrats_3}{e:congrats_4}{e:congrats_5}{e:congrats_6}{e:congrats_7}{e:congrats_8}"
+        };
+    }
     let msg = |key: &str, name: &str, vars: &[&'static str], req: &[&'static str], m: Value| {
         let mut d = def(key, name, G, false, vars, m);
         d.required = req.to_vec();
@@ -4635,6 +4642,7 @@ fn giveaways(out: &mut Vec<Def>) {
                     "{prize}",
                     GREY,
                     &[
+                        congrats!(),
                         "{e:user_id} **Hosted by:** {host}",
                         "{e:star} **Sponsored by:** {sponsor}",
                         "{note}",
@@ -4672,7 +4680,7 @@ fn giveaways(out: &mut Vec<Def>) {
         "Winners post",
         &["winners", "prize", "sponsor", "link", "claim"],
         &["winners", "prize"],
-        json!({"content": "{e:trophy} Congratulations {winners}! You won **{prize}**!\n{e:star} **Sponsored by:** {sponsor}\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}", "embeds": []}),
+        json!({"content": concat!(congrats!(), "\n{e:trophy} Congratulations {winners}! You won **{prize}**!\n{e:star} **Sponsored by:** {sponsor}\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}"), "embeds": []}),
     ));
     out.push(msg(
         "giveaway.no_winners",
@@ -4686,7 +4694,7 @@ fn giveaways(out: &mut Vec<Def>) {
         "Reroll post",
         &["winners", "prize", "link", "claim"],
         &["winners", "prize"],
-        json!({"content": "{e:trophy} New winner: {winners}! You won **{prize}**!\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}", "embeds": []}),
+        json!({"content": concat!(congrats!(), "\n{e:trophy} New winner: {winners}! You won **{prize}**!\n{e:clock} Press **Claim** within {claim}, or the prize goes to another entrant.\n{link}"), "embeds": []}),
     ));
     out.push(msg(
         "giveaway.winner_dm",
@@ -4697,6 +4705,7 @@ fn giveaways(out: &mut Vec<Def>) {
             "You won a giveaway!",
             ORANGE,
             &[
+                congrats!(),
                 "{e:trophy} You won **{prize}** in `{guild.name}`.",
                 "{e:star} **Sponsored by:** {sponsor}",
                 "{e:clock} Press **Claim** before {deadline}, or the prize goes to another entrant.",
@@ -7793,6 +7802,44 @@ mod tests {
         for k in ["giveaway.running", "giveaway.ended"] {
             assert!(missing_text(k, &find(k).unwrap().template).is_none(), "{k}");
         }
+    }
+
+    /// The CONGRATS word (`congrats_1` to `congrats_8`) opens what an ended giveaway says to its
+    /// winners and nothing else; the mentions stay in the text, so they still ping.
+    #[test]
+    fn ended_giveaway_messages_open_with_the_congrats_word() {
+        let word: String = (1..=8).map(|i| format!("{{e:congrats_{i}}}")).collect();
+        let first = |k: &str| {
+            let t = &find(k).unwrap().template;
+            match t["content"].as_str().filter(|c| !c.is_empty()) {
+                Some(c) => c.lines().next().unwrap().to_string(),
+                None => t["embeds"][0]["description"]
+                    .as_str()
+                    .unwrap()
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .to_string(),
+            }
+        };
+        for k in [
+            "giveaway.ended",
+            "giveaway.winners",
+            "giveaway.reroll",
+            "giveaway.winner_dm",
+        ] {
+            assert_eq!(first(k), word, "{k}");
+        }
+        for k in [
+            "giveaway.running",
+            "giveaway.cancelled",
+            "giveaway.no_winners",
+            "giveaway.thread",
+        ] {
+            assert!(!first(k).contains("congrats_"), "{k}");
+        }
+        let m = &find("giveaway.winners").unwrap().template;
+        assert!(m["content"].as_str().unwrap().contains("{winners}") && m["embeds"] == json!([]));
     }
 
     #[test]

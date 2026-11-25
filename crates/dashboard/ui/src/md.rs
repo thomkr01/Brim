@@ -47,7 +47,7 @@ pub fn inline(s: &str) -> String {
     let s = s.replace('\u{1}', "");
     // code spans and links are stashed first so the emphasis passes leave their insides (and URLs) alone
     let (mut out, mut kept, mut rest) = (String::new(), Vec::new(), s.as_str());
-    while let Some(i) = rest.find(['`', '[', '&', '@']) {
+    while let Some(i) = rest.find(['`', '[', '&', '@', '{']) {
         let t = &rest[i..];
         let hit = if let Some(typed) = t.strip_prefix('@') {
             // A typed @name (an example such as @alex) draws as the mention it stands for; an email's @ does not.
@@ -67,6 +67,16 @@ pub fn inline(s: &str) -> String {
                     format!("<span class=\"mention\">@{name}</span>"),
                 )
             })
+        } else if t.starts_with('{') {
+            // A Brim emoji tag is kept whole: its underscores (`congrats_1}{e:congrats_2`) are not emphasis.
+            t.find('}')
+                .filter(|&n| {
+                    t.starts_with("{e:")
+                        && t[3..n]
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                })
+                .map(|n| (n + 1, t[..=n].to_string()))
         } else if t.starts_with('&') {
             t.strip_prefix("&lt;").and_then(|r| {
                 r.find("&gt;")
@@ -252,6 +262,15 @@ mod tests {
     }
 
     use super::*;
+
+    /// The CONGRATS word is eight tags in a row; their underscores are not emphasis marks.
+    #[test]
+    fn emoji_tags_with_underscores_are_not_emphasis() {
+        let word: String = (1..=8).map(|i| format!("{{e:congrats_{i}}}")).collect();
+        let h = md(&word);
+        assert!(!h.contains("<em>") && !h.contains("{e:"), "{h}");
+        assert_eq!(h.matches("class=\"i emo\"").count(), 8, "{h}");
+    }
 
     #[test]
     fn md_renders_discord_markdown() {
