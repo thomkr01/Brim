@@ -1,10 +1,10 @@
 //! Job `exempt_roles_move`: older versions let a role exempt its holders from Auto Mod and the
-//! catch channel. A role exempts nobody now (owner rule: trust is by user id and permits), so the
+//! golden channel. A role exempts nobody now (owner rule: trust is by user id and permits), so the
 //! Overview Fix moves today's holders once, by user id:
 //! - Auto Mod whitelists: into the permit [`PERMIT`] (flag `automod`), at the bottom of the
 //!   permit list. A member in another permit (one permit each) without Automod Immunity goes on
 //!   the same tab's Members list instead.
-//! - Catch channel: onto its Members list (a permit does not exempt from the catch channel).
+//! - Golden channel: onto its Members list (a permit does not exempt from the golden channel).
 //!
 //! The role lists are emptied in the same config version, so History shows them and a rollback
 //! brings them back.
@@ -53,7 +53,7 @@ fn id_list(v: &Value) -> Vec<u64> {
         .collect()
 }
 
-/// The stored exempt roles: per Auto Mod tab, and the catch channel's.
+/// The stored exempt roles: per Auto Mod tab, and the golden channel's.
 pub fn stored(doc: &Value) -> (BTreeMap<&'static str, Vec<u64>>, Vec<u64>) {
     let tabs = TABS
         .iter()
@@ -70,7 +70,7 @@ pub struct Holder {
     pub bot: bool,
 }
 
-/// What the move does. Members lists are keyed by tab ("catch" for the catch channel).
+/// What the move does. Members lists are keyed by tab ("catch" for the golden channel).
 #[derive(Debug, Default, PartialEq)]
 pub struct Plan {
     pub to_permit: Vec<u64>,
@@ -334,7 +334,7 @@ mod tests {
             h(3, &[10]),     // permit with the flag: already exempt
             h(4, &[10, 20]), // Trusted Admin: already exempt
             h(5, &[20]),     // no listed role
-            h(6, &[12]),     // the catch channel's role
+            h(6, &[12]),     // the golden channel's role
             Holder {
                 user: 7,
                 roles: vec![10],
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(p, Plan::default());
     }
 
-    /// 100,000 members, half in the role: the permit takes all of them, the catch channel's
+    /// 100,000 members, half in the role: the permit takes all of them, the golden channel's
     /// Members list stops at its cap, and the plan stays fast.
     #[test]
     fn large_roles_hold() {
@@ -423,7 +423,7 @@ mod tests {
     }
 
     /// The whole job on a scratch database and the mock: 3,001 role holders over four member
-    /// pages go into the permit, a member of another permit and the catch channel's role holders
+    /// pages go into the permit, a member of another permit and the golden channel's role holders
     /// go on the Members lists, and the role lists are emptied in one new version.
     #[tokio::test]
     async fn the_job_moves_every_holder_by_id() {

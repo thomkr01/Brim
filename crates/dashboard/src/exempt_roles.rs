@@ -1,5 +1,5 @@
 //! Overview row and Fix for the roles older versions let exempt members from Auto Mod and the
-//! catch channel. A role exempts nobody now (owner rule: trust is by user id and permits), so
+//! golden channel. A role exempts nobody now (owner rule: trust is by user id and permits), so
 //! until the Fix runs their members are checked like everyone else, the safe direction. The Fix
 //! queues the bot's job `exempt_roles_move` (`crates/bot/src/exempt_roles.rs`), which pages every
 //! member, so it holds on any server size.
@@ -29,7 +29,7 @@ const LISTS: [(&str, &str); 5] = [
     ("/whitelist/invites/roles", "Invite links"),
     ("/whitelist/mentions/roles", "Mentions"),
     ("/whitelist/everyone/roles", "@everyone"),
-    ("/catch/roles", "Catch channel"),
+    ("/catch/roles", "Golden channel"),
 ];
 
 /// Names shown in the row at most; the count covers everyone read.
@@ -91,7 +91,7 @@ pub(crate) async fn overview_check(
         })
         .collect();
     let mut detail = format!(
-        "A role no longer keeps members out of Auto Mod or the catch channel. Saved roles: {}.",
+        "A role no longer keeps members out of Auto Mod or the golden channel. Saved roles: {}.",
         named.join("; ")
     );
     if queued(st, guild).await? {
@@ -154,7 +154,7 @@ pub(crate) async fn overview_check(
         Err(_) => detail.push_str(" Brim could not read who holds them now."),
     }
     detail.push_str(
-        " Move them: Brim adds each member by user ID to the permit Automod Immunity. A member who has another permit, and the catch channel's members, go on the Members list instead. Then the saved roles are cleared.",
+        " Move them: Brim adds each member by user ID to the permit Automod Immunity. A member who has another permit, and the golden channel's members, go on the Members list instead. Then the saved roles are cleared.",
     );
     Ok(Some(row(
         detail,
@@ -221,7 +221,7 @@ mod tests {
             stored(&c),
             vec![
                 (1, vec!["Spam", "Invite links"]),
-                (2, vec!["Invite links", "Catch channel"])
+                (2, vec!["Invite links", "Golden channel"])
             ]
         );
         assert!(stored(&json!({})).is_empty());

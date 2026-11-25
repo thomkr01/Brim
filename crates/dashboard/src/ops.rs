@@ -1168,7 +1168,7 @@ async fn fix(
             true => catch_stays,
             false => Some("Discord refused moving the golden channel. A category holds at most 50 channels: make room, then try again".into()),
         };
-        log_by(&st, &s, guild, &c, None, &format!("gave the open channels, Information, the catch and the verification channel the standard permissions from the security score ({failed} failed)"))
+        log_by(&st, &s, guild, &c, None, &format!("gave the open channels, Information, the golden channel and the verification channel the standard permissions from the security score ({failed} failed)"))
         .await;
         return Ok(Json(
             json!({"ok": true, "failed": failed, "catch_stays": catch_stays}),
@@ -3201,7 +3201,7 @@ mod tests {
         let r = row(&v).expect("the row is shown");
         let d = r["detail"].as_str().unwrap();
         assert!(d.contains("@Helpers (Spam, Invite links)"), "{d}");
-        assert!(d.contains("a deleted role (99) (Catch channel)"), "{d}");
+        assert!(d.contains("a deleted role (99) (Golden channel)"), "{d}");
         // Member 4 holds Helpers; 3 is a bot.
         assert!(d.contains("1 member holds them now"), "{d}");
         assert_eq!(r["fix"]["setting"], crate::exempt_roles::FIX);
