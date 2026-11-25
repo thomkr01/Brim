@@ -510,6 +510,7 @@ async fn native_action(
                     duration_s: None,
                     proof: None,
                     inverse: None,
+                    feature: "discord_automod",
                 },
             )
             .await?;

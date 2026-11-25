@@ -1400,6 +1400,7 @@ pub async fn run(
             duration_s: None,
             proof,
             inverse,
+            feature: if actor_id == app.me { "brim" } else { "staff" },
         },
     )
     .await?;
@@ -1524,6 +1525,7 @@ async fn stat(app: &App, g: i64, by: u64, kind: &str, target: Option<i64>, case_
                 case_no,
                 audit_id: None,
                 ai_client: None,
+                feature: None,
             },
         )
         .await

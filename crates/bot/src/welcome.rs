@@ -392,11 +392,7 @@ pub(crate) async fn purge_removed(app: &App) -> Result<()> {
                     guild = g,
                     "a server marked as left is still there: mark cleared"
                 );
-                let r = sqlx::query("DELETE FROM guild_left WHERE guild_id = $1")
-                    .bind(g)
-                    .execute(&app.pool)
-                    .await;
-                if let Err(e) = r {
+                if let Err(e) = clear_left(app, g, None).await {
                     tracing::warn!(?e, guild = g, "clearing a wrong left mark failed");
                 }
             }
@@ -508,6 +504,16 @@ pub async fn purge_left(app: std::sync::Arc<App>) {
         if let Err(e) = brim_core::invites::prune(&app.pool).await {
             tracing::warn!(?e, "pruning the invite join journal failed");
         }
+        // Only the detail rows: the counts are kept for good (owner decision 2026-11-25).
+        if let Err(e) = brim_core::stats::prune(&app.pool).await {
+            tracing::warn!(?e, "pruning old stats events failed");
+        }
+        if let Err(e) = brim_core::stats::fold(&app.pool).await {
+            tracing::warn!(
+                ?e,
+                "adding the finished days to the stats of all servers failed"
+            );
+        }
         for q in [
             // Expired and idle logins still hold the Discord access token (idle: 24 hours).
             "DELETE FROM dash_session WHERE expires_at < now() OR last_seen_at < now() - interval '24 hours'",
@@ -577,13 +583,52 @@ pub fn save_icon(app: &App, gid: Id<GuildMarker>, icon: Option<&twilight_model::
     });
 }
 
+/// Clears a server's left mark and fixes the stats: a mark counted a leave (trigger
+/// `stat_server_left`). `joined_at` (unix seconds, from GuildCreate) after the mark is a real
+/// return, counted as a join; otherwise Brim never left and the leave is taken back. A fresh
+/// `joined_at` with no mark is a first join.
+async fn clear_left(app: &App, g: i64, joined_at: Option<i64>) -> Result<()> {
+    let mut tx = app.pool.begin().await?;
+    let left: Option<f64> = sqlx::query_scalar(
+        "DELETE FROM guild_left WHERE guild_id = $1 RETURNING extract(epoch FROM left_at)::float8",
+    )
+    .bind(g)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let fresh = joined_at.is_some_and(|t| t > crate::app::now_secs() - FRESH_SECS);
+    // In a savepoint: a failed count must not keep the left mark.
+    let mut stat = sqlx::Connection::begin(&mut *tx).await?;
+    let counted = match (left, joined_at) {
+        // Discord's `joined_at` has whole seconds: a return in the same second as the leave counts.
+        (Some(l), Some(j)) if j as f64 >= l.floor() => {
+            brim_core::stats::record(&mut stat, g, "server_join", "bot", 1, None).await
+        }
+        (Some(_), _) => {
+            brim_core::stats::record(&mut stat, g, "server_leave", "bot", -1, None).await
+        }
+        (None, _) if fresh => brim_core::stats::server_joined(&mut stat, g).await,
+        // shortcut: a kick and re-add while Brim is offline leaves no mark and no fresh join, so
+        // that leave and join are not counted (the server total stays right).
+        (None, _) => Ok(()),
+    };
+    match counted {
+        Ok(()) => stat.commit().await?,
+        Err(e) => {
+            tracing::warn!(?e, guild = g, "counting a server join or leave failed");
+            stat.rollback().await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn on_guild_create(app: &App, ev: &GuildCreate) -> Result<()> {
+    let joined_at = match ev {
+        GuildCreate::Available(g) => g.joined_at.map(|t| t.as_secs()),
+        GuildCreate::Unavailable(_) => None,
+    };
     // Logged, not returned: a DB error here must not skip the re-quarantine below.
-    let back = sqlx::query("DELETE FROM guild_left WHERE guild_id = $1")
-        .bind(ev.id().get() as i64)
-        .execute(&app.pool)
-        .await;
-    if let Err(e) = back {
+    if let Err(e) = clear_left(app, ev.id().get() as i64, joined_at).await {
         tracing::warn!(?e, "clearing the server's left mark failed");
     }
     let GuildCreate::Available(g) = ev else {

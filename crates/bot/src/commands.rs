@@ -373,6 +373,7 @@ pub async fn apply_dm(
             duration_s,
             proof,
             inverse,
+            feature: if actor_id == app.me { "brim" } else { "staff" },
         },
     )
     .await?;
@@ -981,6 +982,7 @@ pub(crate) async fn apply_warn_actions(
             duration_s: secs,
             proof: None,
             inverse: None,
+            feature: "warn_points",
         },
     )
     .await?;
