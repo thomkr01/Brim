@@ -178,7 +178,7 @@ pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
         "REVOKE INSERT, UPDATE ON raid_log, joingate_actions, nuke_incidents, catch_hits FROM brim_dashboard",
         // The stats counts (migration 4100): read only. Its staff actions count through the
         // `mod_actions` trigger, its server purge through `purge_guild`, both as the owner.
-        "REVOKE INSERT, UPDATE, DELETE ON stat_events, stat_daily, stat_daily_all, stat_folded FROM brim_dashboard",
+        "REVOKE INSERT, UPDATE, DELETE ON stat_events, stat_daily, stat_daily_all, stat_folded, stat_servers_ever, stat_members FROM brim_dashboard",
         // Only the bot counts wrong giveaway entry codes.
         "REVOKE INSERT, UPDATE, DELETE ON giveaway_code_tries FROM brim_dashboard",
         // Members' stored names and avatars (migration 4044): it only counts them for a data

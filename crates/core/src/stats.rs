@@ -43,6 +43,37 @@ pub async fn server_joined(c: &mut PgConnection, guild: i64) -> sqlx::Result<()>
     .map(drop)
 }
 
+/// Sets a server's member count from Discord's (GuildCreate).
+pub async fn members_set(pool: &PgPool, guild: i64, n: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO stat_members (guild_id, n) VALUES ($1, $2)
+         ON CONFLICT (guild_id) DO UPDATE SET n = EXCLUDED.n",
+    )
+    .bind(guild)
+    .bind(n)
+    .execute(pool)
+    .await
+    .map(drop)
+}
+
+/// A member joined (`joined`) or left: counts `member_join` or `member_leave` and moves the
+/// server's member count by one, in one transaction.
+pub async fn member_moved(pool: &PgPool, guild: i64, joined: bool) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
+    let kind = if joined {
+        "member_join"
+    } else {
+        "member_leave"
+    };
+    record(&mut tx, guild, kind, "discord", 1, None).await?;
+    sqlx::query("UPDATE stat_members SET n = greatest(n + $2, 0) WHERE guild_id = $1")
+        .bind(guild)
+        .bind(if joined { 1_i64 } else { -1 })
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await
+}
+
 /// Deletes detail rows older than [`EVENT_DAYS`], in batches. The counts stay as they are.
 pub async fn prune(pool: &PgPool) -> sqlx::Result<()> {
     while sqlx::query(
@@ -59,7 +90,7 @@ pub async fn prune(pool: &PgPool) -> sqlx::Result<()> {
 }
 
 /// Hourly: adds every finished UTC day not yet added from `stat_daily` into `stat_daily_all`, and
-/// sets today's `servers_total`, `servers_ever` and `servers_active_30d`. A day is finished one hour after it ends, so an event written in
+/// sets today's `servers_total`, `servers_ever`, `servers_active_30d` and each server's `members_total`. A day is finished one hour after it ends, so an event written in
 /// a transaction that started before midnight is in it. Each day is added once (`stat_folded`).
 pub async fn fold(pool: &PgPool) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
@@ -87,6 +118,15 @@ pub async fn fold(pool: &PgPool) -> sqlx::Result<()> {
          SELECT (now() AT TIME ZONE 'UTC')::date, 'servers_total', 'bot', count(*), count(*)
          FROM guild_owners o WHERE NOT EXISTS (SELECT 1 FROM guild_left l WHERE l.guild_id = o.guild_id)
          ON CONFLICT (day, kind, feature) DO UPDATE SET n = EXCLUDED.n, servers = EXCLUDED.servers",
+    )
+    .execute(&mut *tx)
+    .await?;
+    // Members now, per server: today's `members_total` (set, not added). The fold adds each
+    // finished day's last value into the owner totals; today the pages read `stat_daily`.
+    sqlx::query(
+        "INSERT INTO stat_daily (guild_id, day, kind, feature, n)
+         SELECT guild_id, (now() AT TIME ZONE 'UTC')::date, 'members_total', 'discord', n FROM stat_members
+         ON CONFLICT (guild_id, day, kind, feature) DO UPDATE SET n = EXCLUDED.n",
     )
     .execute(&mut *tx)
     .await?;
