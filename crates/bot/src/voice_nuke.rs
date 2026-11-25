@@ -1,6 +1,6 @@
 //! Mass voice disconnect and move (audit types 27 and 26). Discord merges these entries by one
 //! actor into one entry with a growing `options.count`, and the growth fires no gateway event
-//! (PITFALLS §1). So the first gateway entry watches the guild, and while it is watched every
+//! (pitfalls/discord-api.md). So the first gateway entry watches the guild, and while it is watched every
 //! voice update asks for a debounced audit-log fetch that counts how much each entry grew.
 use anyhow::Result;
 use brim_antinuke::Action;

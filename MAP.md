@@ -38,7 +38,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 
 ## Emojis and icons
 - Source images: `assets/icons/<name>.svg` (128x128, one name = one emoji). Mascot: `assets/mascot/brim.svg`, `assets/mascot/poses/*.webp`; logo `assets/logo/`; banners `assets/banner/`; Unicode list `assets/emoji/emoji.json`.
-- Names to ids and the Unicode fallback: `crates/logging/src/emoji.rs` (`load`, `id_of`, `for_label`). A message Brim posts never has a typed Unicode emoji: use a constant from this file (see PITFALLS.md, "Stock emoji in bot messages"). Lint rules and upload: `tools/emojis.mjs` (`check [names] [--sheet out.png]`, `upload [--replace]`; needs `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`; the server command is in DEPLOY.md, "Emojis").
+- Names to ids and the Unicode fallback: `crates/logging/src/emoji.rs` (`load`, `id_of`, `for_label`). A message Brim posts never has a typed Unicode emoji: use a constant from this file (see pitfalls/messages-emoji-builder.md, "Stock emoji in bot messages"). Lint rules and upload: `tools/emojis.mjs` (`check [names] [--sheet out.png]`, `upload [--replace]`; needs `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`; the server command is in DEPLOY.md, "Emojis").
 - In the dashboard: `crates/dashboard/ui/src/icons.rs` (`icon`), `Pose` and the `Brim` pose enum in `common.rs`.
 
 ## Design
@@ -72,7 +72,7 @@ Where things are. Open the path, do not search. Paths are from the repo root.
 - `crates/mcp/`: reads in `tools.rs`, proposed changes in `writes.rs`, login in `oauth.rs`. Tokens page: `crates/dashboard/ui/src/mcp.rs`, `crates/dashboard/src/mcp.rs`. Setup: `DEPLOY.md` section 6.
 
 ## Notes on past bugs and rules
-- `PITFALLS.md` (bot, core, dashboard server) and `crates/dashboard/ui/PITFALLS.md` (web app): read the one for the area before a change. `DEPLOY.md`: server setup and updates. `README.md`: features and how to run. `PRIVACY.md`, `TERMS.md`: public texts.
+- `PITFALLS.md` (index) with the area files in `pitfalls/` (bot, core, dashboard server), and `crates/dashboard/ui/PITFALLS.md` (web app): read the index, then every area file your change touches, before a change. `DEPLOY.md`: server setup and updates. `README.md`: features and how to run. `PRIVACY.md`, `TERMS.md`: public texts.
 
 ## How to keep this file true
 - Whoever moves, renames, adds or removes a file, page, workflow, tool or migration rule named here updates its line in the same change.
