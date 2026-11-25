@@ -984,7 +984,7 @@ pub fn schema() -> Vec<Value> {
         ),
         ti(
             dv(fg("Response", "load_backup", "bool"), true),
-            "Load the latest backup after Panic mode",
+            "Load the latest backup when Panic mode starts",
         ),
         fg("Response", "warned_roles", "roles"),
         fg("Response", "whitelisted_categories", "categories"),
@@ -1701,7 +1701,7 @@ fn bool_help(sec: &str, path: &str, card: &str) -> Option<String> {
         ("catch", "keep_top") => "Moves the channel back when someone drags it somewhere else.",
         ("panic", "heat_algorithm") => "Panic Mode also starts on heat: Auto Mod heat and Anti Nuke heat per action.",
         ("panic", "lock_mod_commands") => "During Panic Mode, only the Owner, Extra Owners and Trusted Admins can use moderation commands.",
-        ("panic", "load_backup") => "When Panic mode starts, Brim puts the server back from the latest backup. It needs Backups and Restore after a nuke on. Off: Panic mode loads no backup. Anti Nuke still puts back what a nuker deleted.",
+        ("panic", "load_backup") => "Right after Brim locks the server, it puts the server back from the latest backup. It needs Backups and Restore after a nuke on. Off: Panic mode loads no backup. Anti Nuke still puts back what a nuker deleted.",
         ("panic", "unlock_when_ending") => "When Panic Mode ends, Brim unlocks the server again. Off: staff unlock it.",
         ("panic", "lock_on_trigger") => "Locks the server while the attack is contained.",
         ("backups", "enabled") => "Off: no backups are made, by hand or on a schedule.",
