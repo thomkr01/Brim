@@ -7,10 +7,10 @@ use serde_json::Value;
 /// (page, card title, button) for the task cards; a card is hidden when the viewer has no access to its page.
 const CARDS: &[(&str, &str, &str)] = &[
     ("cases", "Cases", "View cases"),
-    ("report_list", "Reports", "Open reports"),
     ("embeds", "Message Builder", "Build a message"),
-    ("permits", "Permits", "Open permits"),
     ("backups", "Backups", "Open backups"),
+    ("report_list", "Reports", "Open reports"),
+    ("permits", "Permits", "Open permits"),
     ("logging", "Logging", "Set up logging"),
 ];
 
