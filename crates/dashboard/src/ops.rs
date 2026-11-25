@@ -1359,6 +1359,7 @@ async fn save_fix(
 }
 
 /// The fixes that do what Auto Setup does, or change the config; `None` for any other setting.
+#[allow(clippy::too_many_arguments)]
 async fn setup_fix(
     st: &AppState,
     s: &Sess,

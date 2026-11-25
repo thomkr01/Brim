@@ -3,7 +3,7 @@ use leptos::{prelude::*, task::spawn_local};
 use serde_json::{json, Value};
 
 /// A number segment indexes an array (`custom.0.roles`).
-fn get_path(v: &Value, p: &str) -> Value {
+pub(crate) fn get_path(v: &Value, p: &str) -> Value {
     p.split('.')
         .fold(v, |c, k| match (c, k.parse::<usize>()) {
             (Value::Array(a), Ok(i)) => a.get(i).unwrap_or(&Value::Null),
@@ -21,7 +21,7 @@ fn saved_another_way(c: &Value, p: &str, fields: &[Value]) -> bool {
 }
 
 /// Writes `x` at the dotted path, creating (or replacing non-object) intermediate objects.
-fn set_path(v: &mut Value, p: &str, x: Value) {
+pub(crate) fn set_path(v: &mut Value, p: &str, x: Value) {
     let mut c = v;
     for k in p.split('.') {
         if let (Some(a), Ok(i)) = (c.as_array().map(Vec::len), k.parse::<usize>()) {
