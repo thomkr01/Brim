@@ -154,7 +154,8 @@ fn fit() {
         for (s, g, f) in &all {
             let _ = s.style().set_property("--k", &(k * f).to_string());
             let _ = s.style().set_property("--dx", &format!("{}px", (w - bw * k) / 2.0 + (bw - g.0 * f) / 2.0 * k));
-            let _ = s.style().set_property("--dy", &format!("{}px", (bh - g.1 * f) / 2.0 * k));
+            // A phone's box follows the open scene, so a scene is placed in its own box height: the one fading out does not jump.
+            let _ = s.style().set_property("--dy", &format!("{}px", ((if phone { own(g, f) } else { bh }) - g.1 * f) / 2.0 * k));
         }
         let _ = b.style().set_property("--k", &k.to_string());
         let _ = b.style().set_property("--sh", &format!("{}px", bh * k));
