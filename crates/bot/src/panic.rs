@@ -504,7 +504,9 @@ pub async fn start(app: &App, gid: Id<GuildMarker>, cfg: &PanicCfg, by: Option<u
                 // The locks are on: a failed config read must not skip the end and the log.
                 let backup = match app.cfg(gid.get()).await {
                     Err(e) => Backup::Failed(e.to_string()),
-                    Ok(c) if !(c.backups.enabled && c.backups.restore) => Backup::Disabled,
+                    Ok(c) if !(c.backups.enabled && c.backups.restore && cfg.load_backup) => {
+                        Backup::Disabled
+                    }
                     Ok(_) if !may_restore(app, gid, by).await => Backup::NotAllowed(by),
                     Ok(_) => match backup::restore_latest(app, gid).await {
                         Ok(Some(sum)) => Backup::Loaded(sum),

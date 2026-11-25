@@ -32,6 +32,10 @@ pub fn routes() -> Router<AppState> {
             post(verify_channel),
         )
         .route(
+            "/api/guilds/{guild}/wizard/discord-settings",
+            post(discord_settings),
+        )
+        .route(
             "/api/guilds/{guild}/verification/captcha-preview",
             post(captcha_preview),
         )
@@ -1058,6 +1062,54 @@ async fn wizard_done(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>
     let text = format!(
         "{} (<@{}>) finished the setup wizard",
         s.username, s.user_id
+    );
+    api::log_change(&st, guild, s.user_id, &config, None, text).await;
+    Ok(Json(json!({"ok": true})))
+}
+
+/// The wizard's Discord settings card: the three server settings the Overview rows check, set
+/// to the same safer values (`setting_fix`), and only where Discord has a weaker one now. A
+/// stricter value the owner chose stays.
+async fn discord_settings(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Json(_): Json<Setup>,
+) -> Res {
+    api::require(&st, &s, guild, Level::Admin, true).await?;
+    let (_, config) = store::current(&st.db, guild).await?;
+    let now = st
+        .discord
+        .call(Method::GET, &format!("/guilds/{guild}"), None)
+        .await?;
+    let n = |k: &str| now[k].as_u64().unwrap_or(0);
+    let mut body = serde_json::Map::new();
+    for (setting, weaker) in [
+        ("verification_level", n("verification_level") < 2),
+        ("content_filter", n("explicit_content_filter") < 2),
+        ("notifications", n("default_message_notifications") == 0),
+    ] {
+        if let (true, Some((key, value))) = (weaker, brim_antinuke::security::setting_fix(setting))
+        {
+            body.insert(key.into(), json!(value));
+        }
+    }
+    if body.is_empty() {
+        return Ok(Json(json!({"ok": true})));
+    }
+    let keys: Vec<String> = body.keys().cloned().collect();
+    st.discord
+        .call(
+            Method::PATCH,
+            &format!("/guilds/{guild}"),
+            Some(Value::Object(body)),
+        )
+        .await?;
+    let text = format!(
+        "{} (<@{}>) set Discord's {} from the setup wizard",
+        s.username,
+        s.user_id,
+        keys.join(", ")
     );
     api::log_change(&st, guild, s.user_id, &config, None, text).await;
     Ok(Json(json!({"ok": true})))
