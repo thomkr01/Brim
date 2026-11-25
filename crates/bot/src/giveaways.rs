@@ -393,6 +393,11 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 false => winners_text(&g.winner_ids),
             };
             let note = ended_note(g);
+            // The word only shows when somebody won.
+            let congrats = match g.winner_ids.is_empty() {
+                true => "",
+                false => botmsg::CONGRATS,
+            };
             let count = g.winners.to_string();
             let banner = banner(&choice, true);
             let vars = [
@@ -406,6 +411,7 @@ async fn message(app: &App, g: &Giveaway, entries: i64) -> (String, Vec<Embed>, 
                 ("ga_winner_count", &count),
                 ("winners", &winners),
                 ("note", &note),
+                ("congrats", congrats),
                 ("id", &id),
             ];
             let (t, e) = rendered(app, gid, "giveaway.ended", &vars).await;

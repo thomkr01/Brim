@@ -4536,19 +4536,21 @@ const SECURITY: &str = "Security";
 /// Feed posts (feeds plan 4b): by default as if the source posted it, the plain link so Discord
 /// shows the site's own preview, no Brim branding. `{link}` is required: it is what a feed
 /// post is for. Each feed may also keep its own edited version (`feeds.message`).
+/// The word CONGRATS, one emoji per letter. Without the uploaded emojis the tags drop out.
+macro_rules! congrats {
+    () => {
+        "{e:congrats_1}{e:congrats_2}{e:congrats_3}{e:congrats_4}{e:congrats_5}{e:congrats_6}{e:congrats_7}{e:congrats_8}"
+    };
+}
+/// The value of `{congrats}`, for a giveaway that has winners.
+pub const CONGRATS: &str = congrats!();
+
 /// Giveaways (Messages module): the posted message in its three states, the winners post, the
 /// winner DM, the private answers to the Enter button and the command replies. The default
 /// message follows the usual giveaway layout: the prize as the title, then the end time, the host,
 /// the entries and the winner count.
 fn giveaways(out: &mut Vec<Def>) {
     const G: &str = "Giveaways";
-    // The word CONGRATS, one emoji per letter, as the first line of what an ended giveaway says
-    // to its winners. Without the uploaded emojis the tags drop out and the line is empty.
-    macro_rules! congrats {
-        () => {
-            "{e:congrats_1}{e:congrats_2}{e:congrats_3}{e:congrats_4}{e:congrats_5}{e:congrats_6}{e:congrats_7}{e:congrats_8}"
-        };
-    }
     let msg = |key: &str, name: &str, vars: &[&'static str], req: &[&'static str], m: Value| {
         let mut d = def(key, name, G, false, vars, m);
         d.required = req.to_vec();
@@ -4632,6 +4634,7 @@ fn giveaways(out: &mut Vec<Def>) {
             "ga_winner_count",
             "winners",
             "note",
+            "congrats",
             "id",
         ],
         &["prize", "winners"],
@@ -4642,7 +4645,7 @@ fn giveaways(out: &mut Vec<Def>) {
                     "{prize}",
                     GREY,
                     &[
-                        congrats!(),
+                        "{congrats}",
                         "{e:user_id} **Hosted by:** {host}",
                         "{e:star} **Sponsored by:** {sponsor}",
                         "{note}",
@@ -6439,6 +6442,11 @@ const VAR_INFO: &[(&str, &str, &str)] = &[
         "/giveaway-a.png",
     ),
     ("entries", "Number of entries", "42"),
+    (
+        "congrats",
+        "The CONGRATS word in emojis, empty when nobody won",
+        congrats!(),
+    ),
     ("ga_winner_count", "How many winners the giveaway has", "2"),
     (
         "winners",
@@ -7822,14 +7830,18 @@ mod tests {
                     .to_string(),
             }
         };
-        for k in [
-            "giveaway.ended",
-            "giveaway.winners",
-            "giveaway.reroll",
-            "giveaway.winner_dm",
-        ] {
+        for k in ["giveaway.winners", "giveaway.reroll", "giveaway.winner_dm"] {
             assert_eq!(first(k), word, "{k}");
         }
+        assert_eq!(first("giveaway.ended"), "{congrats}");
+        // The ended card shows the word only with winners; without them the line is dropped.
+        let desc = |c: &str| {
+            let vars = [("prize", "P"), ("winners", "W"), ("congrats", c)];
+            let m = render("giveaway.ended", None, &vars);
+            m["embeds"][0]["description"].as_str().unwrap().to_string()
+        };
+        assert!(desc(CONGRATS).starts_with(&word));
+        assert!(!desc("").contains("congrats_"));
         for k in [
             "giveaway.running",
             "giveaway.cancelled",

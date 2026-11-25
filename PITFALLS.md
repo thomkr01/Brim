@@ -1744,3 +1744,7 @@ The Update page showed "Newest: Could not reach GitHub right now." and an empty 
 ## Emoji tags with underscores showed as italics in the preview (2026-11-25)
 
 The CONGRATS word is eight tags in a row (`{e:congrats_1}{e:congrats_2}`). The dashboard preview read the underscores between two tags as an emphasis pair, so the word showed as raw text with slanted parts. Root cause: `md::inline` set emphasis before `icons::fill_tags` drew the tags. *Avoid:* `inline` keeps a `{e:name}` tag whole, like a code span. A name a default uses must also be in the `icons!` list in `icons.rs`, or the preview shows the tag as text. A default that opens a text with an emoji word has an empty first line when the emojis are not uploaded (`emoji::fill` drops the tags); Discord trims it.
+
+## A fixed line in a default shows in every state of that message (2026-11-25)
+
+The CONGRATS word was a fixed first line of the ended giveaway card, so a giveaway that nobody won said CONGRATS above "Result: Nobody". *Avoid:* a line that must not show in some state is a variable alone on its line (`{ga_congrats}`, code name `congrats`, passed by `giveaways.rs`), empty in that state; `fill_text` drops a line whose variables are all empty. Search for the same pattern when a default gets a celebratory or state-bound line: a state without that fact needs its own default or an empty variable.
