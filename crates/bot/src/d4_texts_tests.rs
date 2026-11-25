@@ -690,6 +690,30 @@ fn every_permit_and_list_log_reads_as_before() {
             ("listed", "<@6>: Mods"),
         ],
     );
+    let vars = [
+        (
+            "alert",
+            "**Auto Mod exemptions moved from roles to members**",
+        ),
+        ("by", "<@6>"),
+        ("to_permit", "2 added to Automod Immunity"),
+        ("to_lists", "1 added to the Members lists"),
+        ("already", "0 already exempt"),
+        ("not_moved", "nobody"),
+    ];
+    sec(
+        Log::new("Permits", ORANGE)
+            .text(vars[0].1)
+            .text("A role no longer exempts anyone from Auto Mod or the catch channel. Its members were listed by user ID. The role lists were emptied; History shows them.")
+            .line("By", "<@6>")
+            .line("Permit", vars[2].1)
+            .line("Members lists", vars[3].1)
+            .line("Already exempt", vars[4].1)
+            .line("Not moved", "nobody"),
+        "Permits",
+        &an("exempt_roles_moved"),
+        &vars,
+    );
     let gone = "<@6> left the server: removed Mods\n<@7> left the server: removed Extra Owner";
     sec(
         Log::new("Permits", ORANGE).text(gone),

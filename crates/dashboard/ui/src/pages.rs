@@ -633,7 +633,8 @@ pub fn Score(guild: String) -> impl IntoView {
             .filter(|x| x["severity"] != "ok" && x["fix"].is_object())
             .filter(|x| {
                 // Remove dangerous roles takes roles from members: its own confirm lists them.
-                !["everyone_to_main", "clamp_stored", "enforce_permits"]
+                // Move to members gives Automod Immunity: who gets it is the owner's choice.
+                !["everyone_to_main", "clamp_stored", "enforce_permits", "exempt_roles"]
                     .contains(&x["fix"]["setting"].as_str().unwrap_or_default())
             })
             .filter(|x| {
@@ -784,7 +785,7 @@ pub fn Score(guild: String) -> impl IntoView {
                             r
                         }
                     };
-                    run_resumable(make, msg, need, move |v| { match refused(&v) { None => msg.done(format!("Done. {title} has been fixed.")), Some(why) => msg.err(format!("{title} was only partly fixed: {why}.")) } load() })
+                    run_resumable(make, msg, need, move |v| { match refused(&v) { None if v["queued"] == true => msg.done("Brim is moving the members now. The result goes to the security log.".to_string()), None => msg.done(format!("Done. {title} has been fixed.")), Some(why) => msg.err(format!("{title} was only partly fixed: {why}.")) } load() })
                 };
                 // Its confirm lists who loses which roles, read live when clicked.
                 if let Some((g, me)) = enforce {

@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use twilight_http::request::AuditLogReason;
 use twilight_model::{
     id::{
-        marker::{ChannelMarker, GuildMarker, RoleMarker},
+        marker::{ChannelMarker, GuildMarker},
         Id,
     },
     voice::VoiceState,
@@ -140,16 +140,15 @@ async fn who(
     v: &VoiceState,
 ) -> Result<(bool, String)> {
     let user = v.user_id;
-    let (bot, name, roles): (bool, String, Vec<Id<RoleMarker>>) = match &v.member {
-        Some(m) => (m.user.bot, m.user.name.clone(), m.roles.clone()),
+    let (bot, name): (bool, String) = match &v.member {
+        Some(m) => (m.user.bot, m.user.name.clone()),
         None => match crate::http_err::member(&app.http, gid, user).await? {
-            Some(m) => (m.user.bot, m.user.name, m.roles),
+            Some(m) => (m.user.bot, m.user.name),
             None => return Ok((true, String::new())),
         },
     };
     let w = &cfg.whitelist.spam;
-    if bot || user == app.me || w.users.contains(&user) || roles.iter().any(|r| w.roles.contains(r))
-    {
+    if bot || user == app.me || w.users.contains(&user) {
         return Ok((true, name));
     }
     let owner = app.guild_info(gid).await?.owner;

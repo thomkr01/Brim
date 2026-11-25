@@ -12,7 +12,7 @@ use twilight_model::{
     gateway::payload::incoming::ReactionAdd,
     guild::audit_log::{AuditLogChange, AuditLogEntry, AuditLogEventType},
     id::{
-        marker::{ChannelMarker, GuildMarker, RoleMarker, UserMarker},
+        marker::{ChannelMarker, GuildMarker, UserMarker},
         Id,
     },
 };
@@ -54,14 +54,10 @@ async fn spam_exempt(
     cfg: &GuildCfg,
     gid: Id<GuildMarker>,
     user: Id<UserMarker>,
-    roles: &[Id<RoleMarker>],
     ch: Id<ChannelMarker>,
 ) -> Result<bool> {
     let (parent, category) = app.channel_scope(gid, ch).await.unwrap_or((ch, None));
-    Ok(cfg
-        .whitelist
-        .spam
-        .covers(user, roles, parent, category, None)
+    Ok(cfg.whitelist.spam.covers(user, parent, category, None)
         || cfg.whitelist.partner_channels.contains(&parent)
         || app.whitelisted(gid, user, "automod").await?)
 }
@@ -154,9 +150,7 @@ pub async fn on_reaction(app: &App, r: &ReactionAdd) -> Result<()> {
         }
         reaction_burst(map.entry((gid.get(), user.get())).or_default(), now_ms())
     };
-    if !bad_name
-        && (!burst || spam_exempt(app, &cfg, gid, user, &member.roles, r.channel_id).await?)
-    {
+    if !bad_name && (!burst || spam_exempt(app, &cfg, gid, user, r.channel_id).await?) {
         return Ok(());
     }
     let emoji = match &r.emoji {
@@ -212,11 +206,7 @@ pub async fn on_thread(app: &App, t: &Channel) -> Result<()> {
         )
         .await;
     }
-    let roles = crate::http_err::member(&app.http, gid, owner)
-        .await?
-        .map(|m| m.roles)
-        .unwrap_or_default();
-    if !am.anti_spam || spam_exempt(app, &cfg, gid, owner, &roles, t.id).await? {
+    if !am.anti_spam || spam_exempt(app, &cfg, gid, owner, t.id).await? {
         return Ok(());
     }
     heat_up(app, &cfg, gid, owner, w.base, "Thread spam").await

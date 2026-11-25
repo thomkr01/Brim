@@ -224,7 +224,7 @@ const CMDS: &[Cmd] = &[
         "*",
         "whitelist TARGET",
         "Interactive whitelist",
-        "whitelist @Helpers",
+        "whitelist @member",
     ),
     (
         "tshoot",
@@ -703,7 +703,7 @@ const ARGS: &[(&str, &str)] = &[
     ("WINNERS", "How many winners a giveaway has: 1 to 100"),
     ("PRIZE", "What the winners get: free text, up to 200 characters"),
     ("CHANGE", "giveaway time: + or - then a duration (+1h, -30m): moves the end time"),
-    ("TARGET", "What to whitelist: @member, @role, #channel, category id or webhook id"),
+    ("TARGET", "What to whitelist: @member, #channel, category id or webhook id"),
     ("ROLE", "A role: @mention, id or name"),
     ("ROLES", "One or more roles: @mentions or ids; empty clears the list"),
     ("@role", "A role mention, to show role info"),

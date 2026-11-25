@@ -23,6 +23,7 @@ mod datareq;
 mod deadroles;
 mod dehoist;
 mod events;
+mod exempt_roles;
 mod feeds;
 mod general;
 mod giveaways;
