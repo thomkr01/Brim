@@ -293,6 +293,9 @@ const LEVELS: [(&str, &str, &str); 6] = [
     ("roles", "Some roles", "Only the roles you pick, plus staff"),
 ];
 
+/// The Staff level's text while the Staff role is on.
+const STAFF_WITH_ROLE: &str = "Only staff see it: the Admins and Moderators permits and the Staff role";
+
 /// The level a channel's access is at.
 fn level_key(a: &Value) -> &'static str {
     match (a["limited"] == true, a["only"].as_str()) {
@@ -1010,6 +1013,7 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         let show_roles = key == "roles" || roles_mode.get().as_deref() == Some(id.as_str());
         let tiers = data.with(|v| v["tiers"].clone());
         let unverified = n["tag"] == "Unverified";
+        let staff_role = data.with(|v| v["staff_role"] == true);
         let levels = (!unverified).then(|| {
             let opts: Vec<_> = LEVELS
                 .iter()
@@ -1019,6 +1023,8 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
                     _ => true,
                 })
                 .map(|&(k, name, tip)| {
+                    // With the Staff role on it opens Staff channels too, next to the permit roles.
+                    let tip = if k == "staff" && staff_role { STAFF_WITH_ROLE } else { tip };
                     let on = if show_roles { k == "roles" } else { k == key };
                     let roles = picked.clone();
                     // Admins only and Owner only hide it from part of staff: owner or extra owner only.
@@ -1041,10 +1047,11 @@ pub fn ChannelSetup(guild: String) -> impl IntoView {
         });
         let grid_roles = data.with(|v| strs(&v["grid_roles"]));
         let grid = grid_view(&n, kind, sid, (adv_open, grid_added), set_grid, dc, grid_roles);
-        let staff_tip = if can {
-            "Staff are the roles of the Admins and Moderators permits. Turn this off to hide it from them too."
-        } else {
-            "Staff are the roles of the Admins and Moderators permits. Only the owner or an extra owner can hide a channel from staff."
+        let staff_tip = match (can, staff_role) {
+            (true, false) => "Staff are the roles of the Admins and Moderators permits. Turn this off to hide it from them too.",
+            (true, true) => "Staff are the roles of the Admins and Moderators permits and the Staff role. Turn this off to hide it from them too.",
+            (false, false) => "Staff are the roles of the Admins and Moderators permits. Only the owner or an extra owner can hide a channel from staff.",
+            (false, true) => "Staff are the roles of the Admins and Moderators permits and the Staff role. Only the owner or an extra owner can hide a channel from staff.",
         };
         view! { <div class="card cs-panel">
             {head}

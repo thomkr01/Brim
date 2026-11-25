@@ -175,6 +175,10 @@ async fn dispatch(app: &App, job: &Job) -> Result<()> {
         "owner_check" => crate::owner::owner_check_job(app, gid).await?,
         "rescue_expired" => crate::owner::rescue_expired_job(app, gid).await?,
         "permit_sync" => crate::permit_sync::sync(app, gid).await?,
+        "staff_role_off" => {
+            let role = need(&job.payload, "role")?;
+            crate::permit_sync::staff_role_off(app, gid, role).await?
+        }
         "keyword_rule_sync" => crate::automod::rule_sync_job(app, gid.get()).await,
         "delete_message" => crate::reply::run_delete(app, &job.payload).await?,
         "confirm_expire" => crate::confirm::run_expire(app, gid, &job.payload).await?,

@@ -58,7 +58,7 @@ pub async fn enqueue_once<'e>(
 /// Jobs that fail this many times are dropped by the scheduler.
 pub const MAX_ATTEMPTS: i32 = 5;
 /// Kinds that can run for minutes; a separate worker takes them so they never delay unbans or unlocks.
-pub const HEAVY: [&str; 7] = [
+pub const HEAVY: [&str; 8] = [
     "backup_load",
     // A draw checks each picked winner with Discord; 100 winners can take a minute.
     "giveaway_end",
@@ -67,6 +67,8 @@ pub const HEAVY: [&str; 7] = [
     "requarantine_missed",
     "verify_catch_up",
     "permit_sync",
+    // Pages every member to take the Staff role after it is turned off.
+    "staff_role_off",
     "verify_sweep",
 ];
 /// Protection that must start at once: its own worker, so no other server's heavy job delays it

@@ -247,6 +247,55 @@ pub(crate) async fn staff_access(
     last
 }
 
+/// Takes `role`'s overwrite off every channel that has one: the Staff role turned off keeps no
+/// channel access. Where it let staff in, each of `keep` (the live staff permit roles) gets View
+/// there first, so no step closes a channel to staff. Every write is tried; Err names how many
+/// failed, so the caller keeps the feature on and the owner can try again.
+pub(crate) async fn strip_role(
+    st: &AppState,
+    guild: i64,
+    role: u64,
+    keep: &[u64],
+) -> Result<usize, ApiError> {
+    let mut failed = 0;
+    let mut done = 0;
+    for c in channels(st, guild).await? {
+        let Some(o) = c.overwrites.iter().find(|o| o.is_role && o.target == role) else {
+            continue;
+        };
+        if o.allow & VIEW != 0 {
+            for o in keep.iter().filter_map(|&r| with_allow(&c, r, VIEW)) {
+                if let Err(e) = put(st, c.id, &o).await {
+                    tracing::warn!(?e, guild, channel = c.id, "letting a staff role in failed");
+                    failed += 1;
+                }
+            }
+            if failed > 0 {
+                continue;
+            }
+        }
+        let at = format!("/channels/{}/permissions/{role}", c.id);
+        match st.discord.call(Method::DELETE, &at, None).await {
+            Ok(_) => done += 1,
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    guild,
+                    channel = c.id,
+                    "taking the Staff role off a channel failed"
+                );
+                failed += 1;
+            }
+        }
+    }
+    if failed > 0 {
+        return Err(ApiError::BadRequest(format!(
+            "Brim could not take the Staff role off {failed} channels, so it stays on. Check that Brim may manage those channels, then try again."
+        )));
+    }
+    Ok(done)
+}
+
 /// The id of the category named `name` in Discord's channel list.
 fn category_id(list: &Value, name: &str) -> Option<String> {
     list.as_array()

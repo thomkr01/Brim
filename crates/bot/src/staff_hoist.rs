@@ -14,7 +14,7 @@ use twilight_model::{
 /// owner's choice. What it needs is read first, so a failed read leaves it for the next start.
 pub(crate) async fn once(app: &App, gid: Id<GuildMarker>, roles: &[Role]) -> Result<()> {
     let g = gid.get() as i64;
-    let staff = brim_core::permits::all_staff_roles(&app.pool, g).await?;
+    let staff = brim_core::permits::grouped_staff_roles(&app.pool, g).await?;
     // A server without staff roles yet is left for a later start: Auto Setup hoists new ones.
     if staff.is_empty() {
         return Ok(());

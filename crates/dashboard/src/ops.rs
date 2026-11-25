@@ -255,6 +255,7 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
         &l.setup,
     );
     rows.extend(crate::channels::overview_check(&st, guild, &config, &l).await?);
+    rows.extend(crate::staff_role::overview_check(&st, guild, &l.image.roles).await?);
     rows.extend(crate::msghooks::overview_check(&st, guild, &l.image.channels).await?);
     rows.extend(crate::feeds::overview_check(&st, guild, &l.image.channels).await?);
     // Its rows name paused and kept permit holders, which Viewers do not see (security review).
@@ -273,7 +274,7 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
     ));
     rows.extend(brim_antinuke::security::staff_hoist_check(
         &l.image.roles,
-        &staff,
+        &brim_core::permits::grouped_staff_roles(&st.db, guild).await?,
         l.bot_pos,
     ));
     rows.extend(brim_antinuke::security::catch_gone_check(
@@ -939,6 +940,9 @@ async fn fix(
     if let Some(r) = setup_fix(&st, &s, guild, level, cur, &c, b.setting.as_deref()).await? {
         return Ok(r);
     }
+    if b.setting.as_deref() == Some(crate::staff_role::FIX) {
+        return crate::staff_role::make_again(&st, &s, guild, level).await;
+    }
     if b.setting.as_deref() == Some(QUARANTINE_CHANNELS) {
         let role = c["antinuke"]["quarantine_role"]
             .as_str()
@@ -1021,7 +1025,7 @@ async fn fix(
     if b.setting.as_deref() == Some(brim_antinuke::security::STAFF_HOIST) {
         // Only the member-list grouping changes, no permission: no backup needed.
         let l = live(&st, guild, &c).await?;
-        let staff = brim_core::permits::all_staff_roles(&st.db, guild).await?;
+        let staff = brim_core::permits::grouped_staff_roles(&st.db, guild).await?;
         let mut failed = 0;
         for r in brim_antinuke::security::staff_to_hoist(&l.image.roles, &staff, l.bot_pos) {
             let at = format!("/guilds/{guild}/roles/{}", r.id);
@@ -1290,7 +1294,7 @@ async fn fix(
 
 /// A backup of the live roles and channels, so Backups can put a fix's changes back. None while
 /// the server is locked or in panic mode: that state must not become the newest backup.
-async fn backup(st: &AppState, guild: i64, l: &Live) -> Result<Option<i64>, ApiError> {
+pub(crate) async fn backup(st: &AppState, guild: i64, l: &Live) -> Result<Option<i64>, ApiError> {
     if crate::recovery::no_backup_now(st, guild).await? {
         return Ok(None);
     }

@@ -33,6 +33,7 @@ mod roles;
 mod schema;
 mod sections;
 mod secure;
+mod staff_role;
 mod store;
 mod tickets;
 mod update;
@@ -278,6 +279,7 @@ pub fn router(st: AppState, dist: &str) -> Router {
         .merge(lockdown::routes())
         .merge(recovery::routes())
         .merge(channels::routes())
+        .merge(staff_role::routes())
         .merge(layout::routes())
         .merge(appeals::routes())
         .merge(records::routes())

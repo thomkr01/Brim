@@ -93,7 +93,8 @@ pub async fn read_permits(c: &mut PgConnection, guild: i64) -> Result<Value, Api
 /// `permits.levels` of a config version). Only Auto Setup and a rollback write them: a permits
 /// save or an import never does, since naming any role here makes Brim take it from everyone
 /// not on the level. A level left out loses its role; nothing happens when `levels` is no object
-/// (a version from before level roles). Queues a permit sync when something changed.
+/// (a version from before level roles). The Staff role (`permits::STAFF`) is never changed here.
+/// Queues a permit sync when something changed.
 pub async fn write_levels(
     c: &mut PgConnection,
     guild: i64,
@@ -103,7 +104,8 @@ pub async fn write_levels(
         return Ok(());
     };
     let before = permits::snapshot(c, guild).await?["levels"].clone();
-    sqlx::query("delete from level_roles where guild_id = $1")
+    // The Staff role is kept: only its own route turns it on or off, with its channel steps.
+    sqlx::query("delete from level_roles where guild_id = $1 and level <> 'staff'")
         .bind(guild)
         .execute(&mut *c)
         .await?;
@@ -136,7 +138,8 @@ fn held(p: &Value) -> Vec<Value> {
     let custom = p["custom"].as_array().into_iter().flatten();
     // The EO and TA lists too: they get the level roles.
     custom
-        .map(|c| json!([c["name"], c["roles"], c["members"]]))
+        // The rank too: it decides who gets the Staff role.
+        .map(|c| json!([c["name"], c["rank"], c["roles"], c["members"]]))
         .chain([p["eo"].clone(), p["ta"].clone()])
         .collect()
 }

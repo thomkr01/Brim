@@ -360,12 +360,18 @@ async fn auto_setup(
         .ok();
     let roles_stay = order_roles(&st, guild, &made, &config, display.as_deref()).await;
     let logs = log_channels(&st, guild, &mut config, essentials_and(b.logs)).await?;
-    let staff_ids: Vec<u64> = made
+    // Held to the end: turning the Staff role off must not run between the read and the overwrites.
+    let held = crate::channels::hold_shared(&st, guild).await?;
+    let mut staff_ids: Vec<u64> = made
         .0
         .iter()
         .flatten()
         .filter_map(|r| r.parse().ok())
         .collect();
+    // The Staff role, while on, opens the Staff channels too (next to the permit roles).
+    if let Some((r, _)) = brim_core::permits::staff_role(&st.db, guild).await? {
+        staff_ids.push(r as u64);
+    }
     let pick = |on: bool, keys: &[&str]| -> Vec<u64> {
         keys.iter()
             .filter(|_| on)
@@ -430,6 +436,7 @@ async fn auto_setup(
     };
     let moved = channel_access::send_moves(&st, guild, moves).await;
     let access = open_channels(&st, guild, &config, &staff_ids).await;
+    crate::channels::release_pushes(held).await;
     api::log_by(&st, &s, guild, &config, Some(version), "ran auto-setup").await;
     Ok(Json(
         json!({"version": version, "created": {"quarantine_role": role, "member_role": member, "staff": staff, "logs": logs, "chats": chats, "information": info, "categories": sorted}, "catch_stays": catch_stays, "quarantine_failed": quarantine_failed, "channel_access": access,

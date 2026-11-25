@@ -613,6 +613,9 @@ pub struct TicketsCfg {
     pub ping_here: bool,
     /// A new panel ticket pings the permit roles of Moderators and higher permits with Manage Tickets.
     pub ping_staff: bool,
+    /// With the Staff role on: ping only the permit roles with Manage Tickets (the ping without
+    /// the Staff role), not the Staff role.
+    pub ping_staff_tickets_only: bool,
     /// Sent to the member when a ticket opens / closes; `{member.username}` `{member.id}` `{member}`.
     /// A panel ticket whose panel has no greeting gets `greeting` too; empty sends none.
     pub greeting: String,
@@ -1035,6 +1038,7 @@ impl Default for TicketsCfg {
             ping_roles: vec![],
             ping_here: false,
             ping_staff: true,
+            ping_staff_tickets_only: false,
             greeting: DEFAULT_GREETING.into(),
             closing: String::new(),
             anonymous: false,

@@ -635,7 +635,7 @@ pub(crate) async fn permit_roles_ok(
             .await?;
     if let Some(r) = added.iter().find(|r| levels.contains(r)) {
         return Err(ApiError::BadRequest(format!(
-            "<@&{r}> cannot be a permit role: it is the Trusted Admin or Owner role, which Brim gives only to the people on that list."
+            "<@&{r}> cannot be a permit role: it is the Trusted Admin, Owner or Staff role, which Brim gives only to the people it belongs to."
         )));
     }
     let managed = st.discord.managed_roles(guild).await.map_err(|e| {
@@ -1057,7 +1057,22 @@ pub async fn rollback(
         if level < Level::Owner && p["ta"] != cur["ta"] {
             return Err(ApiError::Forbidden("only owners can roll back the TA list"));
         }
-        if level < Level::Owner && p["levels"].is_object() && p["levels"] != cur["levels"] {
+        // The Staff role is left out: a rollback never changes it (`store::write_levels`).
+        let roles = |v: &Value| {
+            let mut v = v.clone();
+            if let Some(o) = v.as_object_mut() {
+                o.remove(permits::STAFF);
+                // A version with only the Staff role is one with no level roles.
+                if o.is_empty() {
+                    return Value::Null;
+                }
+            }
+            v
+        };
+        if level < Level::Owner
+            && p["levels"].is_object()
+            && roles(&p["levels"]) != roles(&cur["levels"])
+        {
             return Err(ApiError::Forbidden(
                 "only owners can roll back the Trusted Admin and Owner roles",
             ));

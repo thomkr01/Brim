@@ -295,6 +295,8 @@ pub fn Wizard(guild: String) -> impl IntoView {
                             <button disabled=running on:click={let run = run.clone(); move |_| run(Some(picks.get()))}>"Run with selected"</button>
                         </div>
                     </Show>
+                    <h3>"Staff role (optional)"</h3>
+                    <crate::permits::StaffRole guild=g.clone() />
                     <Toast msg />
                 </div> }.into_any())
             }

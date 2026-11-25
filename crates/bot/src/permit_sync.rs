@@ -25,18 +25,19 @@ pub(crate) const REASON: &str = "Permit: Brim gives this role to the permit's me
 static RUNS: LazyLock<Mutex<HashMap<u64, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(Default::default);
 
+fn run_lock(gid: Id<GuildMarker>) -> Arc<tokio::sync::Mutex<()>> {
+    let mut all = RUNS.lock().unwrap();
+    all.retain(|_, l| Arc::strong_count(l) > 1);
+    all.entry(gid.get()).or_default().clone()
+}
+
 /// GuildCreate and job `permit_sync` (the dashboard queues it after a permits save). Pages every
 /// member first and changes nothing when the paging fails: a cut-short list would drop listed
 /// people as gone. Moves role holders to user ids once, forgets listed people who are gone, gives
 /// listed members their permit's roles and takes permit roles from everyone else. Nobody is punished.
 pub async fn sync(app: &App, gid: Id<GuildMarker>) -> Result<()> {
     // One run per guild: GuildCreate and a queued job can meet.
-    let lock = {
-        let mut all = RUNS.lock().unwrap();
-        all.retain(|_, l| Arc::strong_count(l) > 1);
-        all.entry(gid.get()).or_default().clone()
-    };
-    let _one = lock.lock().await;
+    let _one = run_lock(gid).lock_owned().await;
     let g = gid.get() as i64;
     let members = all_members(app, gid).await?;
     let info = app.guild_info(gid).await?;
@@ -409,6 +410,41 @@ fn ids(roles: &[Id<RoleMarker>]) -> Vec<i64> {
 }
 
 /// Every member, paged as in `sticky::sync`; an error anywhere fails the whole list.
+/// Job `staff_role_off`: the owner turned the Staff role off and it was a role of theirs, so it
+/// stays; Brim takes it from every member who holds it. Skipped when the role is a level or
+/// permit role again (turned on again meanwhile): then `sync` owns it.
+pub async fn staff_role_off(app: &App, gid: Id<GuildMarker>, role: u64) -> Result<()> {
+    let g = gid.get() as i64;
+    let Some(role) = Id::<RoleMarker>::new_checked(role) else {
+        return Ok(());
+    };
+    let _one = run_lock(gid).lock_owned().await;
+    if permits::permit_roles(&app.pool, g)
+        .await?
+        .contains(&(role.get() as i64))
+    {
+        return Ok(());
+    }
+    let info = app.guild_info(gid).await?;
+    if info.roles.get(&role).is_none_or(|p| *p >= info.bot_top) {
+        return Ok(());
+    }
+    for m in all_members(app, gid).await? {
+        if !m.roles.contains(&role) {
+            continue;
+        }
+        let take = app
+            .http
+            .remove_guild_member_role(gid, m.user.id, role)
+            .reason("Staff role: turned off in the dashboard")
+            .await;
+        if let Err(e) = take {
+            tracing::warn!(?e, user = m.user.id.get(), "taking the Staff role failed");
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn all_members(app: &App, gid: Id<GuildMarker>) -> Result<Vec<Member>> {
     let mut all = vec![];
     let mut after = None;

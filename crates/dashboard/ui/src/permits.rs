@@ -53,6 +53,7 @@ pub fn Permits(guild: String) -> impl IntoView {
         }
     });
     let access = expect_context::<Access>();
+    let staff_guild = guild.clone();
     let saving = RwSignal::new(false);
     let save = move |_| {
         if saving.get_untracked() {
@@ -208,6 +209,7 @@ pub fn Permits(guild: String) -> impl IntoView {
                 }).collect_view() }}
                 {move || cfg.with(|c| c["custom"].as_array().is_none_or(Vec::is_empty)).then(|| view! { <p class="muted" role="listitem">"No permits of your own yet. Make one for a staff group, such as Moderators, with Add new permit, then add people to it by their Discord user ID."</p> })}
             </div>
+            <StaffRole guild=staff_guild />
             <Fade when=Signal::derive(move || open.get().is_some())>{move || dlg.get().map(|i| dialog(i))}</Fade>
             <Fade when=Signal::derive(move || deleting.get().is_some())>{move || del.get().map(|n| { let r = NodeRef::new(); focus_on_open(r); view! { <div class="modal" node_ref=r role="dialog" aria-modal="true" aria-label="Delete permit" on:keydown=move |e| dialog_keys(&e, || deleting.set(None))><div class="card"><p>{format!("Delete the permit \"{}\"?", cfg.get_untracked()["custom"][n]["name"].as_str().unwrap_or(""))}</p>
                 <div class="row"><button class="ghost" on:click=move |_| deleting.set(None)>"Abort"</button><button class="danger" on:click=move |_| { open.set(None); delete(n); deleting.set(None) }>"Delete"</button></div></div></div> } })}
@@ -271,5 +273,127 @@ mod order_tests {
         assert_eq!(c["custom"][2]["rank"], 0);
         move_permit(&mut c, 0, 3);
         assert_eq!(c["custom"][0]["name"], "C", "out of range: no move");
+    }
+}
+
+/// The live text of the turn-off popup, from `GET /staff-role`.
+pub fn off_text(v: &Value) -> String {
+    let n = v["members"].as_i64().unwrap_or(0);
+    let who = if n == 1 { "1 member loses".to_string() } else { format!("{n} members lose") };
+    let role = if v["made"] == true { "Brim deletes the Staff role." } else { "The role stays, and Brim takes it from everyone." };
+    let mut t = format!("{who} the Staff role. {role} Staff channels and log channels stay open to the staff permit roles, and the Staff role loses its access there. New tickets ping the staff permit roles again.");
+    let warned: Vec<&str> = v["warned"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !warned.is_empty() {
+        t.push_str(&format!(" Brim takes the Staff role out of the alert pings of {}.", warned.join(" and ")));
+    }
+    t
+}
+
+/// The Staff role switch (owner decision 2026-11-25): one card, the same on the Permits page and in
+/// the setup wizard. Off by default. On: Brim makes a "Staff" role (or uses the one picked) and gives it to
+/// every staff member. Off asks first and says what changes. Only the Owner and Extra Owners can change it.
+#[component]
+pub fn StaffRole(guild: String) -> impl IntoView {
+    let state = RwSignal::new(None::<Value>);
+    let roles = RwSignal::new(Vec::<(String, String)>::new());
+    let pick = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    let (msg, need) = (Msg::default(), step_up());
+    let load = {
+        let g = guild.clone();
+        move || {
+            let g = g.clone();
+            spawn_local(async move {
+                match api("GET", &format!("/api/guilds/{g}/staff-role"), None).await {
+                    Ok(v) => _ = state.try_set(Some(v)),
+                    // The page may be gone after the await (ui PITFALLS rule 1).
+                    Err(e) if !msg.text_disposed() => msg.err(format!("The Staff role could not be loaded: {e}")),
+                    Err(_) => {}
+                }
+                if let Ok(d) = api("GET", &format!("/api/guilds/{g}/discord"), None).await {
+                    let list = d["roles"].as_array().into_iter().flatten()
+                        .filter(|r| r["id"].as_str() != Some(g.as_str()) && r["managed"] != true)
+                        .map(|r| (r["id"].as_str().unwrap_or("").to_string(), r["name"].as_str().unwrap_or("?").to_string()))
+                        .collect();
+                    _ = roles.try_set(list);
+                }
+            });
+        }
+    };
+    load();
+    let on = move || state.with(|s| s.as_ref().is_some_and(|v| v["on"] == true));
+    let can = move || state.with(|s| s.as_ref().is_some_and(|v| v["can_change"] == true));
+    let click = {
+        let g = guild.clone();
+        let load = load.clone();
+        move |e: leptos::ev::MouseEvent| {
+            // The switch follows the saved state only.
+            e.prevent_default();
+            if busy.get_untracked() || !can() {
+                return;
+            }
+            let (g, load, now) = (g.clone(), load.clone(), on());
+            let role = pick.get_untracked();
+            let g2 = g.clone();
+            let go = move |_: String| {
+                busy.set(true);
+                let body = if now { json!({"on": false}) } else if role.is_empty() { json!({"on": true}) } else { json!({"on": true, "role": role}) };
+                run_act(
+                    async move {
+                        let r = api("POST", &format!("/api/guilds/{g}/staff-role"), Some(body)).await;
+                        busy.try_set(false);
+                        r
+                    },
+                    msg,
+                    need,
+                    move |v| {
+                        load();
+                        match v["channels"].as_u64() {
+                            Some(n) if n > 0 => msg.done(format!("Staff role on. Push the {n} channel changes in Channel Setup to let it into the Staff channels.")),
+                            _ => msg.done(if now { "Staff role off" } else { "Staff role on" }),
+                        }
+                    },
+                )
+            };
+            if now {
+                // Live numbers, read when the popup opens.
+                spawn_local(async move {
+                    let v = api("GET", &format!("/api/guilds/{g2}/staff-role"), None).await.unwrap_or_default();
+                    if msg.text_disposed() {
+                        return;
+                    }
+                    ask(Ask::new("Turn the Staff role off?").text(off_text(&v)).yes("Turn off").danger(), go);
+                });
+            } else {
+                go(String::new())
+            }
+        }
+    };
+    view! {
+        <div class="card staffrole">
+            <div class="row tog">
+                <input type="checkbox" class="sw" role="switch" aria-label="Staff role on or off" prop:checked=on disabled=move || busy.get() || !can() on:click=click />
+                <label><b>"Staff role"</b></label>
+            </div>
+            <p class="muted">"Brim gives this role to all staff and takes it from everyone else. It gives no rights. Staff are the Owner, Extra Owners, Trusted Admins and every permit from Moderators up."</p>
+            {move || match state.get() {
+                None => view! { <p role="status"><Working />" Loading"</p> }.into_any(),
+                Some(v) if v["on"] == true => {
+                    let id = v["role"].as_str().unwrap_or("").to_string();
+                    let name = roles.with(|l| l.iter().find(|(i, _)| *i == id).map(|(_, n)| n.clone()));
+                    let gone = v["alive"] != true;
+                    view! { <p>{match (gone, name) {
+                        (true, _) => "The Staff role was deleted in Discord. Overview has a fix that makes it again.".to_string(),
+                        (false, Some(n)) => format!("On: Brim gives @{n} to {} members.", v["members"].as_i64().unwrap_or(0)),
+                        (false, None) => "On.".to_string(),
+                    }}</p> }.into_any()
+                }
+                Some(_) => view! { <label class="field">"Role to use"
+                    <crate::form::ListPick items=Signal::derive(move || roles.get()) get=pick set=Callback::new(move |v| pick.set(v)) none="Make a new Staff role" label="Staff role" disabled=Signal::derive(move || !can()) />
+                </label> }.into_any(),
+            }}
+            {move || (state.with(|s| s.is_some()) && !can()).then(|| view! { <p class="muted">"Only the Owner or an Extra Owner can change this."</p> })}
+            <Toast msg />
+        </div>
     }
 }

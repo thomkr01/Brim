@@ -498,10 +498,12 @@ async fn create(
     );
     if t.ping_staff {
         // The ticket is open already: a failed lookup only skips the staff ping.
-        let staff = panel::ping_staff_roles(app, gid).await.unwrap_or_else(|e| {
-            tracing::warn!(?e, "reading the staff ping roles failed");
-            vec![]
-        });
+        let staff = panel::ping_staff_roles(app, gid, t.ping_staff_tickets_only)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(?e, "reading the staff ping roles failed");
+                vec![]
+            });
         for r in staff {
             if r.get() != gid.get() && !mentions.roles.contains(&r) {
                 pings.push_str(&format!(" <@&{r}>"));

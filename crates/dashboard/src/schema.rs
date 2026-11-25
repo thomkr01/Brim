@@ -1374,7 +1374,11 @@ pub fn schema() -> Vec<Value> {
         ti(fg("General", "ping_here", "bool"), "Ping @here on a new ticket"),
         hp(
             ti(dv(fg("General", "ping_staff", "bool"), true), "Ping staff in a new panel ticket"),
-            "Pings the roles of the Moderators permit and every higher permit with Manage Tickets.",
+            "Pings the Staff role when it is on. Else the roles of the Moderators permit and every higher permit with Manage Tickets.",
+        ),
+        hp(
+            ti(dv(fg("Advanced", "ping_staff_tickets_only", "bool"), false), "Ping only staff with Manage Tickets"),
+            "With the Staff role on: ping the roles of the permits with Manage Tickets, not the Staff role.",
         ),
         hp(
             ti(dv(fg("Messages", "greeting", "text"), brim_core::sections::DEFAULT_GREETING), "Greeting message"),

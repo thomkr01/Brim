@@ -424,10 +424,14 @@ async fn open(
     let mut ping = live_ids(app, gid, &p.ping_roles).await;
     if t.ping_staff {
         // The ticket is open already: a failed lookup only skips the staff ping.
-        ping.extend(ping_staff_roles(app, gid).await.unwrap_or_else(|e| {
-            tracing::warn!(?e, "reading the staff ping roles failed");
-            vec![]
-        }));
+        ping.extend(
+            ping_staff_roles(app, gid, t.ping_staff_tickets_only)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!(?e, "reading the staff ping roles failed");
+                    vec![]
+                }),
+        );
     }
     ping.sort_unstable();
     ping.dedup();
@@ -473,11 +477,22 @@ async fn open(
 /// Roles of the Moderators permit and every higher-ranked permit with Manage Tickets: the staff a
 /// new panel ticket pings (`tickets.ping_staff`). Permit members get these roles from Brim, so
 /// a role ping reaches them; Owner, EO and TA hold no permit role and are not pinged. With no
-/// Moderators permit, every permit with Manage Tickets counts.
+/// Moderators permit, every permit with Manage Tickets counts. With the Staff role on, the ping is
+/// that one role (all staff, Owner, EO and TA too), unless `tickets_only`; a deleted Staff role
+/// falls back to the permit roles at once.
 pub(super) async fn ping_staff_roles(
     app: &App,
     gid: Id<GuildMarker>,
+    tickets_only: bool,
 ) -> Result<Vec<Id<RoleMarker>>> {
+    if !tickets_only {
+        if let Some((r, _)) = brim_core::permits::staff_role(&app.pool, gid.get() as i64).await? {
+            let live = super::live_roles(app, gid, vec![r as u64]).await;
+            if let Some(r) = live.into_iter().find_map(Id::new_checked) {
+                return Ok(vec![r]);
+            }
+        }
+    }
     let roles: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT r.role_id FROM permit_roles r JOIN permits p ON p.id = r.permit_id
          WHERE p.guild_id = $1 AND 'tickets' = ANY(p.perms) AND p.rank >= COALESCE(
@@ -901,7 +916,7 @@ mod tests {
                 .insert(g, (601..605).map(|r| (r, false, 0, 1)).collect());
             m.members.insert((g, crate::test_support::ME), vec![604]);
         });
-        let mut got: Vec<u64> = ping_staff_roles(&t.app, t.g(0))
+        let mut got: Vec<u64> = ping_staff_roles(&t.app, t.g(0), false)
             .await
             .unwrap()
             .iter()
@@ -909,6 +924,36 @@ mod tests {
             .collect();
         got.sort_unstable();
         assert_eq!(got, [602, 603]);
+        // The Staff role on: one ping for all staff. Deleted in Discord: the old ping at once.
+        // "Ping only staff with Manage Tickets": the old ping too.
+        sqlx::query("INSERT INTO level_roles (guild_id, level, role_id) VALUES ($1, 'staff', 650)")
+            .bind(t.base as i64)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        let ids = |v: Vec<Id<RoleMarker>>| {
+            let mut v: Vec<u64> = v.iter().map(|r| r.get()).collect();
+            v.sort_unstable();
+            v
+        };
+        let dead = ids(ping_staff_roles(&t.app, t.g(0), false).await.unwrap());
+        t.set(|m| {
+            m.roles.insert(
+                g,
+                (601..605).chain([650]).map(|r| (r, false, 0, 1)).collect(),
+            );
+        });
+        t.app.invalidate_guild(t.g(0));
+        let on = ids(ping_staff_roles(&t.app, t.g(0), false).await.unwrap());
+        let only = ids(ping_staff_roles(&t.app, t.g(0), true).await.unwrap());
+        sqlx::query("DELETE FROM level_roles WHERE guild_id = $1")
+            .bind(t.base as i64)
+            .execute(&t.app.pool)
+            .await
+            .unwrap();
+        assert_eq!(dead, [602, 603]);
+        assert_eq!(on, [650]);
+        assert_eq!(only, [602, 603]);
         t.cleanup().await;
     }
 

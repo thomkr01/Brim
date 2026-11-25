@@ -163,6 +163,9 @@ pub struct Ctx {
     pub staff: Vec<u64>,
     /// The Owner and Trusted Admin level roles: staff too, for the badges only.
     pub levels: Vec<u64>,
+    /// The common Staff role while it is on and exists. It opens every "Staff" channel next to
+    /// the staff permit roles (never in place of them), and no Admins or Owner channel.
+    pub staff_role: Option<u64>,
     /// "Admins only": the Admins permit roles and the level roles.
     pub admins: Vec<u64>,
     /// "Owner only": the Owner level role.
@@ -180,6 +183,7 @@ impl Ctx {
     fn pickable(&self, role: u64) -> bool {
         role != self.guild
             && !self.staff.contains(&role)
+            && self.staff_role != Some(role)
             && !self.setup.bot_roles.contains(&role)
             && self.setup.quarantine_role != Some(role)
             && !self.setup.main_roles.contains(&role)
@@ -338,7 +342,7 @@ fn apply(c: &ChannelImg, ows: Vec<OverwriteImg>, a: &Access, ctx: &Ctx) -> Vec<O
             });
         }
         if a.read_only && !ctx.locked {
-            for &r in ctx.staff.iter().chain(&ctx.levels) {
+            for &r in ctx.staff.iter().chain(&ctx.levels).chain(&ctx.staff_role) {
                 edit(&mut ows, r, true, |o| {
                     o.allow |= VIEW | SEND;
                     o.deny &= !(VIEW | SEND);
@@ -392,6 +396,13 @@ fn apply(c: &ChannelImg, ows: Vec<OverwriteImg>, a: &Access, ctx: &Ctx) -> Vec<O
         if a.staff && tier.is_none_or(|t| t.contains(&r)) {
             edit(&mut ows, r, true, let_in);
         } else if !picked.contains(&r) {
+            edit(&mut ows, r, true, |o| o.allow &= !VIEW);
+        }
+    }
+    if let Some(r) = ctx.staff_role {
+        if a.staff && tier.is_none() {
+            edit(&mut ows, r, true, let_in);
+        } else {
             edit(&mut ows, r, true, |o| o.allow &= !VIEW);
         }
     }
@@ -453,7 +464,8 @@ fn access_of(ows: &[OverwriteImg], ctx: &Ctx) -> Access {
     // Hidden from @everyone with a main role let in is a members' channel (verification).
     let limited = ow(ctx.guild).is_some_and(|o| o.deny & VIEW != 0)
         && !ctx.setup.main_roles.iter().any(|&r| sees(r));
-    let staff = !limited || ctx.staff.iter().all(|&r| sees(r));
+    // The Staff role alone counts too: a channel Channel Setup opened to staff stays a staff one.
+    let staff = !limited || ctx.staff.iter().all(|&r| sees(r)) || ctx.staff_role.is_some_and(sees);
     // One tier sees it and no staff or level role outside that tier does.
     let tier_only = |t: &[u64]| {
         !t.is_empty()
@@ -462,6 +474,7 @@ fn access_of(ows: &[OverwriteImg], ctx: &Ctx) -> Access {
                 .staff
                 .iter()
                 .chain(&ctx.levels)
+                .chain(&ctx.staff_role)
                 .any(|r| !t.contains(r) && sees(*r))
     };
     let only = match limited && !staff {
@@ -658,7 +671,11 @@ pub fn unstaffed(nodes: &[Node], live: &[ChannelImg], ctx: &Ctx) -> HashSet<Stri
     // A staff role's own View deny (the Advanced grid) hides it from them too.
     let denies = |ows: &[OverwriteImg]| -> Vec<u64> {
         ows.iter()
-            .filter(|o| o.is_role && o.deny & VIEW != 0 && ctx.staff.contains(&o.target))
+            .filter(|o| {
+                o.is_role
+                    && o.deny & VIEW != 0
+                    && (ctx.staff.contains(&o.target) || ctx.staff_role == Some(o.target))
+            })
             .map(|o| o.target)
             .collect()
     };
@@ -1237,10 +1254,17 @@ async fn world_of(
         .into_iter()
         .map(|r| r as u64)
         .collect();
-    let level_roles = brim_core::permits::level_roles(&st.db, guild).await?;
-    let levels: Vec<u64> = level_roles.iter().map(|(_, r)| *r as u64).collect();
+    let mut level_roles = brim_core::permits::level_roles(&st.db, guild).await?;
     // Only roles that still exist: a deleted Owner role must not be the one let in.
     let alive = |r: &u64| l.image.roles.iter().any(|x| x.id == *r);
+    // The Staff role has its own rule (`Ctx::staff_role`); a deleted one counts as off.
+    let staff_role = level_roles
+        .iter()
+        .find(|(l, _)| l == brim_core::permits::STAFF)
+        .map(|(_, r)| *r as u64)
+        .filter(alive);
+    level_roles.retain(|(l, _)| l != brim_core::permits::STAFF);
+    let levels: Vec<u64> = level_roles.iter().map(|(_, r)| *r as u64).collect();
     let owners = level_roles
         .iter()
         .filter(|(l, _)| l == "owner")
@@ -1264,6 +1288,7 @@ async fn world_of(
             bot: st.discord.client_id.parse().unwrap_or_default(),
             staff,
             levels,
+            staff_role,
             admins,
             owners,
             locked: crate::recovery::no_backup_now(st, guild).await?,
@@ -1347,10 +1372,83 @@ async fn lock(
     Ok(tx)
 }
 
+/// Holds off Channel Setup pushes, draft saves and Auto Setup (the draft lock, alone) until
+/// [`release_pushes`]: turning the Staff role off.
+pub(crate) async fn hold_pushes(
+    st: &AppState,
+    guild: i64,
+) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, ApiError> {
+    lock(st, guild, true).await
+}
+
+/// The draft lock, shared with pushes waiting: Auto Setup's channel steps, so the Staff role
+/// cannot be turned off between its read and its overwrites.
+pub(crate) async fn hold_shared(
+    st: &AppState,
+    guild: i64,
+) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, ApiError> {
+    lock(st, guild, false).await
+}
+
+pub(crate) async fn release_pushes(tx: sqlx::Transaction<'static, sqlx::Postgres>) {
+    release(tx).await
+}
+
 async fn release(tx: sqlx::Transaction<'static, sqlx::Postgres>) {
     if let Err(e) = tx.rollback().await {
         tracing::warn!("channel draft lock release failed: {e}");
     }
+}
+
+/// After the Staff role is turned on or made again: a draft item for every "Staff" channel that
+/// does not let the role in yet, so the owner sees the change and Push makes it (Channel Setup's
+/// own rule, `Ctx::staff_role`). Admins and Owner channels, ticket channels and temporary
+/// channels are left out; an item the owner has already keeps its own access. Returns how many
+/// channels it added.
+pub(crate) async fn queue_staff_role(
+    st: &AppState,
+    guild: i64,
+    user: i64,
+) -> Result<usize, ApiError> {
+    let tx = lock(st, guild, false).await?;
+    let r = async {
+        let w = world(st, guild).await?;
+        let Some(role) = w.ctx.staff_role else {
+            return Ok(0);
+        };
+        let (mut draft, _) = load(st, guild).await?;
+        prune(&mut draft, &w.channels);
+        let tickets = crate::tickets::categories(&w.config);
+        let mut n = 0;
+        for c in &w.channels {
+            let a = access_of(&c.overwrites, &w.ctx);
+            let id = c.id.to_string();
+            let skip = !a.is_limited()
+                || !a.staff
+                || a.only.is_some()
+                || w.temp.all.contains(&c.id)
+                || tickets.contains(&id.as_str())
+                || fixed_of(&w, &id) == Some("Tickets")
+                || c.overwrites
+                    .iter()
+                    .any(|o| o.is_role && o.target == role && o.allow & VIEW != 0);
+            if skip {
+                continue;
+            }
+            let it = draft.items.entry(id).or_default();
+            if it.access.is_none() {
+                it.access = Some(a);
+                n += 1;
+            }
+        }
+        if n > 0 {
+            save(st, guild, &draft, user).await?;
+        }
+        Ok(n)
+    }
+    .await;
+    release(tx).await;
+    r
 }
 
 /// The Overview's row for an unpushed draft that Push would refuse, by Channel Setup's own rules.
@@ -1465,6 +1563,7 @@ fn view(w: &World, draft: &Draft, level: Level, version: &str) -> (Vec<Node>, Ve
         "roles": roles,
         "server": {"live": w.settings, "want": crate::roles::want_settings(&w.settings, &server), "changed": server_changed},
         "staff_roles": w.ctx.staff.iter().map(u64::to_string).collect::<Vec<_>>(),
+        "staff_role": w.ctx.staff_role.is_some(),
         "pickable_roles": pickable,
         "can_unstaff": level >= Level::Owner,
         "grid_roles": w.ctx.roles.iter().filter(|r| w.ctx.grid_role(r.id)).map(|r| r.id.to_string()).collect::<Vec<_>>(),
@@ -2192,6 +2291,7 @@ pub(crate) mod tests {
             bot: 7,
             staff: vec![STAFF],
             levels: vec![],
+            staff_role: None,
             admins: vec![STAFF],
             owners: vec![],
             locked: false,
@@ -2216,6 +2316,39 @@ pub(crate) mod tests {
             },
             bot_pos: 10,
         }
+    }
+
+    /// The Staff role opens a Staff channel next to the staff permit roles, never in place of them;
+    /// it stays out of an Admins channel, is no custom role, and alone it still reads as staff.
+    #[test]
+    fn the_staff_role_opens_staff_channels_next_to_the_permit_roles() {
+        const ROLE: u64 = 77;
+        let mut c = ctx();
+        c.staff_role = Some(ROLE);
+        c.roles.push(role(ROLE, 0));
+        let hidden = || ow(G, 0, VIEW);
+        let staff_only = ch(30, 0, None, vec![hidden(), ow(STAFF, VIEW, 0)]);
+        let a = access_of(&staff_only.overwrites, &c);
+        assert!(a.staff && a.is_limited() && a.only.is_none() && a.roles.is_empty());
+        let out = apply(&staff_only, staff_only.overwrites.clone(), &a, &c);
+        let sees =
+            |ows: &[OverwriteImg], r: u64| ows.iter().any(|o| o.target == r && o.allow & VIEW != 0);
+        assert!(sees(&out, STAFF) && sees(&out, ROLE), "{out:?}");
+        // The Staff role alone (permit roles taken off by hand) is still a Staff channel.
+        let only_role = ch(31, 0, None, vec![hidden(), ow(ROLE, VIEW, 0)]);
+        let a = access_of(&only_role.overwrites, &c);
+        assert!(a.staff && a.roles.is_empty() && a.only.is_none());
+        // Admins only: the Staff role is let out, the Admins roles in.
+        let mut admins = a.clone();
+        admins.only = Some("admins".into());
+        let out = apply(&only_role, only_role.overwrites.clone(), &admins, &c);
+        assert!(!sees(&out, ROLE) && sees(&out, STAFF), "{out:?}");
+        // Off (no Staff role): the same channel takes the old overwrites only.
+        let off = ctx();
+        let a = access_of(&staff_only.overwrites, &off);
+        let out = apply(&staff_only, staff_only.overwrites.clone(), &a, &off);
+        assert!(sees(&out, STAFF) && !sees(&out, ROLE));
+        assert!(!c.pickable(ROLE));
     }
 
     /// 10 a category with synced 11 and exception 12; 20 a category with the quarantine deny;

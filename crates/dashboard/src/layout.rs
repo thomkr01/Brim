@@ -1333,6 +1333,7 @@ mod tests {
             bot: 7,
             staff: vec![11],
             levels: vec![],
+            staff_role: None,
             admins: vec![11],
             owners: vec![],
             locked: false,

@@ -123,6 +123,16 @@ pub async fn all_staff_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result
     Ok(all)
 }
 
+/// [`all_staff_roles`] without the common Staff role: the roles shown as their own group in the
+/// member list (the Staff role is not, owner decision 2026-11-23).
+pub async fn grouped_staff_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result<Vec<i64>> {
+    let mut all = all_staff_roles(pool, guild_id).await?;
+    if let Some((r, _)) = staff_role(pool, guild_id).await? {
+        all.retain(|s| *s != r);
+    }
+    Ok(all)
+}
+
 /// Role ids on the Moderators permit and not on Admins: the security score holds them to member rules.
 pub async fn mod_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result<Vec<i64>> {
     sqlx::query_scalar(
@@ -567,13 +577,43 @@ pub fn level_lists_changed(old: &serde_json::Value, new: &serde_json::Value) -> 
 /// server owner and every Extra Owner.
 pub const ROLE_LEVELS: [&str; 2] = ["trusted_admin", "owner"];
 
+/// The optional common Staff role (`level_roles` level `staff`). It is on while its row exists.
+/// Only its own dashboard route writes the row; a rollback, an import and Auto Setup keep it.
+pub const STAFF: &str = "staff";
+
+/// Who gets the Staff role, besides the owner, Extra Owners and Trusted Admins: members of a
+/// permit at or above the Moderators permit (with no Moderators permit, the Admins permit; with
+/// neither, nobody). $1 guild. The same line as the ticket staff ping.
+macro_rules! staff_permits {
+    () => {
+        "SELECT p.id FROM permits p WHERE p.guild_id = $1 AND p.rank >= (SELECT coalesce(
+          (SELECT min(rank) FROM permits WHERE guild_id = $1 AND name = 'Moderators'),
+          (SELECT min(rank) FROM permits WHERE guild_id = $1 AND name = 'Admins')))"
+    };
+}
+const STAFF_PERMITS: &str = staff_permits!();
+
 /// The roles of the levels that `user` is on, with `owner` the server owner: the Trusted Admin
-/// role for a Trusted Admin, the Owner role for the owner and an Extra Owner. Placeholders: $1
+/// role for a Trusted Admin, the Owner role for the owner and an Extra Owner, the Staff role for
+/// all of those and the members of the staff permits ([`STAFF_PERMITS`]). Placeholders: $1
 /// guild, $2 user, $3 Discord owner (mapped to the bot owner, [`bot_owner`]).
-const LEVEL_ROLES_OF: &str = "SELECT l.role_id FROM level_roles l WHERE l.guild_id = $1 AND (
-    (l.level = 'trusted_admin' AND EXISTS (SELECT 1 FROM trusted_admins t WHERE t.guild_id = $1 AND t.user_id = $2))
-    OR (l.level = 'owner' AND ($2 = coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $3)
-      OR EXISTS (SELECT 1 FROM extra_owners e WHERE e.guild_id = $1 AND e.user_id = $2))))";
+const LEVEL_ROLES_OF: &str = concat!("SELECT l.role_id FROM level_roles l WHERE l.guild_id = $1 AND (
+    (l.level IN ('trusted_admin', 'staff') AND EXISTS (SELECT 1 FROM trusted_admins t WHERE t.guild_id = $1 AND t.user_id = $2))
+    OR (l.level IN ('owner', 'staff') AND ($2 = coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $3)
+      OR EXISTS (SELECT 1 FROM extra_owners e WHERE e.guild_id = $1 AND e.user_id = $2)))
+    OR (l.level = 'staff' AND EXISTS (SELECT 1 FROM permit_members m WHERE m.guild_id = $1 AND m.user_id = $2
+      AND m.permit_id IN (", staff_permits!(), "))))");
+
+/// The Staff role while the feature is on: (role id, Brim made it).
+pub async fn staff_role<'e>(
+    c: impl sqlx::PgExecutor<'e>,
+    guild_id: i64,
+) -> sqlx::Result<Option<(i64, bool)>> {
+    sqlx::query_as("SELECT role_id, made FROM level_roles WHERE guild_id = $1 AND level = 'staff'")
+        .bind(guild_id)
+        .fetch_optional(c)
+        .await
+}
 
 /// (level, role) of the guild's level roles.
 pub async fn level_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result<Vec<(String, i64)>> {
@@ -584,20 +624,27 @@ pub async fn level_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result<Vec
 }
 
 /// (user, role) for everyone a level role belongs to: Trusted Admins, Extra Owners and the bot
-/// owner (`owner` is the Discord owner, mapped by [`bot_owner`]).
+/// owner (`owner` is the Discord owner, mapped by [`bot_owner`]), and for the Staff role also the
+/// members of the staff permits ([`STAFF_PERMITS`]).
 pub async fn level_members(
     pool: &sqlx::PgPool,
     guild_id: i64,
     owner: i64,
 ) -> sqlx::Result<Vec<(i64, i64)>> {
-    sqlx::query_as(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT t.user_id, l.role_id FROM level_roles l JOIN trusted_admins t ON t.guild_id = l.guild_id
          WHERE l.guild_id = $1 AND l.level = 'trusted_admin'
          UNION SELECT u.user_id, l.role_id FROM level_roles l
            JOIN (SELECT user_id FROM extra_owners WHERE guild_id = $1
              UNION SELECT coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $2)) u ON true
-         WHERE l.guild_id = $1 AND l.level = 'owner' ORDER BY 1, 2",
-    )
+         WHERE l.guild_id = $1 AND l.level = 'owner'
+         UNION SELECT u.user_id, l.role_id FROM level_roles l
+           JOIN (SELECT user_id FROM trusted_admins WHERE guild_id = $1
+             UNION SELECT user_id FROM extra_owners WHERE guild_id = $1
+             UNION SELECT coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $2)
+             UNION SELECT user_id FROM permit_members WHERE guild_id = $1 AND permit_id IN ({STAFF_PERMITS})) u ON true
+         WHERE l.guild_id = $1 AND l.level = 'staff' ORDER BY 1, 2"
+    )))
     .bind(guild_id)
     .bind(owner)
     .fetch_all(pool)
@@ -1236,6 +1283,54 @@ mod tests {
         let mut rl = RateLimiter::default();
         rl.seed(7, 1, "ban", t);
         assert!(!command_allowed(&mut rl, 7, 1, &lvl, "ban", t));
+    }
+
+    #[tokio::test]
+    async fn the_staff_role_goes_to_moderators_and_up_and_the_levels() {
+        let Ok(url) = crate::db::test_url() else {
+            return;
+        };
+        let pool = crate::db::connect(&url).await.unwrap();
+        let gid = 8_100_000_000 + std::process::id() as i64;
+        let run = |q: &'static str| {
+            let pool = pool.clone();
+            async move { sqlx::query(q).bind(gid).execute(&pool).await.unwrap() }
+        };
+        // Users: 11 Admins, 12 Moderators, 13 Helpers (below Moderators), 14 TA, 15 EO, 1 owner.
+        run("INSERT INTO permits (guild_id, name, rank) VALUES ($1, 'Admins', 2), ($1, 'Moderators', 1), ($1, 'Helpers', 0)").await;
+        run("INSERT INTO permit_members (permit_id, guild_id, user_id) SELECT id, $1, CASE name WHEN 'Admins' THEN 11 WHEN 'Moderators' THEN 12 ELSE 13 END FROM permits WHERE guild_id = $1").await;
+        run("INSERT INTO trusted_admins (guild_id, user_id) VALUES ($1, 14)").await;
+        run("INSERT INTO extra_owners (guild_id, user_id) VALUES ($1, 15)").await;
+        run("INSERT INTO level_roles (guild_id, level, role_id, made) VALUES ($1, 'staff', 900, true)").await;
+        let got: Vec<i64> = level_members(&pool, gid, 1)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|(_, r)| *r == 900)
+            .map(|(u, _)| u)
+            .collect();
+        let has = |u: i64| {
+            let pool = pool.clone();
+            async move { member_roles(&pool, gid, u, 1).await.unwrap().contains(&900) }
+        };
+        let (h11, h13, h14, h1) = (has(11).await, has(13).await, has(14).await, has(1).await);
+        // With no Moderators permit, the Admins permit is the line.
+        run("DELETE FROM permits WHERE guild_id = $1 AND name = 'Moderators'").await;
+        let (no_mod_admin, no_mod_helper) = (has(11).await, has(13).await);
+        let row = staff_role(&pool, gid).await.unwrap();
+        for t in ["permits", "trusted_admins", "extra_owners", "level_roles"] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {t} WHERE guild_id = $1"
+            )))
+            .bind(gid)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        assert_eq!(got, [1, 11, 12, 14, 15]);
+        assert!(h11 && !h13 && h14 && h1);
+        assert!(no_mod_admin && !no_mod_helper);
+        assert_eq!(row, Some((900, true)));
     }
 
     #[tokio::test]

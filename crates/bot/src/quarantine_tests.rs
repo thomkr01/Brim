@@ -3970,3 +3970,80 @@ async fn the_added_dangerous_permissions_are_guarded_like_the_rest() {
         .await;
     t.cleanup().await;
 }
+
+/// Owner decisions 2026-11-23: the Staff role goes to every member of a permit from Moderators up,
+/// and to the owner, Extra Owners and Trusted Admins, by user id; Brim takes it from everyone else.
+/// Load (plan 7): 100,000 members, 500 staff, then 200 permit members changed at once, in one run.
+#[tokio::test]
+async fn the_staff_role_follows_the_staff_permits_at_scale() {
+    let Some(t) = T::new(611).await else { return };
+    server(
+        &t,
+        0,
+        json!({"antinuke": {"enabled": true, "quarantine_role": Q.to_string()}}),
+    )
+    .await;
+    let g = t.g(0);
+    let gi = g.get() as i64;
+    let base = t.base * 1_000_000;
+    // Members base+0 .. base+99,999; the first 500 are Moderators, 600..609 Helpers (below them).
+    t.set(|m| {
+        for u in 0..100_000 {
+            m.members.insert((g.get(), base + u), vec![]);
+        }
+        m.members.insert((g.get(), t.owner()), vec![]);
+        // A role given by hand to someone who is no staff.
+        m.members.insert((g.get(), base + 99_999), vec![ROLE]);
+    });
+    t.exec("INSERT INTO permit_members_migrated (guild_id) VALUES ($1)")
+        .await;
+    t.exec("INSERT INTO permits (guild_id, name, rank) VALUES ($1, 'Moderators', 1), ($1, 'Helpers', 0)").await;
+    let add = |from: u64, to: u64, permit: &'static str| {
+        let pool = t.app.pool.clone();
+        async move {
+            sqlx::query("INSERT INTO permit_members (permit_id, guild_id, user_id) SELECT id, $1, u FROM permits, generate_series($2::bigint, $3::bigint) u WHERE guild_id = $1 AND name = $4")
+                .bind(gi).bind((base + from) as i64).bind((base + to) as i64).bind(permit)
+                .execute(&pool).await.unwrap();
+        }
+    };
+    add(0, 499, "Moderators").await;
+    add(600, 609, "Helpers").await;
+    sqlx::query(
+        "INSERT INTO level_roles (guild_id, level, role_id, made) VALUES ($1, 'staff', $2, true)",
+    )
+    .bind(gi)
+    .bind(ROLE as i64)
+    .execute(&t.app.pool)
+    .await
+    .unwrap();
+    let start = std::time::Instant::now();
+    crate::permit_sync::sync(&t.app, g).await.unwrap();
+    let first = start.elapsed();
+    let has = |u: u64| roles(&t, 0, u).is_some_and(|r| r.contains(&ROLE));
+    assert!((0..500).all(|u| has(base + u)), "every Moderator");
+    assert!(has(t.owner()), "the owner");
+    assert!(
+        !(600..610).any(|u| has(base + u)),
+        "a permit below Moderators gets none"
+    );
+    assert!(!has(base + 99_999), "a hand-given Staff role is taken");
+    // 200 changed at once: 100 leave the permit, 100 join it.
+    sqlx::query("DELETE FROM permit_members WHERE guild_id = $1 AND user_id BETWEEN $2 AND $3")
+        .bind(gi)
+        .bind(base as i64)
+        .bind((base + 99) as i64)
+        .execute(&t.app.pool)
+        .await
+        .unwrap();
+    add(1_000, 1_099, "Moderators").await;
+    let start = std::time::Instant::now();
+    crate::permit_sync::sync(&t.app, g).await.unwrap();
+    let second = start.elapsed();
+    assert!(!(0..100).any(|u| has(base + u)), "removed staff lose it");
+    assert!(
+        (100..500).chain(1_000..1_100).all(|u| has(base + u)),
+        "the rest and the new ones have it"
+    );
+    eprintln!("staff role sync, 100,000 members: first run {first:?} (500 gives), second {second:?} (200 changes)");
+    t.cleanup().await;
+}

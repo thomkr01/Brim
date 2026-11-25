@@ -475,6 +475,20 @@ fs.mkdirSync(out, { recursive: true });
   await page.waitForSelector('.modal', { state: 'detached' }).catch(() => failed.push('permits: a dialog stayed open after Delete'));
   if ((await rowNames()).join() !== 'P2') failed.push(`permits: Delete in Edit did not remove the permit (${await rowNames()})`);
   await page.click('.bar button:has-text("Cancel")');
+  // Staff role (owner decision 2026-11-25): one switch card, off by default. On makes the role;
+  // off asks first and names what changes; the setup wizard shows the same card.
+  const staffSw = page.locator('.card.staffrole input[role="switch"]');
+  await staffSw.waitFor({ timeout: 8000 }).catch(() => failed.push('permits: no Staff role card'));
+  if (await staffSw.isChecked().catch(() => true)) failed.push('permits: the Staff role is on by default');
+  await staffSw.click().catch(() => {});
+  await page.waitForSelector('.card.staffrole input[role="switch"]:checked', { timeout: 8000 }).catch(() => failed.push('permits: the Staff role did not turn on'));
+  await staffSw.click().catch(() => {});
+  await page.waitForSelector('.modal[aria-label="Turn the Staff role off?"]', { timeout: 5000 }).catch(() => failed.push('permits: no confirm before turning the Staff role off'));
+  if (!(await page.locator('.modal', { hasText: 'the Staff role. Brim deletes the Staff role' }).count())) failed.push('permits: the Staff role popup does not say what changes');
+  await page.locator('.modal button.danger:has-text("Turn off")').click().catch(() => {});
+  await page.waitForSelector('.card.staffrole input[role="switch"]:not(:checked)', { timeout: 8000 }).catch(() => failed.push('permits: the Staff role did not turn off'));
+  await page.goto(`${base}/#/${gid}/wizard`);
+  await page.waitForSelector('#wizstep .card.staffrole input[role="switch"]', { timeout: 8000 }).catch(() => failed.push('wizard: no Staff role switch in the first step'));
   // Backups (layout PR 6): no browser frame around the settings; a backup's own page is a route with a crumb
   // ("Backups › Backup #code"), no "Go back" button. An unknown code shows the list and says so.
   await page.goto(`${base}/#/${gid}/backups`);
