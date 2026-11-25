@@ -306,8 +306,11 @@ async fn copy_overwrites(
     c: &Channel,
     differ: &mut Vec<String>,
 ) -> Result<Vec<twilight_model::channel::permission_overwrite::PermissionOverwrite>> {
-    let saved: Option<serde_json::Value> = sqlx::query_scalar(
-        "SELECT ch FROM backups, jsonb_array_elements(image->'channels') ch
+    let saved: Option<(
+        serde_json::Value,
+        sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>,
+    )> = sqlx::query_as(
+        "SELECT ch, created_at FROM backups, jsonb_array_elements(image->'channels') ch
          WHERE guild_id = $1 AND ch->>'id' = $2 ORDER BY created_at DESC, id DESC LIMIT 1",
     )
     .bind(gid.get() as i64)
@@ -315,8 +318,18 @@ async fn copy_overwrites(
     .fetch_optional(&app.pool)
     .await?;
     let mut img = crate::backup::channel_img(c.clone());
-    match saved.and_then(|v| serde_json::from_value::<brim_antinuke::ChannelImg>(v).ok()) {
-        Some(b) => {
+    let saved = saved.and_then(|(v, at)| {
+        Some((
+            serde_json::from_value::<brim_antinuke::ChannelImg>(v).ok()?,
+            at,
+        ))
+    });
+    match saved {
+        Some((mut b, at)) => {
+            // A former Staff role is no longer guarded: no access back from an older image.
+            crate::backup::Former::of(app, gid)
+                .await?
+                .strip(&mut b.overwrites, at);
             *differ = differing(&b.overwrites, &img.overwrites);
             img.overwrites = b.overwrites
         }

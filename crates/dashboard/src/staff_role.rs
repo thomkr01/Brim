@@ -11,7 +11,7 @@ use crate::{
     store, ApiError, AppState,
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::get,
     Json, Router,
 };
@@ -35,8 +35,19 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// The switch's state and what turning it off would change, read live.
-async fn state(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
+/// With `?pick=<role>`: also how many members hold that role now and are not staff, as the next
+/// sync takes it from them (`takes`, `more` when there are more members than were read).
+async fn state(
+    State(st): State<AppState>,
+    s: Sess,
+    Path(guild): Path<i64>,
+    Query(q): Query<Pick>,
+) -> Res {
     let level = require(&st, &s, guild, Level::Admin, false).await?;
+    if let Some(role) = q.pick.filter(|_| level >= Level::Owner) {
+        let (takes, more) = takes(&st, guild, &role).await?;
+        return Ok(Json(json!({"takes": takes, "more": more})));
+    }
     let row = permits::staff_role(&st.db, guild).await?;
     let (_, config) = store::current(&st.db, guild).await?;
     let (role, made, alive, members, warned) = match row {
@@ -57,6 +68,39 @@ async fn state(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
         "on": role.is_some(), "role": role, "made": made, "alive": alive,
         "members": members, "warned": warned, "can_change": level >= Level::Owner,
     })))
+}
+
+#[derive(Deserialize)]
+struct Pick {
+    pick: Option<String>,
+}
+
+/// Members (not bots) that hold `role` and are not staff: a sync takes it from them.
+async fn takes(st: &AppState, guild: i64, role: &str) -> Result<(u64, bool), ApiError> {
+    let owner: Option<i64> =
+        sqlx::query_scalar("select owner_id from guild_owners where guild_id = $1")
+            .bind(guild)
+            .fetch_optional(&st.db)
+            .await?;
+    let staff: std::collections::HashSet<i64> =
+        permits::staff_users(&st.db, guild, owner.unwrap_or(0))
+            .await?
+            .into_iter()
+            .collect();
+    let mut n = 0;
+    let more = crate::ops::member_pages(st, guild, |m| {
+        let holds = m["roles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|r| r.as_str() == Some(role));
+        let user = m["user"]["id"].as_str().and_then(|u| u.parse::<i64>().ok());
+        if holds && m["user"]["bot"] != true && !user.is_some_and(|u| staff.contains(&u)) {
+            n += 1;
+        }
+    })
+    .await?;
+    Ok((n, more))
 }
 
 /// How many people Brim gives the Staff role (the role's holders after a sync).
@@ -346,6 +390,7 @@ async fn off_locked(
         // Turned off, or made again, by someone else meanwhile.
         return Err(ApiError::Conflict(cur));
     }
+    permits::was_staff_role(&mut *tx, guild, role).await?;
     let id = role.to_string();
     let mut cleared = vec![];
     for (sec, key, name) in WARNED {
@@ -483,6 +528,9 @@ pub(crate) async fn make_again(st: &AppState, s: &Sess, guild: i64, level: Level
         .execute(&mut *tx)
         .await?
         .rows_affected();
+    if moved > 0 {
+        permits::was_staff_role(&mut *tx, guild, old).await?;
+    }
     if moved == 0 {
         // Turned off, or relinked by a restore, meanwhile: the new role is not needed.
         drop(tx);
@@ -565,6 +613,10 @@ mod tests {
         let (new, old) = pick(json!({"roles": ["5", "1000"]}));
         let e = crate::api::check_held_roles(&st, g, "verification", &new, &old).await;
         assert!(format!("{e:?}").contains("the Staff role"), "{e:?}");
+        // The bot reads a number as an id too.
+        let (new, old) = pick(json!({"main_roles": [1000]}));
+        let e = crate::api::check_held_roles(&st, g, "lockdown", &new, &old).await;
+        assert!(format!("{e:?}").contains("the Staff role"), "{e:?}");
         let (new, old) = pick(json!({"quarantine_role": "1001"}));
         let e = crate::api::check_held_roles(&st, g, "antinuke", &new, &old).await;
         assert!(format!("{e:?}").contains("the Owner role"), "{e:?}");
@@ -617,6 +669,7 @@ mod tests {
             made.clone(),
             made.clone(),
         );
+        let ta = owner + 1;
         let mock = Router::new()
             .route("/guilds/{g}", get(move || async move { Json(json!({"owner_id": owner.to_string(), "mfa_level": 1})) }))
             .route(
@@ -651,6 +704,10 @@ mod tests {
                 }),
             )
             .route("/users/@me", get(|| async { Json(json!({"id": "7"})) }))
+            .route("/guilds/{g}/members", get(move || async move {
+                Json(json!([{"user": {"id": "11"}, "roles": ["5"]}, {"user": {"id": ta.to_string()}, "roles": ["5"]},
+                    {"user": {"id": "12", "bot": true}, "roles": ["5"]}, {"user": {"id": "13"}, "roles": []}]))
+            }))
             .route("/guilds/{g}/members/{u}", get(|| async { Json(json!({"roles": ["9"]})) }))
             .route(
                 "/channels/{c}/permissions/{t}",
@@ -684,9 +741,10 @@ mod tests {
             vpn_logged: Default::default(),
         };
         let send = |m: &str, user: i64, stepped_up: bool, body: Option<Value>| {
+            let (m, q) = m.split_once(' ').unwrap_or((m, ""));
             let mut req = Request::builder()
                 .method(m)
-                .uri(format!("/api/guilds/{g}/staff-role"))
+                .uri(format!("/api/guilds/{g}/staff-role{q}"))
                 .header("content-type", "application/json")
                 .body(body.map_or(Body::empty(), |b| Body::from(b.to_string())))
                 .unwrap();
@@ -712,13 +770,19 @@ mod tests {
                 )
             }
         };
-        let ta = owner + 1;
         sqlx::query("insert into trusted_admins (guild_id, user_id) values ($1, $2)")
             .bind(g)
             .bind(ta)
             .execute(&db)
             .await
             .unwrap();
+        // A picked role: members who hold it and are not staff (not the Trusted Admin, not a bot).
+        let (code, r) = send("GET ?pick=5", owner, false, None).await;
+        assert_eq!(
+            (code, r["takes"].as_u64(), r["more"].as_bool()),
+            (200, Some(1), Some(false)),
+            "{r}"
+        );
         let on = Some(json!({"on": true}));
         let (code, _) = send("POST", ta, true, on.clone()).await;
         assert_eq!(code, 403, "a Trusted Admin cannot change it");
@@ -774,6 +838,9 @@ mod tests {
         assert_eq!(code, 200, "{r}");
         let (_, config) = crate::store::current(&db, g).await.unwrap();
         let row = brim_core::permits::staff_role(&db, g).await.unwrap();
+        let former = brim_core::permits::former_staff_roles(&db, g)
+            .await
+            .unwrap();
         for t in [
             "guild_config",
             "level_roles",
@@ -783,6 +850,7 @@ mod tests {
             "channel_drafts",
             "permit_roles",
             "permits",
+            "former_staff_roles",
         ] {
             let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "delete from {t} where guild_id = $1"
@@ -792,6 +860,11 @@ mod tests {
             .await;
         }
         assert_eq!(row, None);
+        assert_eq!(
+            former.iter().map(|(r, _)| *r).collect::<Vec<_>>(),
+            vec![1000],
+            "a restore gives it no access back"
+        );
         assert_eq!(config["panic"]["warned_roles"], json!([]));
         let calls = calls.lock().unwrap().clone();
         let let_in = calls.iter().position(|c| c == "let in 300 5");

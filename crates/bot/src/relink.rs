@@ -80,14 +80,19 @@ async fn run(
         .execute(&mut *tx)
         .await?
         .rows_affected() as usize;
-        permit_roles +=
-            sqlx::query("UPDATE level_roles SET role_id = $3 WHERE guild_id = $1 AND role_id = $2")
-                .bind(g)
-                .bind(*old as i64)
-                .bind(*new as i64)
-                .execute(&mut *tx)
-                .await?
-                .rows_affected() as usize;
+        let levels: Vec<String> = sqlx::query_scalar(
+            "UPDATE level_roles SET role_id = $3 WHERE guild_id = $1 AND role_id = $2 RETURNING level",
+        )
+        .bind(g)
+        .bind(*old as i64)
+        .bind(*new as i64)
+        .fetch_all(&mut *tx)
+        .await?;
+        permit_roles += levels.len();
+        // An older image could make the old Staff role again under another name, unguarded.
+        if levels.iter().any(|l| l == brim_core::permits::STAFF) {
+            brim_core::permits::was_staff_role(&mut *tx, g, *old as i64).await?;
+        }
     }
     n += permit_roles;
     if n == 0 {

@@ -276,6 +276,14 @@ mod order_tests {
     }
 }
 
+/// The text of the confirm step for a picked role, from `GET /staff-role?pick=`.
+fn pick_text(name: &str, v: &Value) -> String {
+    let n = v["takes"].as_u64().unwrap_or(0);
+    let more = if v["more"] == true { " or more" } else { "" };
+    let who = if n == 1 && more.is_empty() { "1 member holds".to_string() } else { format!("{n}{more} members hold") };
+    format!("{who} @{name} now and {} not staff. Brim takes the role from them, and from everyone who gets it later and is not staff. Brim gives it to all staff.", if n == 1 && more.is_empty() { "is" } else { "are" })
+}
+
 /// The live text of the turn-off popup, from `GET /staff-role`.
 pub fn off_text(v: &Value) -> String {
     let n = v["members"].as_i64().unwrap_or(0);
@@ -334,7 +342,7 @@ pub fn StaffRole(guild: String) -> impl IntoView {
             }
             let (g, load, now) = (g.clone(), load.clone(), on());
             let role = pick.get_untracked();
-            let g2 = g.clone();
+            let (g2, role2) = (g.clone(), role.clone());
             let go = move |_: String| {
                 busy.set(true);
                 let body = if now { json!({"on": false}) } else if role.is_empty() { json!({"on": true}) } else { json!({"on": true, "role": role}) };
@@ -363,6 +371,22 @@ pub fn StaffRole(guild: String) -> impl IntoView {
                         return;
                     }
                     ask(Ask::new("Turn the Staff role off?").text(off_text(&v)).yes("Turn off").danger(), go);
+                });
+            } else if !role2.is_empty() {
+                // A picked role: the next sync takes it from members who are not staff, so ask first.
+                let name = roles.with_untracked(|l| l.iter().find(|(i, _)| *i == role2).map_or_else(|| role2.clone(), |(_, n)| n.clone()));
+                spawn_local(async move {
+                    let v = api("GET", &format!("/api/guilds/{g2}/staff-role?pick={role2}"), None).await;
+                    if msg.text_disposed() {
+                        return;
+                    }
+                    // Nobody loses it: nothing to ask. Not counted: ask anyway, and say so.
+                    let text = match v {
+                        Ok(v) if v["takes"] == 0 && v["more"] != true => return go(String::new()),
+                        Ok(v) => pick_text(&name, &v),
+                        Err(_) => format!("Brim could not count who holds @{name} now. Brim takes the role from everyone who is not staff, and gives it to all staff."),
+                    };
+                    ask(Ask::new("Use this role as the Staff role?").text(text).yes("Use it"), go);
                 });
             } else {
                 go(String::new())

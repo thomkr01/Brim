@@ -6,6 +6,7 @@ use brim_antinuke::{
     describe, map_overwrites, plan, Action, Change, ChannelImg, Image, OverwriteImg, Plan, RoleImg,
     Settings, WebhookImg, CATEGORY, DANGEROUS_PERMS,
 };
+use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::Json;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -193,14 +194,18 @@ pub async fn save(app: &App, gid: Id<GuildMarker>, by: Option<u64>) -> Result<St
     Ok(code)
 }
 
+/// The newest backup image, without former Staff roles' access ([`Former`]).
 pub async fn latest(app: &App, gid: Id<GuildMarker>) -> Result<Option<Image>> {
-    let row: Option<(Json<Image>,)> = sqlx::query_as(
-        "SELECT image FROM backups WHERE guild_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+    let row: Option<(Json<Image>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT image, created_at FROM backups WHERE guild_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
     )
     .bind(gid.get() as i64)
     .fetch_optional(&app.pool)
     .await?;
-    Ok(row.map(|(Json(i),)| i))
+    let Some((Json(i), at)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(Former::of(app, gid).await?.image(i, at)))
 }
 
 /// Live ids a restore must never delete (`sections::restore_keep`, N2).
@@ -313,16 +318,17 @@ pub async fn load(
     by: u64,
 ) -> Result<String> {
     let id = id.trim_start_matches('#').to_lowercase();
-    let row: Option<(Json<Image>, Option<serde_json::Value>)> = sqlx::query_as(
-        "SELECT image, messages FROM backups WHERE guild_id = $1 AND (code = $2 OR id::text = $2)",
+    let row: Option<(Json<Image>, Option<serde_json::Value>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT image, messages, created_at FROM backups WHERE guild_id = $1 AND (code = $2 OR id::text = $2)",
     )
     .bind(gid.get() as i64)
     .bind(&id)
     .fetch_optional(&app.pool)
     .await?;
-    let Some((Json(image), messages)) = row else {
+    let Some((Json(image), messages, at)) = row else {
         return Ok(format!("No backup #{id}"));
     };
+    let image = Former::of(app, gid).await?.image(image, at);
     let keep = keep_set(app, gid).await?;
     if confirm {
         // A restore during a lock or panic would undo the locked permissions.
@@ -413,8 +419,8 @@ pub async fn recreate(
     ids: &HashSet<u64>,
     filters: Option<&BackupsCfg>,
 ) -> Result<Recreated> {
-    let images: Vec<(Json<Image>,)> = sqlx::query_as(
-        "SELECT image FROM backups WHERE guild_id = $1 ORDER BY created_at DESC, id DESC",
+    let images: Vec<(Json<Image>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT image, created_at FROM backups WHERE guild_id = $1 ORDER BY created_at DESC, id DESC",
     )
     .bind(gid.get() as i64)
     .fetch_all(&app.pool)
@@ -426,7 +432,8 @@ pub async fn recreate(
         .map(|r| r as u64)
         .filter(|r| !main.iter().any(|m| m.get() == *r))
         .collect();
-    let images = images.into_iter().map(|(Json(i),)| i);
+    let former = Former::of(app, gid).await?;
+    let images = images.into_iter().map(|(Json(i), at)| former.image(i, at));
     let Some((image, stripped)) = newest_with(images, ids, &staff) else {
         return Ok(Recreated::default());
     };
@@ -582,6 +589,34 @@ fn apply_filters(p: &mut Plan, f: &BackupsCfg) {
     p.roles.retain(|c| keep(c, f.restore_roles, f.delete_roles));
     p.channels
         .retain(|c| keep(c, f.restore_channels, f.delete_channels));
+}
+
+/// Roles that were the Staff role (`permits::former_staff_roles`): an image taken before one
+/// stopped being it holds the Staff role's channel access, and the role is no longer guarded, so
+/// anyone with Manage Roles could hand that access out. Every read of a backup image for a
+/// restore drops those overwrites ([`Former::strip`]); later grants stay.
+pub struct Former(Vec<(u64, DateTime<Utc>)>);
+
+impl Former {
+    pub async fn of(app: &App, gid: Id<GuildMarker>) -> Result<Self> {
+        let rows = brim_core::permits::former_staff_roles(&app.pool, gid.get() as i64).await?;
+        Ok(Self(
+            rows.into_iter().map(|(r, at)| (r as u64, at)).collect(),
+        ))
+    }
+
+    /// Drops from `overwrites` (of an image taken at `taken`) the former Staff roles' ones.
+    pub fn strip(&self, overwrites: &mut Vec<OverwriteImg>, taken: DateTime<Utc>) {
+        overwrites
+            .retain(|o| !(o.is_role && self.0.iter().any(|(r, at)| *r == o.target && taken < *at)));
+    }
+
+    fn image(&self, mut image: Image, taken: DateTime<Utc>) -> Image {
+        for c in &mut image.channels {
+            self.strip(&mut c.overwrites, taken);
+        }
+        image
+    }
 }
 
 /// Syncs the server to `image` and returns how many changes were made. `filters` is set for panic
@@ -1120,6 +1155,77 @@ async fn due(app: &App, gid: Id<GuildMarker>, hours: u64) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A role that was the Staff role gets no channel access back from a restore while it is no
+    /// level role (it is no longer guarded); while it is the Staff role again, it does.
+    #[tokio::test]
+    async fn a_restore_gives_a_former_staff_role_no_access() {
+        let Some(t) = crate::test_support::T::new(972).await else {
+            return;
+        };
+        let g = t.g(0);
+        let gi = g.get() as i64;
+        let ow = |target, is_role| OverwriteImg {
+            target,
+            is_role,
+            allow: 1 << 10,
+            deny: 0,
+        };
+        let image = Image {
+            channels: vec![ChannelImg {
+                id: 5,
+                name: "staff-chat".into(),
+                kind: 0,
+                parent: None,
+                position: 0,
+                topic: None,
+                nsfw: false,
+                overwrites: vec![ow(1000, true), ow(11, true), ow(1000, false)],
+            }],
+            ..Default::default()
+        };
+        let at = |secs| DateTime::<Utc>::from_timestamp(secs, 0).unwrap();
+        let before = at(1_000_000_000);
+        brim_core::permits::was_staff_role(&t.app.pool, gi, 1000)
+            .await
+            .unwrap();
+        let former = Former::of(&t.app, g).await.unwrap();
+        let got = former.image(image.clone(), before);
+        let targets: Vec<(u64, bool)> = got.channels[0]
+            .overwrites
+            .iter()
+            .map(|o| (o.target, o.is_role))
+            .collect();
+        assert_eq!(
+            targets,
+            vec![(11, true), (1000, false)],
+            "a member overwrite with the same id stays"
+        );
+        // An image taken after off holds access given later: it stays.
+        assert_eq!(former.image(image.clone(), at(4_000_000_000)), image);
+        // The Staff role again, or a permit role now: guarded, so it keeps its access.
+        sqlx::query(
+            "INSERT INTO level_roles (guild_id, level, role_id) VALUES ($1, 'staff', 1000)",
+        )
+        .bind(gi)
+        .execute(&t.app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            Former::of(&t.app, g)
+                .await
+                .unwrap()
+                .image(image.clone(), before),
+            image
+        );
+        for q in [
+            "DELETE FROM level_roles WHERE guild_id = $1",
+            "DELETE FROM former_staff_roles WHERE guild_id = $1",
+        ] {
+            sqlx::query(q).bind(gi).execute(&t.app.pool).await.unwrap();
+        }
+        t.cleanup().await;
+    }
 
     /// Runs only when DATABASE_URL points at a scratch Postgres. A backup during panic, a person's or
     /// an automatic one, is refused before anything is saved or deleted.

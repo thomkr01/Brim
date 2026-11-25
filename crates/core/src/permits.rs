@@ -591,11 +591,10 @@ macro_rules! staff_permits {
           (SELECT min(rank) FROM permits WHERE guild_id = $1 AND name = 'Admins')))"
     };
 }
-const STAFF_PERMITS: &str = staff_permits!();
 
 /// The roles of the levels that `user` is on, with `owner` the server owner: the Trusted Admin
 /// role for a Trusted Admin, the Owner role for the owner and an Extra Owner, the Staff role for
-/// all of those and the members of the staff permits ([`STAFF_PERMITS`]). Placeholders: $1
+/// all of those and the members of the staff permits ([`STAFF_USERS`]). Placeholders: $1
 /// guild, $2 user, $3 Discord owner (mapped to the bot owner, [`bot_owner`]).
 const LEVEL_ROLES_OF: &str = concat!("SELECT l.role_id FROM level_roles l WHERE l.guild_id = $1 AND (
     (l.level IN ('trusted_admin', 'staff') AND EXISTS (SELECT 1 FROM trusted_admins t WHERE t.guild_id = $1 AND t.user_id = $2))
@@ -623,9 +622,63 @@ pub async fn level_roles(pool: &sqlx::PgPool, guild_id: i64) -> sqlx::Result<Vec
         .await
 }
 
+/// Who the Staff role belongs to: Trusted Admins, Extra Owners, the owner ($2) and the members of
+/// the staff permits. $1 is the guild.
+const STAFF_USERS: &str = concat!(
+    "SELECT user_id FROM trusted_admins WHERE guild_id = $1
+     UNION SELECT user_id FROM extra_owners WHERE guild_id = $1
+     UNION SELECT coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $2)
+     UNION SELECT user_id FROM permit_members WHERE guild_id = $1 AND permit_id IN (",
+    staff_permits!(),
+    ")"
+);
+
+/// Roles that were the Staff role, with when they stopped being it, that are no level or permit
+/// role now: an image taken before that time held the Staff role's channel access, and a restore
+/// must not give it to a role that is no longer guarded (`backup::Former`).
+pub async fn former_staff_roles(
+    pool: &sqlx::PgPool,
+    guild_id: i64,
+) -> sqlx::Result<Vec<(i64, chrono::DateTime<chrono::Utc>)>> {
+    sqlx::query_as(
+        "SELECT role_id, since FROM former_staff_roles WHERE guild_id = $1
+         AND role_id NOT IN (SELECT role_id FROM level_roles WHERE guild_id = $1)
+         AND role_id NOT IN (SELECT role_id FROM permit_roles WHERE guild_id = $1)",
+    )
+    .bind(guild_id)
+    .fetch_all(pool)
+    .await
+}
+
+/// Records that `role` stops being the Staff role now ([`former_staff_roles`]).
+pub async fn was_staff_role<'e>(
+    c: impl sqlx::PgExecutor<'e>,
+    guild_id: i64,
+    role: i64,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO former_staff_roles (guild_id, role_id) VALUES ($1, $2)
+         ON CONFLICT (guild_id, role_id) DO UPDATE SET since = now()",
+    )
+    .bind(guild_id)
+    .bind(role)
+    .execute(c)
+    .await
+    .map(drop)
+}
+
+/// The users [`STAFF_USERS`] names, with `owner` the Discord owner (mapped by [`bot_owner`]).
+pub async fn staff_users(pool: &sqlx::PgPool, guild_id: i64, owner: i64) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar(STAFF_USERS)
+        .bind(guild_id)
+        .bind(owner)
+        .fetch_all(pool)
+        .await
+}
+
 /// (user, role) for everyone a level role belongs to: Trusted Admins, Extra Owners and the bot
 /// owner (`owner` is the Discord owner, mapped by [`bot_owner`]), and for the Staff role also the
-/// members of the staff permits ([`STAFF_PERMITS`]).
+/// members of the staff permits ([`STAFF_USERS`]).
 pub async fn level_members(
     pool: &sqlx::PgPool,
     guild_id: i64,
@@ -639,10 +692,7 @@ pub async fn level_members(
              UNION SELECT coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $2)) u ON true
          WHERE l.guild_id = $1 AND l.level = 'owner'
          UNION SELECT u.user_id, l.role_id FROM level_roles l
-           JOIN (SELECT user_id FROM trusted_admins WHERE guild_id = $1
-             UNION SELECT user_id FROM extra_owners WHERE guild_id = $1
-             UNION SELECT coalesce((SELECT o.user_id FROM rescue_owners o WHERE o.server_id = $1), $2)
-             UNION SELECT user_id FROM permit_members WHERE guild_id = $1 AND permit_id IN ({STAFF_PERMITS})) u ON true
+           JOIN ({STAFF_USERS}) u ON true
          WHERE l.guild_id = $1 AND l.level = 'staff' ORDER BY 1, 2"
     )))
     .bind(guild_id)

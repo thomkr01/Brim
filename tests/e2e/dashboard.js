@@ -487,6 +487,14 @@ fs.mkdirSync(out, { recursive: true });
   if (!(await page.locator('.modal', { hasText: 'the Staff role. Brim deletes the Staff role' }).count())) failed.push('permits: the Staff role popup does not say what changes');
   await page.locator('.modal button.danger:has-text("Turn off")').click().catch(() => {});
   await page.waitForSelector('.card.staffrole input[role="switch"]:not(:checked)', { timeout: 8000 }).catch(() => failed.push('permits: the Staff role did not turn off'));
+  // A picked role: the next sync takes it from members who are not staff, so it asks first with the count.
+  await page.locator('.card.staffrole .lp input').click().catch(() => {});
+  await page.locator('.lpl li[role=option]', { hasText: 'Viewers' }).click().catch(() => failed.push('permits: the Staff role picker lists no Viewers role'));
+  await staffSw.click().catch(() => {});
+  await page.waitForSelector('.modal[aria-label="Use this role as the Staff role?"]', { timeout: 8000 }).catch(() => failed.push('permits: no confirm before using a picked role'));
+  if (!(await page.locator('.modal', { hasText: '1 member holds @Viewers now and is not staff' }).count())) failed.push('permits: the pick confirm does not count who loses the role');
+  await page.locator('.modal button:has-text("Cancel")').click().catch(() => {});
+  if (await staffSw.isChecked().catch(() => true)) failed.push('permits: Cancel still turned the Staff role on');
   await page.goto(`${base}/#/${gid}/wizard`);
   await page.waitForSelector('#wizstep .card.staffrole input[role="switch"]', { timeout: 8000 }).catch(() => failed.push('wizard: no Staff role switch in the first step'));
   // Backups (layout PR 6): no browser frame around the settings; a backup's own page is a route with a crumb

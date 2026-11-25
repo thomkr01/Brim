@@ -26,6 +26,9 @@ ROLES = [
     {"id": "400000000000000002", "name": "Viewers", "position": 2, "permissions": "0"},
     {"id": "400000000000000003", "name": "Case staff", "position": 1, "permissions": "0"},
 ]
+# Roles the dashboard made named "Staff": kept, so the Staff role reads as live; staff hold it.
+MADE = []
+STAFF = {"200000000000000001", "200000000000000002", "200000000000000003"}
 sent = []  # messages the dashboard posted, for assertions
 missing = set()  # GET paths the mock has no answer for, printed to help extend it
 
@@ -65,7 +68,7 @@ class H(BaseHTTPRequestHandler):
         elif p == "/missing":
             self.reply(sorted(missing))
         elif gid in GUILDS and len(parts) == 3:
-            roles = [{"id": gid, "name": "@everyone", "position": 0, "permissions": "0"}, *ROLES]
+            roles = [{"id": gid, "name": "@everyone", "position": 0, "permissions": "0"}, *ROLES, *MADE]
             self.reply({**GUILDS[gid], "owner_id": USER["id"], "approximate_member_count": 7, "roles": roles})
         elif p.startswith("/channels/") and "/messages/" in p and p.count("/") == 4:
             # a member's message a trigger answers: still there
@@ -85,9 +88,12 @@ class H(BaseHTTPRequestHandler):
         elif p == "/applications/1/emojis":
             self.reply({"items": []})
         elif p.endswith("/roles"):
-            self.reply([{"id": gid or GUILD["id"], "name": "@everyone", "position": 0, "permissions": "0"}, *ROLES])
+            self.reply([{"id": gid or GUILD["id"], "name": "@everyone", "position": 0, "permissions": "0"}, *ROLES, *MADE])
         elif p.endswith("/auto-moderation/rules"):
             self.reply([])
+        elif p.endswith("/members") and gid:
+            made = [r["id"] for r in MADE]
+            self.reply([{"user": u, "roles": r + (made if u["id"] in STAFF else [])} for u, r in USERS.values()])
         elif "/members/search" in p:
             self.reply([{"user": u, "roles": r} for u, r in USERS.values()])
         elif "/members/" in p:
@@ -118,7 +124,10 @@ class H(BaseHTTPRequestHandler):
                 self.reply({"id": "500000000000000001", "token": "mock-webhook-token"})
             elif self.command == "POST" and self.path.endswith(("/roles", "/channels")):
                 # Each made role or channel its own id: Auto Setup refuses one role for two levels.
-                self.reply({"id": str(600000000000000000 + len(sent))})
+                rid = str(600000000000000000 + len(sent))
+                if self.path.endswith("/roles") and json.loads(body or b"{}").get("name") == "Staff":
+                    MADE.append({"id": rid, "name": "Staff", "position": 1, "permissions": "0", "color": 0x3498DB})
+                self.reply({"id": rid})
             else:
                 self.reply({"id": "1"})
 
@@ -126,6 +135,7 @@ class H(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         sent.append({"path": self.path, "method": "DELETE"})
+        MADE[:] = [r for r in MADE if not self.path.endswith("/roles/" + r["id"])]
         self.send_response(204)
         self.end_headers()
 
