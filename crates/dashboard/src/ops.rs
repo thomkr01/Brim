@@ -933,6 +933,8 @@ struct FixBody {
     setting: Option<String>,
     #[serde(default)]
     move_under_bot: bool,
+    /// The recommended setup: what the page showed (`security_setup::digest`).
+    shown: Option<String>,
 }
 
 /// Role and overwrite strips take a backup first, so Backups can put the old permissions back.
@@ -944,7 +946,18 @@ async fn fix(
 ) -> Res {
     let level = require(&st, &s, guild, Level::Admin, true).await?;
     let (cur, c) = crate::store::current(&st.db, guild).await?;
-    if let Some(r) = setup_fix(&st, &s, guild, level, cur, &c, b.setting.as_deref()).await? {
+    if let Some(r) = setup_fix(
+        &st,
+        &s,
+        guild,
+        level,
+        cur,
+        &c,
+        b.setting.as_deref(),
+        b.shown.as_deref(),
+    )
+    .await?
+    {
         return Ok(r);
     }
     if b.setting.as_deref() == Some(crate::exempt_roles::FIX) {
@@ -1354,6 +1367,7 @@ async fn setup_fix(
     cur: i32,
     c: &Value,
     setting: Option<&str>,
+    shown: Option<&str>,
 ) -> Result<Option<Json<Value>>, ApiError> {
     let Some(setting) = setting else {
         return Ok(None);
@@ -1580,7 +1594,7 @@ async fn setup_fix(
             done(json!({"ok": true, "version": version}))
         }
         crate::security_setup::FIX => {
-            let keys = crate::security_setup::apply(&mut config, level)?;
+            let keys = crate::security_setup::apply(&mut config, level, shown)?;
             if keys.is_empty() {
                 return done(json!({"ok": true}));
             }
@@ -2994,6 +3008,7 @@ mod tests {
 
     fn body(setting: &str) -> Json<FixBody> {
         Json(FixBody {
+            shown: None,
             role_id: None,
             channel_id: None,
             setting: Some(setting.into()),
@@ -3451,18 +3466,35 @@ mod tests {
             (Some(v as i64), json!(true))
         );
         // A Trusted Admin cannot switch Anti-nuke, as on its page.
-        let r = setup_fix(&st, &s, g, Level::Admin, v, &c, Some("enable_antinuke")).await;
+        let r = setup_fix(
+            &st,
+            &s,
+            g,
+            Level::Admin,
+            v,
+            &c,
+            Some("enable_antinuke"),
+            None,
+        )
+        .await;
         assert!(matches!(r, Err(ApiError::Forbidden(_))));
-        assert!(
-            setup_fix(&st, &s, g, Level::Owner, v, &c, Some("verification_level"))
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(setup_fix(
+            &st,
+            &s,
+            g,
+            Level::Owner,
+            v,
+            &c,
+            Some("verification_level"),
+            None
+        )
+        .await
+        .unwrap()
+        .is_none());
         // Move into range: an old 0 goes to the lowest allowed value.
         let mut c = c;
         c["panic"]["window_secs"] = json!(0);
-        let r = setup_fix(&st, &s, g, Level::Owner, v, &c, Some(CLAMP))
+        let r = setup_fix(&st, &s, g, Level::Owner, v, &c, Some(CLAMP), None)
             .await
             .unwrap()
             .unwrap();
@@ -3470,7 +3502,7 @@ mod tests {
         // The Suspicious account filter goes on, also with no filters saved yet.
         let (v, mut c) = crate::store::current(&st.db, g).await.unwrap();
         c["automod"] = json!({"enabled": true});
-        let _ = setup_fix(&st, &s, g, Level::Owner, v, &c, Some(SUSPICION))
+        let _ = setup_fix(&st, &s, g, Level::Owner, v, &c, Some(SUSPICION), None)
             .await
             .unwrap()
             .unwrap();

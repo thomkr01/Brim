@@ -27,6 +27,8 @@ struct Field {
     default: Value,
     fallback: Option<(String, f64)>,
     title: String,
+    /// The card the field sits in, which names what a plain title like "Trigger action" is about.
+    group: String,
 }
 
 fn fields() -> &'static HashMap<String, Field> {
@@ -50,6 +52,7 @@ fn fields() -> &'static HashMap<String, Field> {
                             .zip(fd["fallback"]["scale"].as_f64())
                             .map(|(p, s)| (p.to_string(), s)),
                         title: fd["title"].as_str().unwrap_or(path).to_string(),
+                        group: fd["group"].as_str().unwrap_or_default().to_string(),
                     },
                 );
             }
@@ -64,6 +67,16 @@ fn at<'a>(config: &'a Value, key: &str) -> &'a Value {
 
 /// What the bot uses for `key`: the saved value, else the older field in its units, else the default.
 fn current(config: &Value, key: &str) -> Value {
+    // An old Join Gate filter is one text, its action: on, with that action.
+    if let Some((parent, leaf)) = key.rsplit_once('.') {
+        if let (Some(old), "enabled" | "action") = (at(config, parent).as_str(), leaf) {
+            return if leaf == "enabled" {
+                json!(true)
+            } else {
+                json!(old)
+            };
+        }
+    }
     let saved = at(config, key);
     if !saved.is_null() {
         return saved.clone();
@@ -97,11 +110,12 @@ pub(crate) struct Change {
     pub wanted: &'static Value,
 }
 
-/// The differences for one server. Backups have their own row, so they are left out here.
+/// The differences for one server. Backups and Remove dangerous roles have their own rows, so they are left out here.
 pub(crate) fn changes(config: &Value) -> Vec<Change> {
     wanted()
         .iter()
-        .filter(|(k, _)| k.as_str() != "backups.enabled")
+        // Backups and Remove dangerous roles have their own rows: the second one lists who loses roles first.
+        .filter(|(k, _)| !matches!(k.as_str(), "backups.enabled" | "misc.enforce_permits"))
         .filter_map(|(k, w)| {
             let now = current(config, k);
             (!same(&now, w)).then_some(Change {
@@ -149,7 +163,12 @@ fn show(key: &str, v: &Value) -> String {
 pub(crate) fn lines(list: &[Change]) -> Vec<String> {
     list.iter()
         .map(|c| {
-            let title = fields().get(c.key).map_or(c.key, |f| f.title.as_str());
+            let f = fields().get(c.key);
+            let title = match f {
+                Some(f) if !f.group.is_empty() => format!("{}, {}", f.group, f.title),
+                Some(f) => f.title.clone(),
+                None => c.key.to_string(),
+            };
             let sec = crate::schema::schema()
                 .iter()
                 .find(|s| s["name"] == section_of(c.key))
@@ -162,6 +181,16 @@ pub(crate) fn lines(list: &[Change]) -> Vec<String> {
             )
         })
         .collect()
+}
+
+/// What the page showed, so a press after someone else saved is refused instead of applying lines nobody saw.
+pub(crate) fn digest(list: &[Change]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for c in list {
+        (c.key, c.now.to_string(), c.wanted.to_string()).hash(&mut h);
+    }
+    format!("{:x}", h.finish())
 }
 
 /// The profile row (None when the server already has every value) and the Backups row.
@@ -204,6 +233,7 @@ pub(crate) fn rows(config: &Value) -> Vec<Value> {
             steps: vec![],
         });
         row["changes"] = json!(lines(&list));
+        row["fix"]["shown"] = json!(digest(&list));
         out.push(row);
     }
     out
@@ -212,8 +242,17 @@ pub(crate) fn rows(config: &Value) -> Vec<Value> {
 /// Writes every recommended value into `config`. Each changed section needs its own write bar,
 /// and a section turned on brings its module on (the bar of the module switch). Returns the
 /// changed keys; the caller validates the sections and saves.
-pub(crate) fn apply(config: &mut Value, level: Level) -> Result<Vec<&'static str>, ApiError> {
+pub(crate) fn apply(
+    config: &mut Value,
+    level: Level,
+    shown: Option<&str>,
+) -> Result<Vec<&'static str>, ApiError> {
     let list = changes(config);
+    if shown.is_some_and(|d| d != digest(&list)) {
+        return Err(ApiError::BadRequest(
+            "The settings changed since this page loaded. Reload the page and look at the list again.".into(),
+        ));
+    }
     let mut sections: Vec<&str> = list.iter().map(|c| section_of(c.key)).collect();
     sections.dedup();
     sections.sort_unstable();
@@ -230,13 +269,17 @@ pub(crate) fn apply(config: &mut Value, level: Level) -> Result<Vec<&'static str
         let mut cur = &mut *config;
         for k in c.key.split('.') {
             if !cur.is_object() {
-                *cur = json!({});
+                // An old Join Gate filter text keeps its action.
+                *cur = match cur.as_str() {
+                    Some(old) => json!({"enabled": true, "action": old}),
+                    None => json!({}),
+                };
             }
             cur = &mut cur[k];
         }
         *cur = c.wanted.clone();
         done.push(c.key);
-        if c.key.ends_with(".enabled") && c.wanted == &json!(true) {
+        if c.key == format!("{}.enabled", section_of(c.key)) && c.wanted == &json!(true) {
             if let Some(m) = brim_core::sections::module_of(section_of(c.key)) {
                 if config["modules"][m] == false {
                     if level < crate::access::write_bar("modules").0 {
@@ -285,10 +328,10 @@ mod tests {
 
     #[test]
     fn the_profile_row_lists_only_what_differs() {
-        let all = apply(&mut json!({}), Level::Owner).unwrap();
+        let all = apply(&mut json!({}), Level::Owner, None).unwrap();
         assert!(all.len() > 40);
         let mut c = json!({});
-        apply(&mut c, Level::Owner).unwrap();
+        apply(&mut c, Level::Owner, None).unwrap();
         c["backups"]["enabled"] = json!(true);
         assert!(changes(&c).is_empty(), "applied once, nothing is left");
         assert!(rows(&c).is_empty());
@@ -314,13 +357,48 @@ mod tests {
     #[test]
     fn a_missing_switch_is_off_and_a_lower_level_is_refused() {
         assert_eq!(current(&json!({}), "antinuke.enabled"), json!(false));
-        assert!(apply(&mut json!({}), Level::Admin).is_err());
+        assert!(apply(&mut json!({}), Level::Admin, None).is_err());
         let mut c = json!({"modules": {"server_joins": false}});
-        apply(&mut c, Level::Owner).unwrap();
+        apply(&mut c, Level::Owner, None).unwrap();
         assert_eq!(c["modules"]["server_joins"], json!(true));
         // A value equal to the bot's default is not written: it is not a difference.
         assert_eq!(c["joingate"]["unverified_bot"]["enabled"], json!(true));
         assert!(c["joingate"]["unverified_bot"]["action"].is_null());
+    }
+
+    /// An old Join Gate filter (one text) is on with that action, and the Fix keeps the action.
+    #[test]
+    fn an_old_join_gate_filter_keeps_its_action() {
+        let mut c = json!({"joingate": {"suspicious": "Ban"}});
+        assert_eq!(current(&c, "joingate.suspicious.enabled"), json!(true));
+        let l = lines(&changes(&c));
+        assert!(
+            l.iter()
+                .any(|x| x.contains("Suspicious account") && x.contains("Ban to Kick")),
+            "{l:?}"
+        );
+        apply(&mut c, Level::Owner, None).unwrap();
+        assert_eq!(c["joingate"]["suspicious"]["action"], json!("Kick"));
+        // Only the section's own switch brings its module on.
+        let mut m = json!({"modules": {"server_joins": false}, "joingate": {"enabled": true}});
+        apply(&mut m, Level::Owner, None).unwrap();
+        assert_eq!(
+            m["modules"]["server_joins"],
+            json!(true),
+            "joingate.enabled is on already"
+        );
+        let mut n = json!({"modules": {"server_joins": false}, "joingate": {"enabled": true}, "joinraid": {"enabled": true}, "verification": {"enabled": true}, "raider_list": {"enabled": true}});
+        apply(&mut n, Level::Owner, None).unwrap();
+        assert_eq!(n["modules"]["server_joins"], json!(false));
+    }
+
+    #[test]
+    fn a_press_after_another_save_is_refused() {
+        let c = json!({});
+        let d = digest(&changes(&c));
+        assert!(apply(&mut c.clone(), Level::Owner, Some(&d)).is_ok());
+        assert!(apply(&mut c.clone(), Level::Owner, Some("0")).is_err());
+        assert!(!changes(&c).iter().any(|c| c.key == "misc.enforce_permits"));
     }
 
     #[test]
