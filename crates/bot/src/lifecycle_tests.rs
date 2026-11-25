@@ -1547,3 +1547,123 @@ fn dashboard_lock_bar() {
     ));
     assert!(!super::may_lock(&Level::None, "lockdown", &[], false));
 }
+
+/// The catch channel's default is a softban with 7 days of purge; a burst of messages makes one
+/// case and one count; a pin notice is not writing; a slash command used there catches the
+/// member who ran it, not the app that answered.
+#[tokio::test]
+async fn the_catch_channel_catches_once_skips_system_messages_and_sees_slash_commands() {
+    let Some(t) = T::new(976).await else { return };
+    use twilight_model::gateway::payload::incoming::MessageCreate;
+    let gid = t.g(0);
+    let cfg = json!({"catch": {"enabled": true, "channel": "7"}, "misc": {"ban_purge_days": 0}});
+    t.server_config(0, t.owner(), cfg).await;
+    let (spam, pinner, slash) = (t.base + 5, t.base + 6, t.base + 7);
+    t.set(|m| {
+        for u in [spam, pinner, slash] {
+            m.members.insert((gid.get(), u), vec![]);
+        }
+    });
+    bot_on_top(&t, 0);
+    let post = |id: u64, extra: Value| {
+        let mut v = json!({"guild_id": gid.to_string(), "id": id.to_string(), "content": "free nitro",
+            "author": {"id": spam.to_string(), "username": "x", "discriminator": "0", "avatar": null}});
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        MessageCreate {
+            channel_type: None,
+            message: crate::automod::more_tests::msg(v),
+        }
+    };
+    let cases = || async {
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM cases WHERE guild_id = $1")
+            .bind(gid.get() as i64)
+            .fetch_one(&t.app.pool)
+            .await
+            .unwrap();
+        n
+    };
+    // A burst: both messages are handled, only the first punishes.
+    assert!(crate::catch::on_message(&t.app, &post(100, json!({})))
+        .await
+        .unwrap());
+    assert!(crate::catch::on_message(&t.app, &post(101, json!({})))
+        .await
+        .unwrap());
+    assert_eq!(cases().await, 1);
+    assert_eq!(
+        t.calls("\"delete_message_seconds\":604800"),
+        1,
+        "softban purges 7 days"
+    );
+    let hits: (i64, String) =
+        sqlx::query_as("SELECT count(*), max(action) FROM catch_hits WHERE guild_id = $1")
+            .bind(gid.get() as i64)
+            .fetch_one(&t.app.pool)
+            .await
+            .unwrap();
+    assert_eq!(hits, (1, "softban".into()));
+    // A pin notice (type 6) is a system message by the pinner.
+    let pin = json!({"type": 6, "author": {"id": pinner.to_string(), "username": "p", "discriminator": "0", "avatar": null}});
+    assert!(!crate::catch::on_message(&t.app, &post(102, pin))
+        .await
+        .unwrap());
+    // Another app's answer to a slash command: the member who ran it is caught.
+    let user = |u: u64| json!({"id": u.to_string(), "username": "s", "discriminator": "0", "avatar": null});
+    let answer = json!({"type": 20, "author": {"id": "4242", "username": "app", "discriminator": "0", "avatar": null, "bot": true},
+        "interaction_metadata": {"id": "9", "type": 2, "user": user(slash), "authorizing_integration_owners": {}}});
+    assert!(crate::catch::on_message(&t.app, &post(103, answer))
+        .await
+        .unwrap());
+    let who: Vec<i64> =
+        sqlx::query_scalar("SELECT user_id FROM cases WHERE guild_id = $1 ORDER BY case_no")
+            .bind(gid.get() as i64)
+            .fetch_all(&t.app.pool)
+            .await
+            .unwrap();
+    assert_eq!(who, [spam as i64, slash as i64]);
+    t.exec("DELETE FROM catch_hits WHERE guild_id BETWEEN $1 AND $1 + 9")
+        .await;
+    t.cleanup().await;
+}
+
+/// A kick from the catch channel also deletes the member's recent messages in other channels
+/// (the ones Auto Mod tracked), as a ban's purge would.
+#[tokio::test]
+async fn a_catch_channel_kick_deletes_the_spam_in_other_channels() {
+    let Some(t) = T::new(977).await else { return };
+    use twilight_model::gateway::payload::incoming::MessageCreate;
+    let gid = t.g(0);
+    let cfg = json!({"catch": {"enabled": true, "channel": "7", "action": "Kick"}});
+    t.server_config(0, t.owner(), cfg).await;
+    let spam = t.base + 5;
+    t.set(|m| {
+        m.members.insert((gid.get(), spam), vec![]);
+    });
+    bot_on_top(&t, 0);
+    // A fresh id (now), so it is inside Discord's 14 days for deletes.
+    let other = ((crate::app::now_secs() as u64 * 1000 - 1_420_070_400_000) << 22) + 1;
+    t.app
+        .heat
+        .lock()
+        .unwrap()
+        .entry((gid.get(), spam))
+        .or_default()
+        .1
+        .track(8, other);
+    let post = MessageCreate {
+        channel_type: None,
+        message: crate::automod::more_tests::msg(json!({"guild_id": gid.to_string(),
+            "author": {"id": spam.to_string(), "username": "x", "discriminator": "0", "avatar": null}})),
+    };
+    assert!(crate::catch::on_message(&t.app, &post).await.unwrap());
+    assert_eq!(
+        t.calls(&format!("/channels/8/messages/{other}")),
+        1,
+        "the spam elsewhere is deleted"
+    );
+    t.exec("DELETE FROM catch_hits WHERE guild_id BETWEEN $1 AND $1 + 9")
+        .await;
+    t.cleanup().await;
+}

@@ -245,6 +245,11 @@ pub async fn apply_dm(
         }
     }
     let cfg = app.cfg(gid.get()).await?;
+    let purge = if flags.full_purge {
+        7 * 86_400
+    } else {
+        cfg.misc.purge_secs()
+    };
     let soft = flags.soft && kind == ModKind::Ban;
     let name = if soft { "softban" } else { perm };
     let dm_kind = match kind {
@@ -289,7 +294,7 @@ pub async fn apply_dm(
                 // A softban exists to purge messages, so purge a day when the server default is none.
                 app.http
                     .create_ban(gid, target)
-                    .delete_message_seconds(cfg.misc.purge_secs().max(86_400))
+                    .delete_message_seconds(purge.max(86_400))
                     .reason(&audit)
                     .await?;
                 // The ban stands: an outage on the unban is retried by a job, never a lasting ban.
@@ -317,7 +322,7 @@ pub async fn apply_dm(
                 }
                 app.http
                     .create_ban(gid, target)
-                    .delete_message_seconds(cfg.misc.purge_secs())
+                    .delete_message_seconds(purge)
                     .reason(&audit)
                     .await?;
                 crate::scheduler::forget_jobs(app, gid, t, crate::scheduler::BANNED, unban_job)
