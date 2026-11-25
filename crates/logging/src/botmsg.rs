@@ -6748,10 +6748,31 @@ const FUNCTIONS: &[(&str, &str, &[&str])] = &[
     ("dm.", "cmd", &[]),
 ];
 
+/// Entries whose `{text}` holds one clear thing: the name it gets (with the function's prefix,
+/// `{tk_reply}`) instead of `text`. Migration 4072 renamed the saved copies; the frames of logs and
+/// commands keep `{text}`.
+const TEXT_NAMES: &[(&str, &str)] = &[
+    ("ticket.sent", "message"),
+    ("ticket.reply", "reply"),
+    ("ticket.greeting", "greeting"),
+    ("ticket.closing", "closing"),
+    ("reply.ticket.usage", "usage"),
+    ("reply.error.usage", "usage"),
+    ("reply.error.wrong_use", "problem"),
+    ("reply.confirm.question", "target"),
+    ("reply.lock.updates_notice", "updates"),
+    ("reply.lock.locked_notice", "updates"),
+];
+
 /// The name members type for variable `var` of entry `key` (owner rule, 2026-11-23): a Discord
 /// thing as Discord names it, else Brim's own as `function_name`. The code passes values by the
 /// code name; the editor, saved copies and backups hold this name.
 pub fn public_name(key: &str, var: &str) -> String {
+    // The code passes these entries' one variable as `text`; members see what it holds.
+    let var = match (var, TEXT_NAMES.iter().find(|(k, _)| *k == key)) {
+        ("text", Some((_, what))) => what,
+        _ => var,
+    };
     let discord = |o: &str| {
         [
             "member", "user", "guild", "channel", "role", "message", "thread",
@@ -7635,6 +7656,27 @@ mod tests {
         }
     }
 
+    /// Migration 4072 renamed `{text}` of ten entries: each pair is still the name members see, and
+    /// an old copy that still says `{text}` is renamed when it loads.
+    #[test]
+    fn migration_4072_matches_the_names() {
+        let sql = include_str!("../../core/migrations/4072_text_variable_names.sql");
+        let mut n = 0;
+        for l in sql.lines().filter_map(|l| l.strip_prefix("('")) {
+            let (k, new) = l.split_once("', '").unwrap();
+            let new = new.trim_end_matches([',', ';', ')', '\'']);
+            assert_eq!(format!("{{{}}}", public_name(k, "text")), new, "{k}");
+            let old = json!({"content": "", "embeds": [{"description": "x {text}"}]});
+            assert_eq!(
+                to_public(k, &old)["embeds"][0]["description"],
+                format!("x {new}"),
+                "{k}"
+            );
+            n += 1;
+        }
+        assert_eq!(n, TEXT_NAMES.len());
+    }
+
     #[test]
     fn names_follow_the_owner_rule() {
         assert_eq!(public_name("giveaway.running", "prize"), "ga_prize");
@@ -8227,16 +8269,16 @@ mod tests {
             assert_eq!(d.what.is_empty(), !has, "{}", d.key);
             assert!(missing_text(&d.key, &d.template).is_none(), "{}", d.key);
         }
-        let ok = json!({"embeds": [{"fields": [{"name": "n", "value": "Got: {text}"}]}]});
+        let ok = json!({"embeds": [{"fields": [{"name": "n", "value": "Got: {tk_reply}"}]}]});
         assert!(missing_text("ticket.reply", &ok).is_none());
         for bad in [
-            json!({"content": "{text}", "embeds": [{"description": "x"}]}),
-            json!({"embeds": [{"description": "x"}, {"description": "{text}"}]}),
-            json!({"embeds": [{"description": "x", "url": "https://a/{text}"}]}),
+            json!({"content": "{tk_reply}", "embeds": [{"description": "x"}]}),
+            json!({"embeds": [{"description": "x"}, {"description": "{tk_reply}"}]}),
+            json!({"embeds": [{"description": "x", "url": "https://a/{tk_reply}"}]}),
         ] {
             let why = missing_text("ticket.reply", &bad).expect("refused");
             assert!(
-                why.contains("{text}") && why.contains("staff member's reply"),
+                why.contains("{tk_reply}") && why.contains("staff member's reply"),
                 "{why}"
             );
             // A stored copy without it sends the default: the reply is never lost.
