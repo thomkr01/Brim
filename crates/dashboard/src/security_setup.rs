@@ -190,8 +190,9 @@ pub(crate) fn rows(config: &Value) -> Vec<Value> {
             severity: Severity::Warn,
             title: "Security setup differs from the recommended one",
             detail: format!(
-                "{} setting(s) differ from the recommended setup. Brim changes only these; everything else stays as you set it. The wizard shows the same values.",
-                list.len()
+                "{} from the recommended setup. Brim changes only {}; everything else stays as you set it. The wizard shows the same values.",
+                if list.len() == 1 { "1 setting differs".to_string() } else { format!("{} settings differ", list.len()) },
+                if list.len() == 1 { "this one" } else { "these" },
             ),
             fix: Some(Fix {
                 label: "Use the recommended setup",

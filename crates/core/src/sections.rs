@@ -1813,7 +1813,7 @@ mod tests {
         }
     }
 
-    /// Loading a backup after Panic mode is on until the owner turns it off, also in a config saved
+    /// Loading a backup when Panic mode starts is on until the owner turns it off, also in a config saved
     /// before the switch existed.
     #[test]
     fn panic_loads_a_backup_unless_switched_off() {
