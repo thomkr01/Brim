@@ -1348,22 +1348,39 @@ async fn ticket_panel_variable_migration_renames_text() {
     let g = gid(97);
     for t in ["bot_messages", "bot_messages_undo"] {
         let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
-        sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(g).execute(&p).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(g)
+            .execute(&p)
+            .await
+            .unwrap();
     }
     let old = json!({"content": "", "embeds": [{"description": "Hi\n{text}"}]});
     sqlx::query("INSERT INTO bot_messages (guild_id, key, message, updated_by) VALUES ($1, 'ticket.panel', $2, 1), ($1, 'ticket.reply', $2, 1)")
         .bind(g).bind(&old).execute(&p).await.unwrap();
-    sqlx::query("INSERT INTO bot_messages_undo (guild_id, key, message) VALUES ($1, 'ticket.panel', $2)")
-        .bind(g).bind(&old).execute(&p).await.unwrap();
+    sqlx::query(
+        "INSERT INTO bot_messages_undo (guild_id, key, message) VALUES ($1, 'ticket.panel', $2)",
+    )
+    .bind(g)
+    .bind(&old)
+    .execute(&p)
+    .await
+    .unwrap();
     let sql = include_str!("../migrations/4071_ticket_panel_variable.sql");
     for _ in 0..2 {
-        sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(&p).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+            .execute(&p)
+            .await
+            .unwrap();
         let get = |t: &'static str, k: &'static str| {
             let p = p.clone();
             async move {
                 let sql = format!("SELECT message FROM {t} WHERE guild_id = $1 AND key = $2");
                 sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe(sql.as_str()))
-                    .bind(g).bind(k).fetch_one(&p).await.unwrap()
+                    .bind(g)
+                    .bind(k)
+                    .fetch_one(&p)
+                    .await
+                    .unwrap()
             }
         };
         let new = json!({"content": "", "embeds": [{"description": "Hi\n{tk_panels}"}]});
@@ -1373,6 +1390,10 @@ async fn ticket_panel_variable_migration_renames_text() {
     }
     for t in ["bot_messages", "bot_messages_undo"] {
         let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
-        sqlx::query(sqlx::AssertSqlSafe(sql.as_str())).bind(g).execute(&p).await.unwrap();
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(g)
+            .execute(&p)
+            .await
+            .unwrap();
     }
 }
