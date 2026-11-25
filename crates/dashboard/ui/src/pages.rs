@@ -495,6 +495,8 @@ fn action(r: &Value) -> String {
         (Some("member_role"), _) => "Create a Member role and make it the main role".into(),
         (Some("staff_access"), _) => "Let every staff role into the Logs and Staff categories".into(),
         (Some("catch_channel"), _) => "Make a new golden channel where Auto Setup puts it".into(),
+        (Some("catch_files"), _) => "Allow files in the golden channel".into(),
+        (Some("golden_name"), _) => "Rename the golden channel to #golden-channel".into(),
         (Some("ticket_log_place"), _) => "Move the ticket log into the Logs category".into(),
         (Some("bot_hoist"), _) => {
             "Give Brim its own role, so it is its own group in the member list".into()

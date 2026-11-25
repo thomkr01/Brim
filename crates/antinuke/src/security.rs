@@ -1195,6 +1195,30 @@ pub fn catch_gone_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -
     })
 }
 
+/// The name Brim gives the golden channel (owner decision 2026-11-25).
+pub const GOLDEN_CHANNEL: &str = "golden-channel";
+
+/// Fix setting for [`golden_name_check`].
+pub const GOLDEN_NAME: &str = "golden_name";
+
+/// The golden channel still has another name (made before the rename, or renamed by staff). Only
+/// a note: the name changes nothing, and nothing renames it unless the owner presses the fix.
+pub fn golden_name_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -> Option<Check> {
+    let id = catch.filter(|_| on)?;
+    let c = channels.iter().find(|c| c.id == id)?;
+    (c.name != GOLDEN_CHANNEL).then(|| Check {
+        id: format!("{NOTE}golden_name"),
+        severity: Severity::Warn,
+        title: "The golden channel has another name",
+        detail: format!(
+            "#{} is the golden channel. The fix renames it to #{GOLDEN_CHANNEL}.",
+            c.name
+        ),
+        fix: act("Rename it", GOLDEN_NAME),
+        steps: vec![],
+    })
+}
+
 /// Fix setting for [`catch_files_check`].
 pub const CATCH_FILES: &str = "catch_files";
 
@@ -1793,6 +1817,20 @@ mod tests {
         assert!(catch_gone_check(&chans, Some(71), false).is_none());
         let row = catch_gone_check(&chans, Some(71), true).unwrap();
         assert_eq!(row.fix.unwrap().setting, Some(CATCH_CHANNEL));
+    }
+
+    #[test]
+    fn an_old_golden_channel_name_gets_a_note_with_a_rename() {
+        let mut old = chan(70, 0, None, vec![]);
+        old.name = "do-not-write".into();
+        let mut new = chan(71, 0, None, vec![]);
+        new.name = GOLDEN_CHANNEL.into();
+        let chans = [old, new];
+        let row = golden_name_check(&chans, Some(70), true).unwrap();
+        assert!(row.id.starts_with(NOTE));
+        assert_eq!(row.fix.unwrap().setting, Some(GOLDEN_NAME));
+        assert!(golden_name_check(&chans, Some(71), true).is_none());
+        assert!(golden_name_check(&chans, Some(70), false).is_none());
     }
 
     #[test]
