@@ -285,6 +285,13 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
             .and_then(|x| x.parse().ok()),
         config["catch"]["enabled"] == true && config["modules"]["moderation"] != false,
     ));
+    rows.extend(brim_antinuke::security::golden_name_check(
+        &l.image.channels,
+        config["catch"]["channel"]
+            .as_str()
+            .and_then(|x| x.parse().ok()),
+        config["catch"]["enabled"] == true && config["modules"]["moderation"] != false,
+    ));
     rows.extend(brim_antinuke::security::catch_files_check(
         &l.image.channels,
         config["catch"]["channel"]
@@ -992,6 +999,32 @@ async fn fix(
             &c,
             None,
             "let the staff roles into the Logs and Staff categories from the security score",
+        )
+        .await;
+        return Ok(Json(json!({"ok": true})));
+    }
+    if b.setting.as_deref() == Some(brim_antinuke::security::GOLDEN_NAME) {
+        // Only the name changes: no backup needed.
+        let Some(ch) = c["catch"]["channel"].as_str() else {
+            return Ok(Json(json!({"ok": true})));
+        };
+        // Only a channel of this server: an old stored id may name another server's channel.
+        let here = live(&st, guild, &c).await?.image.channels;
+        if !here.iter().any(|x| Some(x.id) == ch.parse().ok()) {
+            return Ok(Json(json!({"ok": true})));
+        }
+        let name = json!({"name": brim_antinuke::security::GOLDEN_CHANNEL});
+        st.discord
+            .call(Method::PATCH, &format!("/channels/{ch}"), Some(name))
+            .await
+            .map_err(|_| ApiError::BadRequest("Discord refused the new name. Check that Brim may manage that channel, then try again.".into()))?;
+        log_by(
+            &st,
+            &s,
+            guild,
+            &c,
+            None,
+            "renamed the golden channel from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
