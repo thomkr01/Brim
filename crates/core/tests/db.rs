@@ -1397,3 +1397,64 @@ async fn ticket_panel_variable_migration_renames_text() {
             .unwrap();
     }
 }
+
+/// Migration 4072 renames `{text}` in the ten entries it names, in both tables, and leaves the
+/// frames of logs and commands alone; a second run changes nothing.
+#[tokio::test]
+async fn text_variable_migration_renames_ten_entries() {
+    let Some(p) = pool().await else { return };
+    let g = gid(98);
+    for t in ["bot_messages", "bot_messages_undo"] {
+        let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(g)
+            .execute(&p)
+            .await
+            .unwrap();
+    }
+    let old = json!({"content": "", "embeds": [{"description": "Hi\n{text}"}]});
+    sqlx::query("INSERT INTO bot_messages (guild_id, key, message, updated_by) VALUES ($1, 'ticket.reply', $2, 1), ($1, 'reply.error.usage', $2, 1), ($1, 'cmd.ban', $2, 1)")
+        .bind(g).bind(&old).execute(&p).await.unwrap();
+    sqlx::query("INSERT INTO bot_messages_undo (guild_id, key, message) VALUES ($1, 'reply.lock.locked_notice', $2)")
+        .bind(g).bind(&old).execute(&p).await.unwrap();
+    let sql = include_str!("../migrations/4072_text_variable_names.sql");
+    for _ in 0..2 {
+        let mut tx = p.begin().await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        let get = |t: &'static str, k: &'static str| {
+            let p = p.clone();
+            async move {
+                let sql = format!("SELECT message FROM {t} WHERE guild_id = $1 AND key = $2");
+                sqlx::query_scalar::<_, Value>(sqlx::AssertSqlSafe(sql.as_str()))
+                    .bind(g)
+                    .bind(k)
+                    .fetch_one(&p)
+                    .await
+                    .unwrap()
+            }
+        };
+        let to = |v: &str| json!({"content": "", "embeds": [{"description": format!("Hi\n{v}")}]});
+        assert_eq!(get("bot_messages", "ticket.reply").await, to("{tk_reply}"));
+        assert_eq!(
+            get("bot_messages", "reply.error.usage").await,
+            to("{cmd_usage}")
+        );
+        assert_eq!(
+            get("bot_messages_undo", "reply.lock.locked_notice").await,
+            to("{lock_updates}")
+        );
+        assert_eq!(get("bot_messages", "cmd.ban").await, old);
+    }
+    for t in ["bot_messages", "bot_messages_undo"] {
+        let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
+        sqlx::query(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(g)
+            .execute(&p)
+            .await
+            .unwrap();
+    }
+}
