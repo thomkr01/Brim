@@ -839,7 +839,7 @@ pub const DEFAULT_PANEL_TEXT: &str = "{e:ticket} Need help from staff? Press a b
 pub const DEFAULT_GREETING: &str = "Hi {member}, thanks for reaching out. Tell us what you need, with as much detail as you can, and staff will answer here soon.";
 
 /// The panel message: the `ticket.panel` entry (`look`, the server's edited version, else the
-/// default) with a line per panel that has a description as `{text}`, and a button per panel or
+/// default) with a line per panel that has a description as `{tk_panels}`, and a button per panel or
 /// one menu. With `per_type` (the switch on) a panel with no preset type shows a button or menu
 /// option per entry of `types` (`button_types`). The custom ids are the ones
 /// `bot/src/tickets/panel.rs` reads.
@@ -857,14 +857,14 @@ pub fn panel_message(
         .filter(|p| !p.description.is_empty())
         .map(|p| format!("**{}**\n{}", p.name, p.description))
         .collect();
-    let vars = [("text", text.join("\n\n"))];
+    let vars = [("panels", text.join("\n\n"))];
     let vars: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (*k, v.as_str())).collect();
     let mut m = brim_logging::botmsg::render("ticket.panel", look, &vars);
     // An edited version with only text has no embed to carry the buttons' message: the default.
     if m["embeds"].as_array().is_none_or(Vec::is_empty) {
         m = brim_logging::botmsg::render("ticket.panel", None, &vars);
     }
-    // Brim emoji tags (`{e:name}`) work in the entry and in panel descriptions; an empty `{text}`
+    // Brim emoji tags (`{e:name}`) work in the entry and in panel descriptions; an empty `{tk_panels}`
     // leaves blank lines at the end.
     for e in m["embeds"].as_array_mut().into_iter().flatten() {
         for p in ["/title", "/description", "/footer/text"] {
@@ -2154,7 +2154,7 @@ mod tests {
         let mut with = ps.clone();
         with[0].description = "Questions {e:ticket}".into();
         let refs: Vec<&TicketPanel> = with.iter().collect();
-        let own = json!({"embeds": [{"title": "Help", "description": "{text}"}]});
+        let own = json!({"embeds": [{"title": "Help", "description": "{tk_panels}"}]});
         let m = panel_message(&refs, false, Some(&own), &types, false);
         assert_eq!(m["embeds"][0]["title"], "Help");
         let d = m["embeds"][0]["description"].as_str().unwrap();

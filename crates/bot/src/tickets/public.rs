@@ -532,7 +532,7 @@ mod tests {
         // The default look and an edited one both become a Discord embed.
         let (e, _, _) = body(&refs, None, (&[], false)).unwrap();
         assert!(e.footer.is_some() && e.description.is_some());
-        let own = json!({"content": "", "embeds": [{"title": "Help desk", "description": "{text}", "color": 1}]});
+        let own = json!({"content": "", "embeds": [{"title": "Help desk", "description": "{tk_panels}", "color": 1}]});
         let (e, _, _) = body(&refs, Some(&own), (&[], false)).unwrap();
         assert_eq!(e.title.as_deref(), Some("Help desk"));
     }
