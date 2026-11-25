@@ -948,6 +948,7 @@ async fn act(
                     duration_s: None,
                     proof: None,
                     inverse: None,
+                    feature: "joingate",
                 },
             )
             .await?;

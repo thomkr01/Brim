@@ -176,6 +176,9 @@ pub async fn set_dashboard_role(pool: &PgPool, pw: &str) -> Result<()> {
         "GRANT UPDATE (status, handled_by, handled_at) ON reports TO brim_dashboard",
         // The bot's own records of what happened: read only (and deleted with their server).
         "REVOKE INSERT, UPDATE ON raid_log, joingate_actions, nuke_incidents, catch_hits FROM brim_dashboard",
+        // The stats counts (migration 4100): read only. Its staff actions count through the
+        // `mod_actions` trigger, its server purge through `purge_guild`, both as the owner.
+        "REVOKE INSERT, UPDATE, DELETE ON stat_events, stat_daily, stat_daily_all, stat_folded FROM brim_dashboard",
         // Only the bot counts wrong giveaway entry codes.
         "REVOKE INSERT, UPDATE, DELETE ON giveaway_code_tries FROM brim_dashboard",
         // Members' stored names and avatars (migration 4044): it only counts them for a data
@@ -432,6 +435,15 @@ mod tests {
             "DELETE FROM raider_evidence WHERE false",
             "INSERT INTO mod_actions (id, guild_id, mod_id, kind, source) SELECT 1, 1, 1, 'x', 'x' WHERE false",
             "INSERT INTO case_edits (guild_id, case_no, field, editor_id, edited_at) SELECT 1, 1, 'reason', 1, now() WHERE false",
+            // The stats counts: read only, and no way past the triggers.
+            "INSERT INTO stat_events (guild_id, kind, feature) SELECT 1, 'x', 'x' WHERE false",
+            "INSERT INTO stat_daily SELECT * FROM stat_daily WHERE false",
+            "UPDATE stat_daily SET n = 0 WHERE false",
+            "DELETE FROM stat_daily WHERE false",
+            "DELETE FROM stat_daily_all WHERE false",
+            "UPDATE stat_folded SET day = now() WHERE false",
+            "SELECT stat_add(1, 'x', 'x', 1, NULL) WHERE false",
+            "INSERT INTO mod_actions (guild_id, mod_id, kind, source, feature) SELECT 1, 1, 'x', 'x', 'x' WHERE false",
         ] {
             let e = sqlx::query(sql).execute(&dash).await.expect_err(sql);
             // Refused for the right, not for a mistake in the statement.

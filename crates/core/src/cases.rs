@@ -36,6 +36,8 @@ pub struct NewCase<'a> {
     pub proof: Option<&'a str>,
     /// Inverse operation, e.g. `{"op":"unban","user":123}`; stored in action_log.
     pub inverse: Option<Value>,
+    /// The part of Brim that made the case, for the stats (`staff`, `automod`, `antinuke`, ...).
+    pub feature: &'a str,
 }
 
 /// Inserts the case and its action_log row atomically; returns the per-guild case number.
@@ -98,6 +100,7 @@ pub async fn create(pool: &PgPool, c: NewCase<'_>) -> Result<i32> {
             case_no: Some(case_no),
             audit_id: None,
             ai_client: None,
+            feature: Some(c.feature),
         },
     )
     .await?;
@@ -118,24 +121,35 @@ pub struct ModAction<'a> {
     pub audit_id: Option<i64>,
     /// The MCP token that made the change for the bot owner (`mcp::Via`); None for a person.
     pub ai_client: Option<&'a str>,
+    /// The part of Brim for the stats; None counts it under `source`. Bot only: the dashboard
+    /// role has no right on this column.
+    pub feature: Option<&'a str>,
 }
 
 /// Records a staff action, inside the caller's transaction when it has one.
 pub async fn record(c: &mut sqlx::PgConnection, a: ModAction<'_>) -> Result<()> {
-    sqlx::query(
+    // The trigger `stat_mod_action` (migration 4100) counts the row for the stats.
+    let sql = if a.feature.is_some() {
+        "INSERT INTO mod_actions (guild_id, mod_id, kind, source, target_id, case_no, audit_id, ai_client, feature)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT DO NOTHING"
+    } else {
         "INSERT INTO mod_actions (guild_id, mod_id, kind, source, target_id, case_no, audit_id, ai_client)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING",
-    )
-    .bind(a.guild_id)
-    .bind(a.mod_id)
-    .bind(a.kind)
-    .bind(a.source)
-    .bind(a.target_id)
-    .bind(a.case_no)
-    .bind(a.audit_id)
-    .bind(a.ai_client)
-    .execute(c)
-    .await?;
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING"
+    };
+    let q = sqlx::query(sql)
+        .bind(a.guild_id)
+        .bind(a.mod_id)
+        .bind(a.kind)
+        .bind(a.source)
+        .bind(a.target_id)
+        .bind(a.case_no)
+        .bind(a.audit_id)
+        .bind(a.ai_client);
+    let q = match a.feature {
+        Some(f) => q.bind(f),
+        None => q,
+    };
+    q.execute(c).await?;
     Ok(())
 }
 
@@ -448,6 +462,7 @@ mod tests {
                 duration_s,
                 proof: None,
                 inverse: None,
+                feature: "staff",
             };
             create(&pool, c)
         };
@@ -535,6 +550,7 @@ mod tests {
                 duration_s: None,
                 proof: None,
                 inverse: None,
+                feature: "staff",
             };
             create(&pool, c).await.unwrap();
         }

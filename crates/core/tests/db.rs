@@ -57,6 +57,7 @@ fn case(
         duration_s: None,
         proof: None,
         inverse,
+        feature: "staff",
     }
 }
 
@@ -415,6 +416,7 @@ async fn cases_and_audit_entries_count_once_for_mod_stats() {
                 case_no: None,
                 audit_id: Some(77),
                 ai_client: None,
+                feature: None,
             },
         )
         .await

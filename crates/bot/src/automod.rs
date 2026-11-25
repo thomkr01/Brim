@@ -1078,6 +1078,7 @@ pub(crate) async fn auto_case(
             duration_s,
             inverse: None,
             proof: None,
+            feature: "automod",
         },
     )
     .await
@@ -1118,6 +1119,7 @@ async fn filter_action(
                     duration_s: None,
                     proof: None,
                     inverse: None,
+                    feature: "automod",
                 },
             )
             .await?;
