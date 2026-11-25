@@ -1,6 +1,6 @@
 //! Auto Setup's channel access (owner decision 2026-11-16): staff see the Logs and Staff categories,
 //! the optional Admin-only and Owner-only chats, the Information category (members read, staff
-//! write) with the catch channel at its bottom, and the standard set on every open channel.
+//! write) with the golden channel at its bottom, and the standard set on every open channel.
 //! Every step only adds what is missing; it never takes an overwrite away.
 use crate::{
     sections::{category, own},
@@ -20,7 +20,7 @@ const VIEW: u64 = 1 << 10;
 const SEND: u64 = 1 << 11;
 const HISTORY: u64 = 1 << 16;
 const MENTION_EVERYONE: u64 = 1 << 17;
-/// Add Reactions and Embed Links: what nobody gets in the catch channel. Attach Files stays
+/// Add Reactions and Embed Links: what nobody gets in the golden channel. Attach Files stays
 /// allowed: a spam bot that posts only a picture must be able to write there to be caught.
 const CATCH_DENY: u64 = 16448;
 /// Attach Files.
@@ -29,7 +29,7 @@ pub(crate) const ATTACH: u64 = 1 << 15;
 const THREADS: u64 = (1 << 35) | (1 << 36) | (1 << 38);
 /// View Channel, Send Messages, Embed Links: what the bot needs to post.
 const BOT: u64 = 19456;
-/// The bot in the catch channel: [`BOT`] plus Manage Messages and Read Message History.
+/// The bot in the golden channel: [`BOT`] plus Manage Messages and Read Message History.
 const BOT_CATCH: u64 = 93184;
 
 /// The category for updates and announcements; members read it, staff write.
@@ -481,7 +481,7 @@ fn information_overwrites(
 }
 
 /// Makes or reuses the Information category with #announcements and #rules (owner decision
-/// 2026-11-16) and sets it as the catch channel's place in `config`. A reused category gets the
+/// 2026-11-16) and sets it as the golden channel's place in `config`. A reused category gets the
 /// staff roles' access added. Returns the names of the channels it created.
 pub(crate) async fn information(
     st: &AppState,
@@ -540,7 +540,7 @@ pub(crate) async fn information(
 
 /// Puts every channel without a category into "Text Channels" or, voice and stage, "Voice
 /// Channels" (each reused by name or made), so only the verification channel sits above the
-/// categories (owner decision 2026-11-17). The catch channel goes to Information instead. They keep
+/// categories (owner decision 2026-11-17). The golden channel goes to Information instead. They keep
 /// their overwrites; the standard set makes them verified-only when it may run. Returns the
 /// categories it made.
 pub(crate) async fn sort_loose(
@@ -675,7 +675,7 @@ pub(crate) async fn verify_access(
     Ok(failed)
 }
 
-/// Information and every channel in it but the catch channel, which [`move_catch`] handles.
+/// Information and every channel in it but the golden channel, which [`move_catch`] handles.
 fn info_channels<'a>(chans: &'a [ChannelImg], cat: u64, config: &Value) -> Vec<&'a ChannelImg> {
     let catch = id_of(&config["catch"]["channel"]);
     chans
@@ -772,7 +772,7 @@ pub(crate) fn verification_first(config: &Value, moves: &mut Vec<Value>) {
     }
 }
 
-/// The catch channel's overwrites inside Information: only verified members (the main roles)
+/// The golden channel's overwrites inside Information: only verified members (the main roles)
 /// see it, and they may write there, so a hacked account that spams every channel is caught.
 /// Merged into `c`'s overwrites when it exists; @everyone's is the bot's own and is replaced.
 fn catch_overwrites(
@@ -829,12 +829,12 @@ fn catch_overwrites(
     ows
 }
 
-/// Whether the catch channel is hidden from @everyone, as [`catch_overwrites`] makes it.
+/// Whether the golden channel is hidden from @everyone, as [`catch_overwrites`] makes it.
 fn catch_hidden(c: &ChannelImg, guild: i64) -> bool {
     role_overwrite(c, guild as u64).deny & VIEW != 0
 }
 
-/// The parent and overwrites that make a new catch channel at the bottom of Information, when
+/// The parent and overwrites that make a new golden channel at the bottom of Information, when
 /// it exists and [`config_gate`] allows hiding it from members without a main role.
 pub(crate) async fn new_catch_place(
     st: &AppState,
@@ -860,7 +860,7 @@ pub(crate) async fn new_catch_place(
     Ok(Some((cat.to_string(), ows)))
 }
 
-/// Moves the set catch channel to the bottom of Information and gives it the member write
+/// Moves the set golden channel to the bottom of Information and gives it the member write
 /// access (verified members only, owner decision 2026-11-17). Runs after the commit that stores the
 /// category, so the bot's keeper does not move it back to the top. The access only when
 /// [`blocked`] allows it; otherwise it moves with its own overwrites. Returns why its
@@ -905,7 +905,7 @@ pub(crate) async fn move_catch(
     Ok(why)
 }
 
-/// Lifts every role's deny of Attach Files in the catch channel, for the Overview row
+/// Lifts every role's deny of Attach Files in the golden channel, for the Overview row
 /// `catch_files`; the other bits of each overwrite stay.
 pub(crate) async fn allow_catch_files(
     st: &AppState,
@@ -928,7 +928,7 @@ pub(crate) async fn allow_catch_files(
             st,
             ch,
             &OverwriteImg {
-                // A role that sees the channel gets files allowed, as a new catch channel does.
+                // A role that sees the channel gets files allowed, as a new golden channel does.
                 allow: if o.deny & VIEW == 0 {
                     o.allow | ATTACH
                 } else {
@@ -981,7 +981,7 @@ fn known(st: &AppState, config: &Value) -> Vec<u64> {
 }
 
 /// The Overview row for open channels without the standard set, and for Information and the
-/// catch channel while unverified members still see them (owner decision 2026-11-17: Overview catches a
+/// golden channel while unverified members still see them (owner decision 2026-11-17: Overview catches a
 /// channel with wrong permissions). None while [`config_gate`] says it may not run, or a main
 /// role was deleted in Discord (the Main roles row asks for that first).
 pub(crate) fn overview_check(
@@ -1005,7 +1005,7 @@ pub(crate) fn overview_check(
         chans.iter().find(|c| c.id == id)
     };
     let mut more = vec![];
-    // Only with Information there: the catch channel goes nowhere without it.
+    // Only with Information there: the golden channel goes nowhere without it.
     if let Some(info) = find("category").filter(|c| c.kind == CATEGORY) {
         more.extend(
             info_channels(chans, info.id, config)
@@ -1349,7 +1349,7 @@ mod tests {
             {"id": "6", "type": 0, "name": "general", "position": 1, "permission_overwrites": []},
             {"id": "7", "type": 2, "name": "General", "position": 0, "permission_overwrites": []},
             {"id": "8", "type": 15, "name": "forum", "position": 2, "permission_overwrites": []},
-            {"id": "70", "type": 0, "name": "do-not-write", "position": 0, "permission_overwrites": []},
+            {"id": "70", "type": 0, "name": "golden-channel", "position": 0, "permission_overwrites": []},
             {"id": "40", "type": 4, "name": "Text Channels", "position": 3, "permission_overwrites": []},
             {"id": "41", "type": 0, "name": "chat", "parent_id": "40", "position": 0, "permission_overwrites": []},
         ]))
@@ -1383,7 +1383,7 @@ mod tests {
         );
         assert_eq!(writes.len(), 2);
         assert_eq!(writes[1].0, "PATCH /guilds/1/channels");
-        // The verification and catch channels stay out; the rest keep their overwrites.
+        // The verification and golden channels stay out; the rest keep their overwrites.
         assert_eq!(
             ids(&writes[1].1),
             [
@@ -1464,7 +1464,7 @@ mod tests {
     #[tokio::test]
     async fn information_is_made_and_the_catch_channel_moves_to_its_bottom() {
         let (st, seen) = mock(json!([
-            {"id": "70", "type": 0, "name": "do-not-write", "position": 0, "permission_overwrites": []},
+            {"id": "70", "type": 0, "name": "golden-channel", "position": 0, "permission_overwrites": []},
         ]))
         .await;
         let mut config = json!({"lockdown": {"main_roles": ["2"]}, "catch": {"channel": "70"}, "verification": {"enabled": true, "roles": ["2"]}});
@@ -1496,7 +1496,7 @@ mod tests {
         );
         // Moving needs the category in the channel list.
         let (st, seen) = mock(json!([
-            {"id": "70", "type": 0, "name": "do-not-write", "position": 0, "permission_overwrites": []},
+            {"id": "70", "type": 0, "name": "golden-channel", "position": 0, "permission_overwrites": []},
             {"id": "900", "type": 4, "name": "Information", "position": 1, "permission_overwrites": []},
             {"id": "901", "type": 0, "name": "announcements", "parent_id": "900", "position": 0, "permission_overwrites": []},
             {"id": "902", "type": 0, "name": "rules", "parent_id": "900", "position": 1, "permission_overwrites": []},

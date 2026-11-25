@@ -997,7 +997,7 @@ async fn fix(
         return Ok(Json(json!({"ok": true})));
     }
     if b.setting.as_deref() == Some(brim_antinuke::security::CATCH_FILES) {
-        // Only lifts a deny of Attach Files in the catch channel: no backup needed.
+        // Only lifts a deny of Attach Files in the golden channel: no backup needed.
         crate::channel_access::allow_catch_files(&st, guild, &c).await?;
         log_by(
             &st,
@@ -1005,7 +1005,7 @@ async fn fix(
             guild,
             &c,
             None,
-            "allowed files in the catch channel from the security score",
+            "allowed files in the golden channel from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
@@ -1089,7 +1089,7 @@ async fn fix(
                 ApiError::BadRequest("Brim could not read the server's channels from Discord. Try again in a minute.".into())
             })?;
         crate::sections::start_limits(&st, guild).await;
-        // The same row lists Information and the catch channel while unverified members see
+        // The same row lists Information and the golden channel while unverified members see
         // them; the confirm named who loses access, so the members check is not repeated.
         // Errors only count: the log line below must follow the changes made already.
         let staff: Vec<u64> = brim_core::permits::all_staff_roles(&st.db, guild)
@@ -1107,11 +1107,11 @@ async fn fix(
         let catch_stays = match crate::channel_access::move_catch(&st, guild, &c, &mut moves).await
         {
             Ok(why) => why,
-            Err(_) => Some("moving the catch channel failed".into()),
+            Err(_) => Some("moving the golden channel failed".into()),
         };
         let catch_stays = match crate::channel_access::send_moves(&st, guild, moves).await {
             true => catch_stays,
-            false => Some("Discord refused moving the catch channel. A category holds at most 50 channels: make room, then try again".into()),
+            false => Some("Discord refused moving the golden channel. A category holds at most 50 channels: make room, then try again".into()),
         };
         log_by(&st, &s, guild, &c, None, &format!("gave the open channels, Information, the catch and the verification channel the standard permissions from the security score ({failed} failed)"))
         .await;
@@ -1387,7 +1387,7 @@ async fn setup_fix(
             // Makes a new channel only: nothing to back up.
             let made = crate::sections::make_catch(st, guild, &mut config).await?;
             let version =
-                save_fix(st, s, guild, cur, &config, "made the catch channel again").await?;
+                save_fix(st, s, guild, cur, &config, "made the golden channel again").await?;
             if let Some(ch) = made {
                 crate::sections::pin_catch_notice(st, &ch).await?;
             }
