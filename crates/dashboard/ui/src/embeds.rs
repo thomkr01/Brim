@@ -1475,7 +1475,7 @@ impl Editor {
                 </div>
             };
             view! {
-                <div node_ref=card class="card mcard pvcard">
+                <div node_ref=card class="card mcard pvcard" class:jsonv=move || json_view.get()>
                     <div class="pvtop"><h2>"As members see it"</h2><span class="sp"></span>
                         {move || (!both.get()).then(|| view! { <div class="seg" role="group" aria-label="preview width">
                             <button class:on=move || !phone.get() on:click=move |_| phone.set(false)>"Desktop"</button>
@@ -1483,7 +1483,7 @@ impl Editor {
                         </div> })}
                     </div>
                     <p class="muted small pvnote">"Click a part to edit it. Links in the text, menus and spoilers work here. Variables show example values."</p>
-                    <div class:pvboth=move || both.get()>
+                    <div class="pvbody" class:pvboth=move || both.get()>
                         {move || { let ph = !both.get() && phone.get(); pane(ph, true) }}
                         {move || both.get().then(|| view! { <div class="pvside">{pane(true, false)}</div> })}
                     </div>
