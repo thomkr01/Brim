@@ -288,6 +288,13 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
             .and_then(|x| x.parse().ok()),
         config["catch"]["enabled"] == true && config["modules"]["moderation"] != false,
     ));
+    rows.extend(brim_antinuke::security::catch_files_check(
+        &l.image.channels,
+        config["catch"]["channel"]
+            .as_str()
+            .and_then(|x| x.parse().ok()),
+        config["catch"]["enabled"] == true && config["modules"]["moderation"] != false,
+    ));
     rows.extend(brim_antinuke::security::ticket_log_check(
         &l.image.channels,
         config["tickets"]["log_channel"]
@@ -1007,6 +1014,20 @@ async fn fix(
             &c,
             None,
             "let the staff roles into the Logs and Staff categories from the security score",
+        )
+        .await;
+        return Ok(Json(json!({"ok": true})));
+    }
+    if b.setting.as_deref() == Some(brim_antinuke::security::CATCH_FILES) {
+        // Only lifts a deny of Attach Files in the catch channel: no backup needed.
+        crate::channel_access::allow_catch_files(&st, guild, &c).await?;
+        log_by(
+            &st,
+            &s,
+            guild,
+            &c,
+            None,
+            "allowed files in the catch channel from the security score",
         )
         .await;
         return Ok(Json(json!({"ok": true})));
