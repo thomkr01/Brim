@@ -112,7 +112,7 @@ async fn list(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Re
                 .map(|v| {
                     let (label, example) = botmsg::var_info(&d.key, v);
                     let example = if is_log_type(d, v) { &d.name } else { example };
-                    let example = if d.key == "ticket.panel" && *v == "text" && !panel_text.is_empty() { panel_text.as_str() } else { example };
+                    let example = if d.key == "ticket.panel" && *v == "panels" && !panel_text.is_empty() { panel_text.as_str() } else { example };
                     let banner = banner_example(&cfg, &site, &d.key);
                     let example = if *v == "banner" { banner.as_str() } else { example };
                     let example = if *v == "sponsor_picture" && cfg["giveaways"]["sponsor_picture"] != true { "" } else { example };
