@@ -704,7 +704,7 @@ fn every_permit_and_list_log_reads_as_before() {
     sec(
         Log::new("Permits", ORANGE)
             .text(vars[0].1)
-            .text("A role no longer exempts anyone from Auto Mod or the catch channel. Its members were listed by user ID. The role lists were emptied; History shows them.")
+            .text("A role no longer exempts anyone from Auto Mod or the golden channel. Its members were listed by user ID. The role lists were emptied; History shows them.")
             .line("By", "<@6>")
             .line("Permit", vars[2].1)
             .line("Members lists", vars[3].1)

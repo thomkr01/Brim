@@ -1491,7 +1491,7 @@ fn fixed_by(config: &Value, id: &str, parent: Option<&str>) -> Option<&'static s
     } else if is(&config["appeals"]["channel"]) {
         Some("Appeals")
     } else if is(&config["catch"]["channel"]) {
-        Some("Catch")
+        Some("Golden Channel")
     } else if parent.is_some_and(|p| crate::tickets::categories(config).contains(&p)) {
         Some("Tickets")
     } else {
@@ -2547,7 +2547,7 @@ pub(crate) mod tests {
         let cfg = json!({"verification": {"channel": "13"}, "tickets": {"category": "20", "panels": [{"category": "21"}, {"category": null}]}, "catch": {"channel": "9"}});
         assert_eq!(fixed_by(&cfg, "13", None), Some("Verification"));
         assert_eq!(fixed_by(&cfg, "11", Some("20")), Some("Tickets"));
-        assert_eq!(fixed_by(&cfg, "9", None), Some("Catch"));
+        assert_eq!(fixed_by(&cfg, "9", None), Some("Golden Channel"));
         assert_eq!(fixed_by(&cfg, "11", Some("10")), None);
         // A panel's own category holds ticket channels too.
         assert_eq!(fixed_by(&cfg, "11", Some("21")), Some("Tickets"));
