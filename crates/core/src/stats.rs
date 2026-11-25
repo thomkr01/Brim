@@ -59,7 +59,7 @@ pub async fn prune(pool: &PgPool) -> sqlx::Result<()> {
 }
 
 /// Hourly: adds every finished UTC day not yet added from `stat_daily` into `stat_daily_all`, and
-/// sets today's `servers_total`. A day is finished one hour after it ends, so an event written in
+/// sets today's `servers_total`, `servers_ever` and `servers_active_30d`. A day is finished one hour after it ends, so an event written in
 /// a transaction that started before midnight is in it. Each day is added once (`stat_folded`).
 pub async fn fold(pool: &PgPool) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
@@ -86,6 +86,23 @@ pub async fn fold(pool: &PgPool) -> sqlx::Result<()> {
         "INSERT INTO stat_daily_all (day, kind, feature, n, servers)
          SELECT (now() AT TIME ZONE 'UTC')::date, 'servers_total', 'bot', count(*), count(*)
          FROM guild_owners o WHERE NOT EXISTS (SELECT 1 FROM guild_left l WHERE l.guild_id = o.guild_id)
+         ON CONFLICT (day, kind, feature) DO UPDATE SET n = EXCLUDED.n, servers = EXCLUDED.servers",
+    )
+    .execute(&mut *tx)
+    .await?;
+    // Servers ever: every server known now is added once (a hash, so the server purge keeps it).
+    // Active: servers with any count in the last 30 days.
+    sqlx::query(
+        "WITH seen AS (INSERT INTO stat_servers_ever (key, first_day)
+                       SELECT sha256(guild_id::text::bytea), (now() AT TIME ZONE 'UTC')::date FROM guild_owners
+                       ON CONFLICT DO NOTHING RETURNING 1)
+         INSERT INTO stat_daily_all (day, kind, feature, n, servers)
+         SELECT (now() AT TIME ZONE 'UTC')::date, k, 'bot', n, n FROM (
+             SELECT 'servers_ever' AS k, (SELECT count(*) FROM stat_servers_ever) + (SELECT count(*) FROM seen) AS n
+             UNION ALL
+             SELECT 'servers_active_30d', count(DISTINCT guild_id) FROM stat_daily
+             WHERE day > (now() AT TIME ZONE 'UTC')::date - 30
+         ) t
          ON CONFLICT (day, kind, feature) DO UPDATE SET n = EXCLUDED.n, servers = EXCLUDED.servers",
     )
     .execute(&mut *tx)

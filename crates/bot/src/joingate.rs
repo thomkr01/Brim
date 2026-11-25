@@ -635,12 +635,12 @@ async fn join_raid(
                         user = id,
                         "join raid: immunity check failed, retrying later"
                     );
-                    queue_retry(app, gid, id, raid.action, "join raid").await;
+                    queue_retry(app, gid, id, raid.action, RAID_WHY).await;
                     return false;
                 }
             }
             let d = Detail::default();
-            let done = punish_or_retry(app, cfg, gid, id, raid.action, "join raid", d).await;
+            let done = punish_or_retry(app, cfg, gid, id, raid.action, RAID_WHY, d).await;
             id == j.id && done && removes(raid.action)
         });
     let removed = futures_util::future::join_all(tries).await.contains(&true);
@@ -815,6 +815,35 @@ pub(crate) async fn record(
     if let Err(e) = saved {
         tracing::warn!(?e, "saving the join gate record failed");
     }
+    if failed.is_none() {
+        count(app, gid, action, why).await;
+    }
+}
+
+/// The stats count of a done Join Gate or join raid action: `Ban`, `Timeout(600)` count as `ban`,
+/// `timeout`. Only Brim's warn is a case, which already counts through `mod_actions`.
+async fn count(app: &App, gid: Id<GuildMarker>, action: &str, why: &str) {
+    let kind = action
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if kind == "warn" {
+        return;
+    }
+    let feature = if why == RAID_WHY {
+        "join_raid"
+    } else {
+        "joingate"
+    };
+    let r = async {
+        let mut c = app.pool.acquire().await?;
+        brim_core::stats::record(&mut c, gid.get() as i64, &kind, feature, 1, None).await?;
+        anyhow::Ok(())
+    };
+    if let Err(e) = r.await {
+        tracing::warn!(?e, "counting a join gate action failed");
+    }
 }
 
 /// With no log channel at all, the owner hears once that Join Gate acts without a log.
@@ -825,6 +854,9 @@ async fn no_log_channel(app: &App, gid: Id<GuildMarker>) {
         reply::dm_owner(app, gid, "dm.owner_alert", "Brim's Join Gate punished a member, but your server has no log channel, so only the Join Gate Log on the dashboard shows it. Pick a log channel on the dashboard.").await;
     }
 }
+
+/// The reason of a join raid punishment; the stats count it apart from other Join Gate actions.
+const RAID_WHY: &str = "join raid";
 
 /// The nick Join Gate's Rename action sets.
 const RENAMED: &str = "Moderated Nickname";
