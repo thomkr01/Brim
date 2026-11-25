@@ -206,6 +206,10 @@ pub const AUTOMOD: &[Card] = &[
                     "automod.filters.chars_lower.enabled",
                     "Monitor long messages",
                 ),
+                (
+                    "automod.filters.chars_upper.enabled",
+                    "Monitor capital letters",
+                ),
                 ("automod.filters.emojis.enabled", "Monitor emoji spam"),
                 (
                     "automod.filters.newlines.enabled",
@@ -256,7 +260,7 @@ pub const AUTOMOD: &[Card] = &[
             "Timeouts and lockdown",
             "Should repeat offenders get longer timeouts, and should Brim lock the server when many members are mentioned at once?",
             &[
-                ("automod.auto_lockdown.enabled", "Lock the server when mentions flood"),
+                ("automod.auto_lockdown.enabled", "Lock the server when mentions flood (Auto lockdown)"),
                 ("automod.auto_lockdown.mention_window_ms", "Count mentions within"),
                 ("automod.strike.multiply", "Make timeouts longer for repeat offenders"),
             ],
@@ -453,9 +457,9 @@ pub const PANIC: &[Card] = &[card(
         ("panic.executors", "Quarantined accounts that start Panic mode"),
         ("panic.duration_secs", "How long it lasts"),
         ("panic.heat_algorithm", "Also start it on heat"),
-        ("panic.load_backup", "Load the latest backup after Panic mode"),
+        ("panic.load_backup", "Load the latest backup when Panic mode starts"),
     ],
-    |c, _| text(if on(c, "panic.load_backup", true) { "The latest backup is loaded when Panic mode starts, if backups and their restore are on." } else { "Panic mode loads no backup." }),
+    |c, _| text(if on(c, "panic.load_backup", true) { "Right after Brim locks the server, it loads the latest backup, if backups and their restore are on." } else { "Panic mode loads no backup." }),
 )];
 
 pub const RAIDER_LIST: &[Card] = &[boxed(card(
