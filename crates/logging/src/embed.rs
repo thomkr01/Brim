@@ -376,10 +376,10 @@ mod tests {
         let (e, row) = verify_panel("Mine", Some(&copy));
         assert_eq!(e.description.as_deref(), Some("Welcome to Mine"));
         assert!(matches!(row, Component::ActionRow(r) if r.components.len() == 2));
-        // A copy without the required server name sends the default.
-        let lost = serde_json::json!({"embeds": [{"description": "Welcome"}]});
-        let d = verify_panel("Mine", Some(&lost)).0.description.unwrap();
-        assert!(d.contains("`Mine`"), "{d}");
+        // The server name is recommended, not required: a copy without it is sent as it is.
+        let plain = serde_json::json!({"embeds": [{"description": "Welcome"}]});
+        let d = verify_panel("Mine", Some(&plain)).0.description.unwrap();
+        assert_eq!(d, "Welcome");
     }
 
     #[test]
