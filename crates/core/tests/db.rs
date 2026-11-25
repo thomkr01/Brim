@@ -1355,7 +1355,7 @@ async fn ticket_panel_variable_migration_renames_text() {
             .unwrap();
     }
     let old = json!({"content": "", "embeds": [{"description": "Hi\n{text}"}]});
-    sqlx::query("INSERT INTO bot_messages (guild_id, key, message, updated_by) VALUES ($1, 'ticket.panel', $2, 1), ($1, 'ticket.reply', $2, 1)")
+    sqlx::query("INSERT INTO bot_messages (guild_id, key, message, updated_by) VALUES ($1, 'ticket.panel', $2, 1), ($1, 'cmd.ban', $2, 1)")
         .bind(g).bind(&old).execute(&p).await.unwrap();
     sqlx::query(
         "INSERT INTO bot_messages_undo (guild_id, key, message) VALUES ($1, 'ticket.panel', $2)",
@@ -1386,7 +1386,7 @@ async fn ticket_panel_variable_migration_renames_text() {
         let new = json!({"content": "", "embeds": [{"description": "Hi\n{tk_panels}"}]});
         assert_eq!(get("bot_messages", "ticket.panel").await, new);
         assert_eq!(get("bot_messages_undo", "ticket.panel").await, new);
-        assert_eq!(get("bot_messages", "ticket.reply").await, old);
+        assert_eq!(get("bot_messages", "cmd.ban").await, old);
     }
     for t in ["bot_messages", "bot_messages_undo"] {
         let sql = format!("DELETE FROM {t} WHERE guild_id = $1");
