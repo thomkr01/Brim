@@ -55,3 +55,7 @@ The verify script caught a bad answer but not a failed `fetch`: with no connecti
 ## The preview did not start level with the editor's message (2026-11-25)
 
 On a message page the preview card began at the hint, the editor card at the toolbar, so the two Brim rows sat at different heights. *Avoid:* on a wide screen the two cards share the rows of `.msplit.two` (title, hint, toolbar, message, add buttons) through `subgrid` in `style.css`; each part names its row, and the preview's body sits in the message row (the text box row in JSON view). A new child of the editor card needs a row there, or it lands on top of another. The front page scenes (`.builder`) and the phone layout keep the old flow.
+
+## Two columns at 1000 to 1070 px broke the editor (2026-11-25)
+
+The message page split into two columns from 901 px, but the page keeps a 285 px menu, so each column was about 240 px at 1000 px and the editor text wrapped one letter per line. It was already so before the level change (the columns were never changed). *Avoid:* judge a split by the room left after the menu, not the window width: `.msplit.two` is two columns only from 1280 px and stacks (preview under the editor) below that. Check a layout change at 1070, 1000 and 800 px in a real browser, since 1070 px is the owner's window.
