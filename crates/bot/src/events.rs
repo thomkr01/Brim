@@ -1026,12 +1026,20 @@ async fn run(app: &Arc<App>, ev: &Event, extra: Extra) -> Result<()> {
         }
         Event::MemberAdd(m) => {
             crate::permit_sync::forget_left(m.guild_id, m.user.id);
+            let gid = m.guild_id.get() as i64;
+            if let Err(e) = brim_core::stats::member_moved(&app.pool, gid, true).await {
+                tracing::warn!(?e, "counting a member join failed");
+            }
             if let Err(e) = crate::profile_log::on_join(app, m.guild_id, &m.user).await {
                 tracing::warn!(?e, "storing a joiner's name and avatar failed");
             }
             crate::joingate::on_join(app, m, extra.spammer).await?
         }
         Event::MemberRemove(m) => {
+            let gid = m.guild_id.get() as i64;
+            if let Err(e) = brim_core::stats::member_moved(&app.pool, gid, false).await {
+                tracing::warn!(?e, "counting a member leave failed");
+            }
             if let Err(e) =
                 crate::permit_sync::on_leave(app, m.guild_id, m.user.id, m.user.bot).await
             {

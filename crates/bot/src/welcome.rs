@@ -638,6 +638,12 @@ pub async fn on_guild_create(app: &App, ev: &GuildCreate) -> Result<()> {
         tracing::warn!(?e, "noting the server owner failed");
     }
     save_icon(app, g.id, g.icon.as_ref());
+    if let Some(n) = g.member_count {
+        if let Err(e) = brim_core::stats::members_set(&app.pool, g.id.get() as i64, n as i64).await
+        {
+            tracing::warn!(?e, "storing the member count failed");
+        }
+    }
     let complete = g.member_count == Some(g.members.len() as u64);
     if let Err(e) =
         crate::joingate::requarantine_missed(app, g.id, &g.members, complete, None).await

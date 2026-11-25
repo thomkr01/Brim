@@ -363,3 +363,25 @@ async fn a_golden_channel_catch_counts() {
     assert_eq!(daily(&pool, g, "catch").await, 2);
     crate::db::purge_guild(&pool, g).await.unwrap();
 }
+
+/// Members: the count follows joins and leaves, and the fold writes today's total.
+#[tokio::test]
+async fn members_are_counted() {
+    let Some(pool) = pool().await else { return };
+    let g = 5_407_000_000 + std::process::id() as i64;
+    crate::db::purge_guild(&pool, g).await.unwrap();
+    members_set(&pool, g, 100).await.unwrap();
+    member_moved(&pool, g, true).await.unwrap();
+    member_moved(&pool, g, true).await.unwrap();
+    member_moved(&pool, g, false).await.unwrap();
+    assert_eq!(daily(&pool, g, "member_join").await, 2);
+    assert_eq!(daily(&pool, g, "member_leave").await, 1);
+    fold(&pool).await.unwrap();
+    fold(&pool).await.unwrap();
+    assert_eq!(
+        daily(&pool, g, "members_total").await,
+        101,
+        "set, not added twice"
+    );
+    crate::db::purge_guild(&pool, g).await.unwrap();
+}
