@@ -1195,6 +1195,31 @@ pub fn catch_gone_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -
     })
 }
 
+/// Fix setting for [`catch_files_check`].
+pub const CATCH_FILES: &str = "catch_files";
+
+/// Attach Files.
+const ATTACH: u64 = 1 << 15;
+
+/// The catch channel denies Attach Files to a role (Brim made it that way before 2026-11-25): a
+/// spam bot that posts only a picture cannot write there, so it is never caught.
+pub fn catch_files_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -> Option<Check> {
+    let id = catch.filter(|_| on)?;
+    let c = channels.iter().find(|c| c.id == id)?;
+    let blocked = c
+        .overwrites
+        .iter()
+        .any(|o| o.is_role && o.deny & ATTACH != 0);
+    blocked.then(|| Check {
+        id: "catch_files".into(),
+        severity: Severity::Warn,
+        title: "The catch channel blocks files",
+        detail: format!("#{} does not allow files, so a spam bot that posts only a picture cannot write there and is not caught. The fix allows files there. Brim deletes every post there anyway.", c.name),
+        fix: act("Allow files", CATCH_FILES),
+        steps: vec![],
+    })
+}
+
 pub fn staff_mention_note(roles: &[RoleImg], staff: &[i64]) -> Option<Check> {
     let names: Vec<&str> = roles
         .iter()
@@ -1768,6 +1793,25 @@ mod tests {
         assert!(catch_gone_check(&chans, Some(71), false).is_none());
         let row = catch_gone_check(&chans, Some(71), true).unwrap();
         assert_eq!(row.fix.unwrap().setting, Some(CATCH_CHANNEL));
+    }
+
+    #[test]
+    fn a_catch_channel_that_blocks_files_gets_a_row() {
+        let ow = |deny| OverwriteImg {
+            target: 1,
+            is_role: true,
+            allow: 0,
+            deny,
+        };
+        let chans = [
+            chan(70, 0, None, vec![ow(ATTACH | 64)]),
+            chan(71, 0, None, vec![ow(64)]),
+        ];
+        let row = catch_files_check(&chans, Some(70), true).unwrap();
+        assert_eq!(row.fix.unwrap().setting, Some(CATCH_FILES));
+        assert!(catch_files_check(&chans, Some(70), false).is_none());
+        assert!(catch_files_check(&chans, Some(71), true).is_none());
+        assert!(catch_files_check(&chans, Some(72), true).is_none());
     }
 
     #[test]

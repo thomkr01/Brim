@@ -3,12 +3,17 @@
 use anyhow::Result;
 use brim_core::{permits::Level, sections::CatchAction};
 use brim_logging::{embed::RED, Log, LogKind};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 use twilight_model::{
-    channel::Channel,
+    channel::{message::MessageType, Channel},
     gateway::payload::incoming::MessageCreate,
     http::channel_position::Position,
     id::{
-        marker::{ChannelMarker, GuildMarker},
+        marker::{ChannelMarker, GuildMarker, UserMarker},
         Id,
     },
 };
@@ -22,6 +27,44 @@ use crate::{
 
 const REASON: &str = "Wrote in the catch channel";
 
+/// What a member writes. A pin, boost or join notice is a system message by whoever caused it,
+/// so a moderator who pins a message there must not be punished.
+const WRITES: [MessageType; 5] = [
+    MessageType::Regular,
+    MessageType::Reply,
+    MessageType::ChatInputCommand,
+    MessageType::ContextMenuCommand,
+    MessageType::ThreadCreated,
+];
+
+/// How long one catch blocks the next for the same member: a spam bot sends several messages
+/// at once, and each must not start its own ban, DM and case.
+const HOLD: Duration = Duration::from_secs(30);
+
+/// (server, member) caught in the last [`HOLD`] (one bot process per database, as for reports).
+static CAUGHT: LazyLock<Mutex<HashMap<(u64, u64), Instant>>> = LazyLock::new(Default::default);
+
+/// True for the first catch of a member within [`HOLD`]; later ones only delete their message.
+fn first_catch(key: (u64, u64), now: Instant) -> bool {
+    let mut held = CAUGHT.lock().unwrap_or_else(|e| e.into_inner());
+    held.retain(|_, at| now.duration_since(*at) < HOLD);
+    match held.contains_key(&key) {
+        true => false,
+        false => held.insert(key, now).is_none(),
+    }
+}
+
+/// The member who wrote `m`: for a slash command used here, the member who ran it, not the app
+/// that answered. None for bots, webhooks and Brim's own answers.
+fn writer(m: &MessageCreate, me: Id<UserMarker>) -> Option<Id<UserMarker>> {
+    match &m.interaction_metadata {
+        Some(_) if m.author.id == me => None,
+        Some(i) => Some(i.user.id),
+        None if m.author.bot || m.webhook_id.is_some() => None,
+        None => Some(m.author.id),
+    }
+}
+
 /// True when the message was in the catch channel by someone it punishes; nothing else should run.
 /// Log mode punishes nobody, so automod still runs.
 pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
@@ -33,9 +76,12 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
     let Some(catch) = c.channel.filter(|_| c.enabled) else {
         return Ok(false);
     };
-    if m.author.bot || m.webhook_id.is_some() {
+    if !WRITES.contains(&m.kind) {
         return Ok(false);
     }
+    let Some(uid) = writer(m, app.me) else {
+        return Ok(false);
+    };
     // Threads of the catch channel catch too.
     if catch != m.channel_id
         && !app
@@ -45,8 +91,12 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
     {
         return Ok(false);
     }
-    let uid = m.author.id;
-    let roles = m.member.as_ref().map_or(&[][..], |mem| &mem.roles);
+    // A slash command's message carries the app's member, not the roles of who ran it.
+    let roles = m
+        .member
+        .as_ref()
+        .filter(|_| m.interaction_metadata.is_none());
+    let roles = roles.map_or(&[][..], |mem| &mem.roles);
     if c.users.contains(&uid) || roles.iter().any(|r| c.roles.contains(r)) {
         return Ok(false);
     }
@@ -72,10 +122,14 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         app.http.delete_message(m.channel_id, m.id).await,
         "delete caught message",
     );
+    if !first_catch((gid.get(), uid.get()), Instant::now()) {
+        return Ok(true);
+    }
     let flags = Flags {
         dm: c.dm,
         soft,
         compact: true,
+        full_purge: true,
         ..Default::default()
     };
     // The bot acts with owner rights, so the usual permit and hierarchy checks still refuse
@@ -94,12 +148,23 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         None,
     )
     .await;
+    if !done.as_ref().is_ok_and(|a| a.case.is_some()) {
+        // Not caught: the member's next message must try again.
+        CAUGHT
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&(gid.get(), uid.get()));
+    }
     let text = match done {
         Ok(a) if a.case.is_none() => a.text,
         Ok(a) => {
             if let Some(case_no) = a.case {
                 crate::proof::verified(app, gid, case_no, &crate::proof::copy_of(m)).await;
             }
+            if matches!(kind, ModKind::Kick | ModKind::Timeout) {
+                purge_seen(app, gid.get(), uid.get()).await;
+            }
+            count(app, gid.get(), c.action).await;
             return Ok(true);
         }
         Err(e) => format!("Failed: {e}"),
@@ -110,6 +175,31 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         tracing::warn!(?e, "catch channel failure log failed");
     }
     Ok(true)
+}
+
+/// Deletes the member's recent messages in other channels, as a ban's purge does.
+/// shortcut: only the messages Auto Mod tracked (its last 50 per member, Auto Mod on); a full
+/// search of every channel if servers report spam left behind.
+async fn purge_seen(app: &App, gid: u64, uid: u64) {
+    let seen = app
+        .heat
+        .lock()
+        .unwrap()
+        .get_mut(&(gid, uid))
+        .map(|(_, h)| h.take_msgs());
+    crate::reply::purge_ids(app, &seen.unwrap_or_default()).await;
+}
+
+/// One row per catch, for the caught counter (no member id: the case holds who).
+async fn count(app: &App, gid: u64, action: CatchAction) {
+    let done = sqlx::query("INSERT INTO catch_hits (guild_id, action) VALUES ($1, $2)")
+        .bind(gid as i64)
+        .bind(action.name())
+        .execute(&app.pool)
+        .await;
+    if let Err(e) = done {
+        tracing::warn!(?e, "catch count failed");
+    }
 }
 
 pub(crate) fn test_log(uid: u64) -> Log {

@@ -20,8 +20,11 @@ const VIEW: u64 = 1 << 10;
 const SEND: u64 = 1 << 11;
 const HISTORY: u64 = 1 << 16;
 const MENTION_EVERYONE: u64 = 1 << 17;
-/// Add Reactions, Embed Links, Attach Files: what nobody gets in the catch channel.
-const CATCH_DENY: u64 = 49216;
+/// Add Reactions and Embed Links: what nobody gets in the catch channel. Attach Files stays
+/// allowed: a spam bot that posts only a picture must be able to write there to be caught.
+const CATCH_DENY: u64 = 16448;
+/// Attach Files.
+pub(crate) const ATTACH: u64 = 1 << 15;
 /// Create Public Threads, Create Private Threads, Send Messages in Threads.
 const THREADS: u64 = (1 << 35) | (1 << 36) | (1 << 38);
 /// View Channel, Send Messages, Embed Links: what the bot needs to post.
@@ -821,7 +824,7 @@ fn catch_overwrites(
     ];
     ows.extend(
         main.iter()
-            .map(|&r| merge(r, VIEW | SEND | HISTORY, CATCH_DENY)),
+            .map(|&r| merge(r, VIEW | SEND | HISTORY | ATTACH, CATCH_DENY)),
     );
     ows
 }
@@ -900,6 +903,44 @@ pub(crate) async fn move_catch(
         moves.push(json!({"id": ch.to_string(), "parent_id": cat.to_string(), "position": pos, "lock_permissions": false}));
     }
     Ok(why)
+}
+
+/// Lifts every role's deny of Attach Files in the catch channel, for the Overview row
+/// `catch_files`; the other bits of each overwrite stay.
+pub(crate) async fn allow_catch_files(
+    st: &AppState,
+    guild: i64,
+    config: &Value,
+) -> Result<(), ApiError> {
+    let Some(ch) = id_of(&config["catch"]["channel"]) else {
+        return Ok(());
+    };
+    let chans = channels(st, guild).await?;
+    let Some(c) = chans.iter().find(|c| c.id == ch) else {
+        return Ok(());
+    };
+    for o in c
+        .overwrites
+        .iter()
+        .filter(|o| o.is_role && o.deny & ATTACH != 0)
+    {
+        put(
+            st,
+            ch,
+            &OverwriteImg {
+                // A role that sees the channel gets files allowed, as a new catch channel does.
+                allow: if o.deny & VIEW == 0 {
+                    o.allow | ATTACH
+                } else {
+                    o.allow
+                },
+                deny: o.deny & !ATTACH,
+                ..o.clone()
+            },
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Channels with their own access set by Brim: logs, verification, catch, Information and
@@ -1487,7 +1528,10 @@ mod tests {
         };
         assert_eq!(put("1")["deny"], (VIEW | CATCH_DENY).to_string());
         assert_eq!(put("1")["allow"], "0");
-        assert_eq!(put("2")["allow"], (VIEW | SEND | HISTORY).to_string());
+        assert_eq!(
+            put("2")["allow"],
+            (VIEW | SEND | HISTORY | ATTACH).to_string()
+        );
         let (path, body) = writes.last().unwrap();
         assert_eq!(path, "PATCH /guilds/1/channels");
         assert_eq!(body[0]["parent_id"], "900");
