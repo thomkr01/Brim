@@ -1,4 +1,4 @@
-//! D7: the ticket, report, appeal and catch channel logs read exactly as the code builds them
+//! D7: the ticket, report, appeal and golden channel logs read exactly as the code builds them
 //! until a server edits the entry, and an edit keeps their facts.
 use brim_logging::{botmsg, embed::Log, overlay};
 use serde_json::json;

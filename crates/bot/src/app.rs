@@ -701,7 +701,7 @@ fn fresh(
     Some(v)
 }
 
-/// Setup that follows from a saved setting: Tickets turned on gets its category, a catch channel
+/// Setup that follows from a saved setting: Tickets turned on gets its category, a golden channel
 /// gets its warning, and the Raider List turned on scans the members.
 async fn on_saved(app: Arc<App>, gid: Id<GuildMarker>, version: Option<i32>) {
     if let Err(e) = crate::raiders::on_saved(&app, gid, version).await {
@@ -721,7 +721,7 @@ async fn on_saved(app: Arc<App>, gid: Id<GuildMarker>, version: Option<i32>) {
         tracing::warn!(?e, %gid, "keeping the public ticket channel failed");
     }
     if let Err(e) = crate::catch::post_notice(&app, gid).await {
-        tracing::warn!(?e, %gid, "posting the catch channel warning failed");
+        tracing::warn!(?e, %gid, "posting the golden channel warning failed");
     }
     // Last: on a big server this gives roles to many members.
     if let Err(e) = crate::verify::on_saved(&app, gid).await {

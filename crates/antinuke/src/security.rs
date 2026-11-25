@@ -1181,15 +1181,15 @@ pub fn ticket_log_check(channels: &[ChannelImg], log: Option<u64>) -> Option<Che
 /// Fix setting for [`catch_gone_check`].
 pub const CATCH_CHANNEL: &str = "catch_channel";
 
-/// The catch channel is on but was deleted in Discord (test server, 2026-11-18): nobody is
+/// The golden channel is on but was deleted in Discord (test server, 2026-11-18): nobody is
 /// caught there, and each save tried to post its warning into the missing channel.
 pub fn catch_gone_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -> Option<Check> {
     let id = catch.filter(|_| on)?;
     (!channels.iter().any(|c| c.id == id)).then(|| Check {
         id: "catch_gone".into(),
         severity: Severity::Warn,
-        title: "The catch channel was deleted",
-        detail: "The catch channel no longer exists in Discord, so nobody is caught there. The fix makes a new #do-not-write where Auto Setup puts it.".into(),
+        title: "The golden channel was deleted",
+        detail: "The golden channel no longer exists in Discord, so nobody is caught there. The fix makes a new #golden-channel where Auto Setup puts it.".into(),
         fix: act("Make it again", CATCH_CHANNEL),
         steps: vec![],
     })
@@ -1201,7 +1201,7 @@ pub const CATCH_FILES: &str = "catch_files";
 /// Attach Files.
 const ATTACH: u64 = 1 << 15;
 
-/// The catch channel denies Attach Files to a role (Brim made it that way before 2026-11-25): a
+/// The golden channel denies Attach Files to a role (Brim made it that way before 2026-11-25): a
 /// spam bot that posts only a picture cannot write there, so it is never caught.
 pub fn catch_files_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) -> Option<Check> {
     let id = catch.filter(|_| on)?;
@@ -1213,7 +1213,7 @@ pub fn catch_files_check(channels: &[ChannelImg], catch: Option<u64>, on: bool) 
     blocked.then(|| Check {
         id: "catch_files".into(),
         severity: Severity::Warn,
-        title: "The catch channel blocks files",
+        title: "The golden channel blocks files",
         detail: format!("#{} does not allow files, so a spam bot that posts only a picture cannot write there and is not caught. The fix allows files there. Brim deletes every post there anyway.", c.name),
         fix: act("Allow files", CATCH_FILES),
         steps: vec![],

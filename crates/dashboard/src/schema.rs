@@ -1485,11 +1485,11 @@ pub fn schema() -> Vec<Value> {
         ),
         (
             "catch",
-            "Catch channel",
+            "Golden channel",
             vec![
-                ti(fg("General", "enabled", "bool"), "Use the catch channel"),
+                ti(fg("General", "enabled", "bool"), "Use the golden channel"),
                 hp(
-                    ti(fg("General", "channel", "channel"), "Catch channel"),
+                    ti(fg("General", "channel", "channel"), "Golden channel"),
                     "Anyone who writes here is punished, except the Owner, Extra Owners, Trusted Admins, whitelisted members and bots. Hacked accounts spam every channel, so they land here first.",
                 ),
                 hp(
@@ -1696,7 +1696,7 @@ fn bool_help(sec: &str, path: &str, card: &str) -> Option<String> {
         ("lockdown", "updates") => "Posts each lock and unlock in the mod command log.",
         ("lockdown", "pause_invites") => "While a lock kicks new members, Discord invites and member DMs are paused too.",
         ("lockdown", "voice") => "Main roles also cannot join, speak, use the soundboard or stream in voice channels.",
-        ("catch", "enabled") => "Hacked accounts post in every channel. Anyone who writes in the catch channel is punished, except the Owner, Extra Owners, Trusted Admins, whitelisted members and bots.",
+        ("catch", "enabled") => "Hacked accounts post in every channel. Anyone who writes in the golden channel is punished, except the Owner, Extra Owners, Trusted Admins, whitelisted members and bots.",
         ("catch", "dm") => "The member gets a DM before the punishment, with the appeal link for bans and timeouts.",
         ("catch", "keep_top") => "Moves the channel back when someone drags it somewhere else.",
         ("panic", "heat_algorithm") => "Panic Mode also starts on heat: Auto Mod heat and Anti Nuke heat per action.",

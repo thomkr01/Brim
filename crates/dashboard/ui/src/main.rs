@@ -122,7 +122,7 @@ const NAV: &[(&str, &[(&str, &str)])] = &[
             ("notes", "Notes"),
             ("report_list", "Reports"),
             ("tickets", "Tickets"),
-            ("catch", "Catch Channel"),
+            ("catch", "Golden Channel"),
         ],
     ),
     (

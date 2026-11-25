@@ -1548,7 +1548,7 @@ fn dashboard_lock_bar() {
     assert!(!super::may_lock(&Level::None, "lockdown", &[], false));
 }
 
-/// The catch channel's default is a softban with 7 days of purge; a burst of messages makes one
+/// The golden channel's default is a softban with 7 days of purge; a burst of messages makes one
 /// case and one count; a pin notice is not writing; a slash command used there catches the
 /// member who ran it, not the app that answered.
 #[tokio::test]
@@ -1628,7 +1628,7 @@ async fn the_catch_channel_catches_once_skips_system_messages_and_sees_slash_com
     t.cleanup().await;
 }
 
-/// A kick from the catch channel also deletes the member's recent messages in other channels
+/// A kick from the golden channel also deletes the member's recent messages in other channels
 /// (the ones Auto Mod tracked), as a ban's purge would.
 #[tokio::test]
 async fn a_catch_channel_kick_deletes_the_spam_in_other_channels() {

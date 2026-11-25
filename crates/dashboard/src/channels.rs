@@ -1477,7 +1477,7 @@ pub(crate) async fn overview_check(
 }
 
 /// The feature that owns channel `id` and keeps its permissions fixed (plan 3.2a): log channels,
-/// the appeal, verification and catch channels, and the channels in a ticket category.
+/// the appeal, verification and golden channels, and the channels in a ticket category.
 fn fixed_by(config: &Value, id: &str, parent: Option<&str>) -> Option<&'static str> {
     let is = |v: &Value| v.as_str() == Some(id);
     let logs = serde_json::from_value::<brim_logging::LogConfig>(config["logging"].clone())

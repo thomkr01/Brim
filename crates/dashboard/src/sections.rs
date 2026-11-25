@@ -435,7 +435,7 @@ async fn auto_setup(
     let catch_stays = match channel_access::move_catch(&st, guild, &config, &mut moves).await {
         Ok(why) => why,
         Err(e) => {
-            tracing::warn!(?e, guild, "making the catch channel verified-only failed");
+            tracing::warn!(?e, guild, "making the golden channel verified-only failed");
             Some("Brim could not read or change it".into())
         }
     };
@@ -483,7 +483,7 @@ fn steps(r: &Report) -> Value {
     }
     if let Some(why) = r.catch_stays {
         info.push(format!(
-            "The catch channel is still visible to members without a role: {why}."
+            "The golden channel is still visible to members without a role: {why}."
         ));
     }
     let info = (!info.is_empty()).then(|| info.join(" "));
@@ -1234,9 +1234,9 @@ const NO_VERIFY_ROLE: &str = "The verification channel is ready, but members can
 const CATCH_WARNING: &str =
     "Do not write here. Writing = instant ban. Account hacked? Change your password.";
 
-/// Makes the catch channel (`config`'s one is reused while it exists) and turns it on. Returns
+/// Makes the golden channel (`config`'s one is reused while it exists) and turns it on. Returns
 /// the channel when it is new, for [`pin_catch_notice`]; also used by the Overview fix for a
-/// deleted catch channel (2026-11-18).
+/// deleted golden channel (2026-11-18).
 pub(crate) async fn make_catch(
     st: &AppState,
     guild: i64,
@@ -1247,7 +1247,7 @@ pub(crate) async fn make_catch(
     // At the bottom of Information when Auto Setup made it: only verified members see it there.
     let body = match channel_access::new_catch_place(st, guild, config).await? {
         Some((parent, overwrites)) => {
-            json!({"name": "do-not-write", "type": 0, "parent_id": parent, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
+            json!({"name": "golden-channel", "type": 0, "parent_id": parent, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
         }
         None => {
             // @everyone: View, Send, History, Attach Files (a picture-only spam bot is caught too);
@@ -1256,13 +1256,13 @@ pub(crate) async fn make_catch(
                 {"id": guild.to_string(), "type": 0, "allow": "101376", "deny": "16448"},
                 {"id": st.discord.client_id, "type": 1, "allow": "93184"}
             ]);
-            json!({"name": "do-not-write", "type": 0, "position": 0, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
+            json!({"name": "golden-channel", "type": 0, "position": 0, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
         }
     };
     let channel = create(st, guild, existing.clone(), "channels", body).await?;
     config["catch"]["channel"] = json!(channel);
     config["catch"]["enabled"] = json!(true);
-    // The catch channel runs only with Moderation on; this route has that switch's bar.
+    // The golden channel runs only with Moderation on; this route has that switch's bar.
     if config["modules"]["moderation"] == false {
         config["modules"]["moderation"] = json!(true);
     }
@@ -1272,7 +1272,7 @@ pub(crate) async fn make_catch(
     Ok((existing.as_deref() != Some(channel.as_str())).then_some(channel))
 }
 
-/// Posts and pins the "Do not write here" warning in a new catch channel.
+/// Posts and pins the "Do not write here" warning in a new golden channel.
 pub(crate) async fn pin_catch_notice(st: &AppState, channel: &str) -> Result<(), ApiError> {
     let m = st
         .discord
@@ -1289,9 +1289,9 @@ pub(crate) async fn pin_catch_notice(st: &AppState, channel: &str) -> Result<(),
     Ok(())
 }
 
-/// The catch channel: at the bottom of the Information category when Auto Setup made one, else
+/// The golden channel: at the bottom of the Information category when Auto Setup made one, else
 /// on top of the list (uncategorized channels sit above every category); members may only read
-/// and write plain text. Turns the catch channel on; an already set
+/// and write plain text. Turns the golden channel on; an already set
 /// channel is reused.
 async fn catch_channel(
     State(st): State<AppState>,
@@ -1314,7 +1314,7 @@ async fn catch_channel(
         guild,
         &config,
         Some(version),
-        "set up the catch channel",
+        "set up the golden channel",
     )
     .await;
     if let Some(ch) = &made {
@@ -1324,7 +1324,7 @@ async fn catch_channel(
     Ok(Json(json!({"version": version, "channel": channel})))
 }
 
-/// How many members the catch channel caught in this server (counted since 2026-11-25).
+/// How many members the golden channel caught in this server (counted since 2026-11-25).
 async fn catch_count(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> Res {
     api::require(&st, &s, guild, Level::Viewer, false).await?;
     let n: i64 = sqlx::query_scalar("SELECT count(*) FROM catch_hits WHERE guild_id = $1")
