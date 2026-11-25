@@ -664,9 +664,11 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .feat-arrow { color:var(--copper); opacity:0; transition:opacity .2s ease; } .land .feat-tab[aria-pressed="true"] .feat-arrow { opacity:1; }
 .land .feat-shot { position:relative; flex:1.5 1 0; min-width:0; isolation:isolate; }
 .land .feat-shot { display:grid; grid-template-columns:minmax(0,1fr); height:var(--sh, 0px); }
-/* Switching lines: the old scene fades out, then the new one fades in at its place, in the same box. Only one scene shows at a time and nothing moves or scales: two scenes faded over each other read as a double image, and a moving layer drew the scene off its place and soft. Every scene keeps its own opacity layer, so the last frame is the resting frame. */
-.land .feat-shot > .scene { grid-area:1/1; align-self:start; opacity:0; pointer-events:none; transition:opacity .15s linear; will-change:opacity; }
-.land .feat-shot > .scene.on { opacity:1; pointer-events:auto; transition-delay:.15s; }
+/* Switching lines: the old scene fades out fast while it drops a little; the new one fades in and rises into place, slowing down at the end (ease-out), so it settles without a snap. The new one starts when the old one is gone (0.1 s), so two scenes never show through each other. The stars (.fx) leave and arrive with the scene. Only opacity and transform change; every scene keeps its layer, so the last frame is the resting frame. */
+.land .feat-shot > .scene { grid-area:1/1; align-self:start; opacity:0; transform:translateY(var(--space-24)); pointer-events:none; transition:opacity .1s linear, transform .1s ease-in; will-change:transform, opacity; }
+.land .feat-shot > .scene.on { opacity:1; transform:none; pointer-events:auto; transition:opacity var(--dur-slow) var(--ease) .1s, transform .4s var(--ease) .1s; }
+.land .feat-shot > .fx { transition:opacity var(--dur-slow) var(--ease), transform .4s var(--ease); will-change:transform, opacity; }
+.land .feat-shot > .fx.away { opacity:0; transform:translateY(calc(var(--space-24) * var(--k, 1))); transition:opacity .1s linear, transform .1s ease-in; }
 /* A scene is drawn at one natural width and scaled to fit (landing.rs sets --k, --dx and --sh). */
 .land .scene { z-index:1; text-align:left; width:calc(var(--space-56) * 14); translate:var(--dx, 0px) var(--dy, 0px); scale:var(--k, 1); transform-origin:0 0; position:relative; isolation:isolate; display:grid; grid-template-columns:repeat(14,minmax(0,1fr)); align-items:start; padding:var(--space-48) 0; }
 .land .win { position:relative; overflow:hidden; min-width:calc(var(--space-56) * 7); border-radius:var(--radius-card); background:#313338; box-shadow:0 var(--space-24) var(--space-48) #0008; min-width:0; }
@@ -724,7 +726,7 @@ input.hue::-webkit-slider-thumb { appearance:none; width:16px; height:16px; bord
 .land .pane span { padding:var(--space-4) var(--space-8); border-radius:var(--radius-row); color:var(--text-secondary); font-size:.9em; }
 .land .pane span.on { background:#f07f2226; color:var(--accent); }
 .land .fx { position:absolute; inset:0 auto 0 var(--fxl, 0px); width:var(--fxw, 100%); z-index:3; pointer-events:none; }
-.land .scene > i, .land .fx > i { position:absolute; transition:left .3s linear, top .3s linear; z-index:0; pointer-events:none; }
+.land .scene > i, .land .fx > i { position:absolute; z-index:0; pointer-events:none; }
 /* The star shape is on ::before: a clip-path on the same element would cut off its own glow (filter runs before clip-path). */
 .land .spark { width:var(--space-32); height:var(--space-32); filter:drop-shadow(0 0 var(--space-8) var(--accent)); }
 .land .spark::before { content:""; position:absolute; inset:0; background:var(--orange-grad); clip-path:var(--star); }

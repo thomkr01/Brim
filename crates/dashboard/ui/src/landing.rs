@@ -161,7 +161,8 @@ fn fit() {
         let _ = b.style().set_property("--sh", &format!("{}px", bh * k));
         let _ = b.style().set_property("--fxl", &format!("{}px", (w - bw * k) / 2.0));
         let _ = b.style().set_property("--fxw", &format!("{}px", bw * k));
-        // The stars follow the open scene (the first one before any is open).
+        // The stars follow the open scene (the first one before any is open). While they are away (a switch) they keep their places, and move when hidden.
+        if b.query_selector(".fx.away").ok().flatten().is_some() { continue }
         let Some((_, (gw, gh, w1, h1), f)) = all.iter().find(|(s, _, _)| s.class_list().contains("on")).or(all.first()) else { continue };
         let (gw, gh, w1, h1) = (gw * f, gh * f, w1 * f, h1 * f);
         let (l, t) = ((bw - gw) / 2.0, (bh - gh) / 2.0);
@@ -308,19 +309,37 @@ pub fn Landing(
                 <div class="feats">
                 {SECTIONS.iter().enumerate().map(|(i, (title, tabs))| {
                     let on = RwSignal::new(0usize);
+                    let away = RwSignal::new(false);
+                    let fx = NodeRef::<html::Div>::new();
+                    let clicks = StoredValue::new(0u32);
                     view! {
                         <section class="feat" class:flip=i % 2 == 1 class:big=i == 0>
                             <div class="feat-copy">
                                 <h3 class:deep=title.chars().take(4).any(|c| "gjpqy".contains(c))>{*title}</h3>
                                 <div class="feat-tabs" role="group" aria-label=format!("{title} examples")>
                                     {tabs.iter().enumerate().map(|(t, (label, _, _))| view! {
-                                        <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| { on.set(t); request_animation_frame(fit); }>
+                                        <button class="feat-tab" type="button" aria-pressed=move || (on.get() == t).to_string() on:click=move |_| {
+                                            if on.get_untracked() == t { return }
+                                            on.set(t);
+                                            away.set(true);
+                                            request_animation_frame(fit);
+                                            // The stars leave with the old scene, move while hidden, and arrive with the new one. Only the last click's timer brings them back.
+                                            let n = clicks.get_value() + 1;
+                                            clicks.set_value(n);
+                                            set_timeout(move || {
+                                                if clicks.try_get_value() != Some(n) { return }
+                                                // The class goes first, so `fit` places the stars before the next frame draws them.
+                                                if let Some(f) = fx.try_get_untracked().flatten() { let _ = f.class_list().remove_1("away"); }
+                                                fit();
+                                                away.try_set(false);
+                                            }, std::time::Duration::from_millis(100));
+                                        }>
                                             <span class="feat-dot" aria-hidden="true"></span>{*label}<span class="feat-arrow" aria-hidden="true">"\u{203a}"</span>
                                         </button>
                                     }).collect_view()}
                                 </div>
                             </div>
-                            <div class="feat-shot"><div class="fx">{effects(i)}</div>
+                            <div class="feat-shot"><div class="fx" class:away=move || away.get() node_ref=fx>{effects(i)}</div>
                                 {tabs.iter().enumerate().map(|(t, tab)| view! { <div class=format!("scene l-{}", tab.1) class:on=move || on.get() == t>{move || tab.2.iter().map(|it| match *it {
                                     E(key) => view! { <div class="win">{shown(sample(key))}</div> }.into_any(),
                                     P(name, rows) => view! { <div class="win pane card">{(!name.is_empty()).then(|| view! { <b class="ph">{name}</b> })}{rows.iter().map(|row| match (row.strip_prefix('?'), row.strip_prefix('>'), row.split_once('|')) {
