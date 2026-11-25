@@ -465,6 +465,8 @@ pub struct WhitelistCfg {
 #[serde(default)]
 pub struct WhitelistList {
     pub users: Vec<Id<UserMarker>>,
+    /// Stored by older versions; never read. A role exempts nobody: trust is by user id and
+    /// permits (owner rule). The Overview row `exempt_roles` moves their members once.
     pub roles: Vec<Id<RoleMarker>>,
     pub channels: Vec<Id<ChannelMarker>>,
     pub categories: Vec<Id<ChannelMarker>>,
@@ -472,17 +474,15 @@ pub struct WhitelistList {
 }
 
 impl WhitelistList {
-    /// A message whose author, member roles, channel, category or webhook is listed.
+    /// A message whose author, channel, category or webhook is listed. Roles are not read.
     pub fn covers(
         &self,
         user: Id<UserMarker>,
-        roles: &[Id<RoleMarker>],
         channel: Id<ChannelMarker>,
         category: Option<Id<ChannelMarker>>,
         webhook: Option<Id<WebhookMarker>>,
     ) -> bool {
         self.users.contains(&user)
-            || roles.iter().any(|r| self.roles.contains(r))
             || self.channels.contains(&channel)
             || category.is_some_and(|c| self.categories.contains(&c))
             || webhook.is_some_and(|w| self.webhooks.contains(&w))
@@ -1434,8 +1434,9 @@ pub struct CatchCfg {
     /// The Information category Auto Setup made; the channel is kept at its bottom (owner decision
     /// 2026-11-16).
     pub category: Option<Id<ChannelMarker>>,
-    /// Never punished, besides bots, permit holders and owners.
+    /// Stored by older versions; never read (see [`WhitelistList::roles`]).
     pub roles: Vec<Id<RoleMarker>>,
+    /// Never punished, besides bots, the Owner, Extra Owners and Trusted Admins.
     pub users: Vec<Id<UserMarker>>,
 }
 
@@ -2049,10 +2050,17 @@ mod tests {
         )
         .unwrap();
         let (u, c) = (Id::new(1), Id::new(3));
-        assert!(w.spam.covers(u, &[], Id::new(9), None, None));
-        assert!(w.invites.covers(Id::new(5), &[], c, None, None));
-        assert!(!w.mentions.covers(u, &[], c, None, Some(Id::new(2))));
-        assert!(w.spam.covers(Id::new(5), &[], c, None, Some(Id::new(2))));
+        assert!(w.spam.covers(u, Id::new(9), None, None));
+        assert!(w.invites.covers(Id::new(5), c, None, None));
+        assert!(!w.mentions.covers(u, c, None, Some(Id::new(2))));
+        assert!(w.spam.covers(Id::new(5), c, None, Some(Id::new(2))));
+    }
+
+    #[test]
+    fn a_listed_role_exempts_nobody() {
+        let w: WhitelistCfg = serde_json::from_value(json!({"roles": ["7"]})).unwrap();
+        assert_eq!(w.spam.roles, [Id::new(7)], "the stored ids are kept");
+        assert!(!w.spam.covers(Id::new(5), Id::new(9), None, None));
     }
 
     #[test]

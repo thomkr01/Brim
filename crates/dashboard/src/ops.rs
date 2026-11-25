@@ -257,6 +257,9 @@ async fn score(State(st): State<AppState>, s: Sess, Path(guild): Path<i64>) -> R
     rows.extend(crate::channels::overview_check(&st, guild, &config, &l).await?);
     rows.extend(crate::staff_role::overview_check(&st, guild, &l.image.roles).await?);
     rows.extend(crate::staff_role::given_check(&st, guild, &config).await?);
+    rows.extend(
+        crate::exempt_roles::overview_check(&st, guild, &config, &l.image.roles, level).await?,
+    );
     rows.extend(crate::msghooks::overview_check(&st, guild, &l.image.channels).await?);
     rows.extend(crate::feeds::overview_check(&st, guild, &l.image.channels).await?);
     // Its rows name paused and kept permit holders, which Viewers do not see (security review).
@@ -940,6 +943,9 @@ async fn fix(
     let (cur, c) = crate::store::current(&st.db, guild).await?;
     if let Some(r) = setup_fix(&st, &s, guild, level, cur, &c, b.setting.as_deref()).await? {
         return Ok(r);
+    }
+    if b.setting.as_deref() == Some(crate::exempt_roles::FIX) {
+        return crate::exempt_roles::fix(&st, &s, guild, &c).await;
     }
     if b.setting.as_deref() == Some(crate::staff_role::FIX) {
         return crate::staff_role::make_again(&st, &s, guild, level).await;
@@ -3047,6 +3053,91 @@ mod tests {
             .await
             .unwrap();
         wipe(&st, g).await;
+    }
+
+    /// Exemptions by role: the row names each saved role and who holds it, the Fix queues the
+    /// bot's move once, and the row then says the move runs.
+    #[tokio::test]
+    async fn exempt_roles_row_and_fix() {
+        let Some((mut st, s, g)) = crate::api::g3_handler_tests::setup(9_901_300_000).await else {
+            return;
+        };
+        let roles = json!([
+            {"id": g.to_string(), "name": "@everyone", "permissions": "1024", "position": 0},
+            {"id": "50", "name": "Helpers", "permissions": "0", "position": 1},
+            {"id": "60", "name": "Brim", "permissions": "8", "position": 2, "managed": true},
+        ]);
+        mock_discord(&mut st, g, roles).await;
+        wipe(&st, g).await;
+        let clear = || async {
+            sqlx::query("delete from scheduled_jobs where guild_id = $1")
+                .bind(g)
+                .execute(&st.db)
+                .await
+                .unwrap();
+        };
+        clear().await;
+        let c = json!({"whitelist": {"roles": ["50"], "invites": {"roles": ["50"]}}, "catch": {"roles": ["99"]}});
+        sqlx::query("insert into guild_config (guild_id, version, config) values ($1, 1, $2)")
+            .bind(g)
+            .bind(&c)
+            .execute(&st.db)
+            .await
+            .unwrap();
+        let row = |v: &Value| {
+            v["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["id"] == "exempt_roles")
+                .cloned()
+        };
+        let v = score(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        let r = row(&v).expect("the row is shown");
+        let d = r["detail"].as_str().unwrap();
+        assert!(d.contains("@Helpers (Spam, Invite links)"), "{d}");
+        assert!(d.contains("a deleted role (99) (Catch channel)"), "{d}");
+        // Member 4 holds Helpers; 3 is a bot.
+        assert!(d.contains("1 member holds them now"), "{d}");
+        assert_eq!(r["fix"]["setting"], crate::exempt_roles::FIX);
+        for _ in 0..2 {
+            let f = fix(
+                State(st.clone()),
+                s.clone(),
+                Path(g),
+                body(crate::exempt_roles::FIX),
+            )
+            .await
+            .unwrap();
+            assert_eq!(f.0["queued"], true);
+        }
+        let jobs: Vec<Value> = sqlx::query_scalar(
+            "select payload from scheduled_jobs where guild_id = $1 and kind = 'exempt_roles_move'",
+        )
+        .bind(g)
+        .fetch_all(&st.db)
+        .await
+        .unwrap();
+        assert_eq!(jobs, [json!({"by": s.user_id})], "queued once");
+        let v = score(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        let r = row(&v).unwrap();
+        assert!(
+            r["fix"].is_null() && r["detail"].as_str().unwrap().contains("moving"),
+            "{r}"
+        );
+        clear().await;
+        wipe(&st, g).await;
+        let v = score(State(st.clone()), s.clone(), Path(g))
+            .await
+            .unwrap()
+            .0;
+        assert!(row(&v).is_none(), "no saved roles, no row");
     }
 
     /// Move to main roles: each main role gets @everyone's bits, @everyone ends with none, and

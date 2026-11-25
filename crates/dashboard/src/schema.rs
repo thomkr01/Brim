@@ -1010,7 +1010,6 @@ pub fn schema() -> Vec<Value> {
     ] {
         for (key, card, kind) in [
             ("users", "Members", "users"),
-            ("roles", "Roles", "roles"),
             ("channels", "Channels", "channels"),
             ("categories", "Categories", "categories"),
             ("webhooks", "Webhooks", "list"),
@@ -1484,7 +1483,7 @@ pub fn schema() -> Vec<Value> {
                 ti(fg("General", "enabled", "bool"), "Use the catch channel"),
                 hp(
                     ti(fg("General", "channel", "channel"), "Catch channel"),
-                    "Anyone without a permit who writes here is punished. Hacked accounts spam every channel, so they land here first.",
+                    "Anyone who writes here is punished, except the Owner, Extra Owners, Trusted Admins, whitelisted members and bots. Hacked accounts spam every channel, so they land here first.",
                 ),
                 hp(
                     dv(
@@ -1498,7 +1497,6 @@ pub fn schema() -> Vec<Value> {
                 ),
                 ti(fg("General", "dm", "bool"), "DM the member first, with the appeal link"),
                 ti(fg("General", "keep_top", "bool"), "Keep the channel in place (top of the server, or the bottom of Information)"),
-                ti(fg("Whitelist", "roles", "roles"), "Whitelisted roles"),
                 ti(fg("Whitelist", "users", "users"), "Whitelisted members"),
             ],
         ),

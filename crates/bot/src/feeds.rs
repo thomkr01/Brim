@@ -497,8 +497,7 @@ async fn server_rules(app: &App, r: &Row, p: &Piece, found: &[String]) -> Option
         .channel_scope(Id::new(r.guild_id as u64), channel)
         .await
         .unwrap_or((channel, None));
-    let listed =
-        |l: &brim_core::sections::WhitelistList| l.covers(app.me, &[], parent, category, None);
+    let listed = |l: &brim_core::sections::WhitelistList| l.covers(app.me, parent, category, None);
     let text = p.text(r);
     if f.invites.enabled
         && !wl.partner_channels.contains(&parent)

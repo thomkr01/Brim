@@ -9,6 +9,7 @@ mod datareq;
 mod diff;
 mod discord;
 mod embeds;
+mod exempt_roles;
 mod feedfollow;
 mod feedhooks;
 mod feeds;

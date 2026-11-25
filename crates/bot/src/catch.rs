@@ -46,8 +46,8 @@ pub async fn on_message(app: &App, m: &MessageCreate) -> Result<bool> {
         return Ok(false);
     }
     let uid = m.author.id;
-    let roles = m.member.as_ref().map_or(&[][..], |mem| &mem.roles);
-    if c.users.contains(&uid) || roles.iter().any(|r| c.roles.contains(r)) {
+    // By user id only: a role exempts nobody (owner rule).
+    if c.users.contains(&uid) {
         return Ok(false);
     }
     // Only Owner, Extra Owners and Trusted Admins: a hacked mod with a permit is caught too.

@@ -242,7 +242,6 @@ macro_rules! wl {
     ($p:literal) => {
         &[
             (concat!("whitelist.", $p, "users"), "Members (IDs)"),
-            (concat!("whitelist.", $p, "roles"), "Roles"),
             (concat!("whitelist.", $p, "channels"), "Channels"),
             (concat!("whitelist.", $p, "categories"), "Categories"),
             (concat!("whitelist.", $p, "webhooks"), "Webhooks (IDs)"),
@@ -253,21 +252,21 @@ macro_rules! wl {
 pub const WHITELIST: &[Card] = &[
     Card {
         notes: &[AUTO_WL, "This whitelist targets these filters: Regular Spam, Similar Spam, Characters/Walls Of Text, Emoji Spam, Zalgo Spam, New Lines."],
-        ..card("Spam whitelist", "Pick the users, roles, channels, categories and webhooks you want to whitelist when it comes to spam.", wl!(""), |_, _| {
+        ..card("Spam whitelist", "Pick the members, channels, categories and webhooks you want to whitelist when it comes to spam.", wl!(""), |_, _| {
             view! { {chat("member", text("HAHAHA IM SPAMMING WOOO"))}{chat("member", text("HAHAHA IM SPAMMING WOOO"))} }.into_any()
         })
     },
     Card {
         notes: &[AUTO_WL, "Your own server's invite links are automatically whitelisted."],
-        ..card("Invite link whitelist", "Pick the users, roles, channels, categories and webhooks you want to whitelist when it comes to posting invite links.", wl!("invites."), |_, _| chat("member", text("Join my server everyone discord.gg/example")))
+        ..card("Invite link whitelist", "Pick the members, channels, categories and webhooks you want to whitelist when it comes to posting invite links.", wl!("invites."), |_, _| chat("member", text("Join my server everyone discord.gg/example")))
     },
     Card {
         notes: &[AUTO_WL, "This whitelist is related to @user and @role mentions only."],
-        ..card("@ping whitelist", "Pick the users, roles, channels, categories and webhooks you want to whitelist when it comes to spamming @user and @role mentions.", wl!("mentions."), |_, _| chat("member", text("@ark @Squeezy @REGEX @Revin you suck!")))
+        ..card("@ping whitelist", "Pick the members, channels, categories and webhooks you want to whitelist when it comes to spamming @user and @role mentions.", wl!("mentions."), |_, _| chat("member", text("@ark @Squeezy @REGEX @Revin you suck!")))
     },
     Card {
         notes: &[AUTO_WL, "This whitelist is related to @everyone and main role mentions only."],
-        ..card("@everyone whitelist", "Pick the users, roles, channels, categories and webhooks you want to whitelist when it comes to sending @everyone mentions (or main roles).", wl!("everyone."), |_, _| chat("member", text("@everyone you suck!")))
+        ..card("@everyone whitelist", "Pick the members, channels, categories and webhooks you want to whitelist when it comes to sending @everyone mentions (or main roles).", wl!("everyone."), |_, _| chat("member", text("@everyone you suck!")))
     },
     Card {
         notes: &["You do not need this step if you use Brim's own tickets: they are always exempt.", "If you use another ticket bot, you should set this whitelist, or its new ticket channels count towards the antinuke limits."],

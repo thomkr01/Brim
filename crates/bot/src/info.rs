@@ -112,9 +112,7 @@ pub(crate) async fn user_info(
     );
     let points = cases::warn_points(&app.pool, gid.get() as i64, uid.get() as i64).await?;
     let wl = &cfg.whitelist;
-    let on = |l: &brim_core::sections::WhitelistList| {
-        l.users.contains(&uid) || m.roles.iter().any(|r| l.roles.contains(r))
-    };
+    let on = |l: &brim_core::sections::WhitelistList| l.users.contains(&uid);
     let whitelists = format!(
         "{} Spam\n{} Ping\n{} Advertising\n{} @everyone\n{} Quarantine",
         yes(on(&wl.spam)),
@@ -240,15 +238,9 @@ pub(crate) async fn role_info(app: &App, gid: Id<GuildMarker>, rid: u64) -> Resu
         return Ok(None);
     };
     let cfg = app.cfg(gid.get()).await?;
-    let wl = &cfg.whitelist;
     let main = cfg.lockdown.main_roles.contains(&r.id);
-    let whitelists = format!(
-        "{} Spam\n{} Ping\n{} Advertising\n{} @everyone",
-        yes(wl.spam.roles.contains(&r.id)),
-        yes(wl.mentions.roles.contains(&r.id)),
-        yes(wl.invites.roles.contains(&r.id)),
-        yes(wl.everyone.roles.contains(&r.id))
-    );
+    // A role exempts nobody: the whitelists hold members by user id.
+    let whitelists = format!("{} None: Brim whitelists members, not roles", yes(false));
     let details = format!(
         "{} Managed\n{} Mentionable\n{} Hoisted\n{} Main Role",
         yes(r.managed),
