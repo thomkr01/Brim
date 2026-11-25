@@ -1247,7 +1247,7 @@ pub(crate) async fn make_catch(
     // At the bottom of Information when Auto Setup made it: only verified members see it there.
     let body = match channel_access::new_catch_place(st, guild, config).await? {
         Some((parent, overwrites)) => {
-            json!({"name": "golden-channel", "type": 0, "parent_id": parent, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
+            json!({"name": brim_antinuke::security::GOLDEN_CHANNEL, "type": 0, "parent_id": parent, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
         }
         None => {
             // @everyone: View, Send, History, Attach Files (a picture-only spam bot is caught too);
@@ -1256,7 +1256,7 @@ pub(crate) async fn make_catch(
                 {"id": guild.to_string(), "type": 0, "allow": "101376", "deny": "16448"},
                 {"id": st.discord.client_id, "type": 1, "allow": "93184"}
             ]);
-            json!({"name": "golden-channel", "type": 0, "position": 0, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
+            json!({"name": brim_antinuke::security::GOLDEN_CHANNEL, "type": 0, "position": 0, "topic": CATCH_WARNING, "permission_overwrites": overwrites})
         }
     };
     let channel = create(st, guild, existing.clone(), "channels", body).await?;
