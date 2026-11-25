@@ -6829,7 +6829,11 @@ pub fn to_public(key: &str, msg: &Value) -> Value {
                 .find(|(o, _)| *o == n)
                 .map_or(n, |(_, to)| to);
             // The panel message's `{text}` (before migration 4071) is `{tk_panels}`.
-            let n = if key == "ticket.panel" && n == "text" { "panels" } else { n };
+            let n = if key == "ticket.panel" && n == "text" {
+                "panels"
+            } else {
+                n
+            };
             d.vars
                 .iter()
                 .find(|v| **v == n)
