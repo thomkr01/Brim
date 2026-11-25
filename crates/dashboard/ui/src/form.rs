@@ -12,6 +12,14 @@ fn get_path(v: &Value, p: &str) -> Value {
         .clone()
 }
 
+/// A value the server has under an older shape: a Join Gate filter saved as one text (the path
+/// goes through a text), or a number saved in the field this one replaced (`fallback`).
+fn saved_another_way(c: &Value, p: &str, fields: &[Value]) -> bool {
+    let through = p.match_indices('.').any(|(i, _)| matches!(get_path(c, &p[..i]), Value::String(_) | Value::Bool(_) | Value::Number(_)));
+    let old = fields.iter().find(|f| f["path"] == p).and_then(|f| f["fallback"]["path"].as_str()).is_some_and(|o| !get_path(c, &format!("{}.{o}", p.rsplit_once('.').map_or("", |(s, _)| s))).is_null());
+    through || old
+}
+
 /// Writes `x` at the dotted path, creating (or replacing non-object) intermediate objects.
 fn set_path(v: &mut Value, p: &str, x: Value) {
     let mut c = v;
@@ -1290,7 +1298,7 @@ pub fn Section(
                 // The wizard fills the recommended values (`profile.json`) where nothing is saved yet.
                 let prefix = format!("{n}.");
                 let unset: Vec<(&str, Value)> = if cards.is_some() {
-                    crate::wizard::profile().iter().filter(|(p, _)| p.starts_with(&prefix)).map(|(p, v)| (p.as_str(), v.clone())).filter(|(p, _)| get_path(&c, p).is_null()).collect()
+                    crate::wizard::profile().iter().filter(|(p, _)| p.starts_with(&prefix)).map(|(p, v)| (p.as_str(), v.clone())).filter(|(p, _)| get_path(&c, p).is_null() && !saved_another_way(&c, p, &fields.get_untracked())).collect()
                 } else {
                     vec![]
                 };
