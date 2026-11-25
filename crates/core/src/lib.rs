@@ -22,4 +22,5 @@ pub mod raiders;
 pub mod ratelimit;
 pub mod roles;
 pub mod sections;
+pub mod stats;
 pub mod warn;

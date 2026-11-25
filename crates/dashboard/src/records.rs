@@ -590,6 +590,7 @@ async fn staff_action(
             case_no: Some(no),
             audit_id: None,
             ai_client,
+            feature: None,
         },
     )
     .await?;
@@ -1085,6 +1086,7 @@ async fn report_status(
             case_no: None,
             audit_id: None,
             ai_client: None,
+            feature: None,
         },
     )
     .await?;

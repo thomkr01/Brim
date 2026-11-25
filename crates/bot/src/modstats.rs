@@ -116,6 +116,7 @@ pub async fn on_audit(app: &App, e: &AuditLogEntry) -> Result<()> {
             case_no: None,
             audit_id: Some(e.id.get() as i64),
             ai_client: None,
+            feature: Some("discord_app"),
         },
     )
     .await
