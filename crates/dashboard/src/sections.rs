@@ -436,7 +436,7 @@ async fn auto_setup(
         Ok(why) => why,
         Err(e) => {
             tracing::warn!(?e, guild, "making the golden channel verified-only failed");
-            Some("Brim could not read or change it".into())
+            Some("Discord did not answer in time. Wait a minute, then run Auto Setup again".into())
         }
     };
     let moved = channel_access::send_moves(&st, guild, moves).await;
@@ -463,7 +463,7 @@ struct Report<'a> {
 /// Auto Setup's result, one entry per step the setup page lists (owner decision 2026-11-17: simple, and
 /// a step that needs him says what happened and what to do): `{"step", "ok", "note"}`.
 fn steps(r: &Report) -> Value {
-    let manage = "Give Brim Manage Roles there, then run Auto Setup again.";
+    let manage = "Discord refused or was limiting requests. Wait a minute, then run Auto Setup again.";
     let quarantine = match r.quarantine_failed {
         Some(0) => None,
         Some(n) => Some(format!(
@@ -564,9 +564,10 @@ async fn open_channels(st: &AppState, guild: i64, config: &Value, staff: &[u64])
         Ok(Some(why)) => return json!({"skipped": why}),
         Err(_) => return json!({"skipped": "Brim could not check who would lose access"}),
     }
-    let info = channel_access::info_access(st, guild, config, staff)
-        .await
-        .unwrap_or(1);
+    // A failed list (often Discord's rate limit) is no refused channel: say so.
+    let Ok(info) = channel_access::info_access(st, guild, config, staff).await else {
+        return json!({"skipped": "Discord did not answer in time. Wait a minute"});
+    };
     match channel_access::standard_access(st, guild, config).await {
         Some(n) => {
             // Only once the channels are Member-only.
@@ -2040,6 +2041,22 @@ pub(crate) async fn log_channels(
 
 #[cfg(test)]
 mod tests {
+    /// A rate limit or refusal must not tell an Administrator bot to "give Manage Roles".
+    #[test]
+    fn failed_channel_steps_do_not_blame_manage_roles() {
+        let access = json!({"failed": 1});
+        let v = steps(&Report {
+            roles_stay: None,
+            quarantine_failed: Some(2),
+            lounge_failed: false,
+            moved: true,
+            catch_stays: Some("Discord did not answer in time"),
+            verify_failed: 1,
+            access: &access,
+        });
+        assert!(!v.to_string().contains("Manage Roles"));
+    }
+
     #[test]
     fn log_gaps_empty_only_when_every_channel_is_set() {
         use serde_json::json;

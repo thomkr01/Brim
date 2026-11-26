@@ -473,8 +473,8 @@ fn refused(v: &Value) -> Option<String> {
     let mut why = vec![];
     match v["failed"].as_u64() {
         Some(0) | None => {}
-        Some(1) => why.push("Discord refused 1 change. Check that Brim has Manage Roles and the permissions it gives, then try again".to_string()),
-        Some(n) => why.push(format!("Discord refused {n} changes. Check that Brim has Manage Roles and the permissions it gives, then try again")),
+        Some(1) => why.push("Discord refused or limited 1 change. Wait a minute and try again. If it repeats, check Brim's permissions".to_string()),
+        Some(n) => why.push(format!("Discord refused or limited {n} changes. Wait a minute and try again. If it repeats, check Brim's permissions")),
     }
     if let Some(c) = v["catch_stays"].as_str() {
         why.push(format!("the golden channel kept its access: {c}"));

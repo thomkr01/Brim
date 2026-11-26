@@ -1162,7 +1162,7 @@ async fn fix(
         let catch_stays = match crate::channel_access::move_catch(&st, guild, &c, &mut moves).await
         {
             Ok(why) => why,
-            Err(_) => Some("moving the golden channel failed".into()),
+            Err(_) => Some("Discord did not answer in time. Wait a minute and try again".into()),
         };
         let catch_stays = match crate::channel_access::send_moves(&st, guild, moves).await {
             true => catch_stays,
