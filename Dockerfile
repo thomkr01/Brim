@@ -1,7 +1,7 @@
 # Build with `docker compose build`. Pick the image with --target: bot, dashboard, mcp or updater.
 # Base images are pinned by digest, so a re-pushed tag cannot change a build; Dependabot proposes new digests.
 
-FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS builder
+FROM rust:1.100.0-bookworm@sha256:75d26c23c24cc6ea1cdabf0714a6bff8fd7bf3248716043fd7ae86dac7f41b94 AS builder
 WORKDIR /src
 # The libraries first, in their own layer: it is built again only when a manifest, the lock file or
 # the vendored crate changes. Empty stand-ins take the place of Brim's own code for this step.
@@ -22,7 +22,7 @@ COPY . .
 # Every Brim crate is built from the real code: the stand-ins left nothing of theirs behind.
 RUN cargo build --release --locked -p brim -p brim-dashboard -p brim-mcp
 
-FROM rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS ui
+FROM rust:1.100.0-bookworm@sha256:75d26c23c24cc6ea1cdabf0714a6bff8fd7bf3248716043fd7ae86dac7f41b94 AS ui
 RUN rustup target add wasm32-unknown-unknown \
  && cargo install trunk --version 0.21.14 --locked
 WORKDIR /src/crates/dashboard/ui
