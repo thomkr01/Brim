@@ -167,7 +167,7 @@ services:
 
   # Cloudflare Tunnel to the dashboard. Off unless COMPOSE_PROFILES=tunnel; see DEPLOY.md.
   cloudflared:
-    image: cloudflare/cloudflared:2026.11.1 # pinned: :latest changed the tunnel without a commit
+    image: cloudflare/cloudflared:2026.11.2 # pinned: :latest changed the tunnel without a commit
     profiles: [tunnel]
     restart: unless-stopped
     <<: [*logging, *hardening]
