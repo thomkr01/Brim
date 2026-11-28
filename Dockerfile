@@ -76,7 +76,7 @@ FROM docker:29.10.0-cli@sha256:34507eb5069d8be82c95dd3b6987d4250fd5fee49b82e2509
 
 # psql and the libraries it loads, copied out of the official Postgres image (the same pinned image the
 # updater used to be built on), so the updater is plain Alpine plus these files and no package is installed.
-FROM postgres:18-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015 AS pgclient
+FROM postgres:19-alpine@sha256:cac45fb483caee3668946088a1c0532db89d5285c28dbfeac889b4068296e06f AS pgclient
 
 # Carries out updates started from the dashboard; see scripts/updater.sh.
 # psql from the Postgres image, the Docker CLI and compose plugin from Docker's: no package installs.
