@@ -16,7 +16,7 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Location", "Document", "HtmlElement", "Element", "Navigator", "Clipboard", "HtmlInputElement", "FileList", "File", "Blob", "EventInit", "HtmlTextAreaElement", "NodeList", "Node", "Storage", "ScrollIntoViewOptions", "ScrollBehavior", "ScrollLogicalPosition", "DomRect", "CssStyleDeclaration", "DomTokenList", "DragEvent", "DataTransfer", "Event", "EventTarget", "Url", "HtmlDocument", "Selection", "Range", "ClipboardEvent", "PointerEvent", "TouchEvent", "HtmlSelectElement", "TouchList", "Touch", "MouseEvent", "KeyboardEvent", "MediaQueryList", "HtmlDialogElement", "History", "HashChangeEvent", "BeforeUnloadEvent", "InputEvent"] }
 console_error_panic_hook = "0.1"
-qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+qrcode = { version = "0.15", default-features = false, features = ["svg"] }
 
 # Smaller wasm (3.3 MB instead of 6.5 MB, 1.2 MB instead of 2.1 MB gzipped, measured): size over speed.
 [profile.release]
